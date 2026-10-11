@@ -69,7 +69,9 @@ object Timers {
         return out
     }
 
-    private fun cal(t: Timer, at: Long): Calendar = Calendar.getInstance(t.tz).apply { timeInMillis = at }
+    // Times are read in the phone's own current time zone — so "21:00" means 21:00 where the phone is, wherever that
+    // is, and changing the phone's zone (travelling) moves the timer with it. The stored [tz] is ignored.
+    private fun cal(t: Timer, at: Long): Calendar = Calendar.getInstance(TimeZone.getDefault()).apply { timeInMillis = at }
     private fun dayOf(c: Calendar) = c.get(Calendar.DAY_OF_WEEK) - 1          // 0 = Sunday
     private fun minuteOf(c: Calendar) = c.get(Calendar.HOUR_OF_DAY) * 60 + c.get(Calendar.MINUTE)
     /** "2026-10-11" in the timer's own time zone (an allowance starts again each day). */

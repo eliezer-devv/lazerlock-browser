@@ -47,10 +47,30 @@ object BrowserGuard {
     }
 
     private val protect get() = Whitelist.state.protect
-    /** Protection is set up (not off), so the phone should enforce and the cover may run. */
-    fun on(): Boolean = protect?.let { it.mode != "off" } ?: false
-    /** The screen cover should run now: cover mode, or device-owner mode as a backup, and the admin hasn't switched it off. */
-    fun coverOn(): Boolean = protect?.let { it.mode != "off" && it.overlay } ?: false
+
+    /**
+     * The protection in force on this phone. Normally this is what the admin set on the dashboard. But if the admin
+     * hasn't set anything yet and the parent has turned the cover (or device owner) on here, we default to blocking
+     * other browsers straight away — so turning it on actually does something without a second step on the dashboard.
+     * If the admin explicitly set it Off, that's respected.
+     */
+    fun effective(ctx: Context): Protect? {
+        val admin = protect
+        if (admin != null && (admin.mode != "off" || admin.apps.isNotEmpty())) return admin
+        if (admin?.mode == "off") return admin                      // admin turned it off on purpose
+        val localOwner = runCatching { DeviceOwner.isOwner(ctx) }.getOrDefault(false)
+        if (GuardService.running || localOwner) return Protect(
+            mode = if (localOwner) "owner" else "cover",
+            overlay = admin?.overlay ?: true, blockNew = admin?.blockNew ?: true,
+            blockInstalls = admin?.blockInstalls ?: false, lockClock = admin?.lockClock ?: true,
+            apps = admin?.apps ?: emptyMap())
+        return admin
+    }
+
+    /** Protection is in force (so the phone should enforce and the cover may run). */
+    fun on(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" } ?: false
+    /** The screen cover should run now (the admin hasn't switched it off). */
+    fun coverOn(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" && it.overlay } ?: false
 
     /** Our own package, and the Android pieces that must never be blocked. */
     private fun ownPackage(ctx: Context) = ctx.packageName
@@ -107,16 +127,25 @@ object BrowserGuard {
      * and never an app Android needs.
      */
     fun blocked(ctx: Context, pkg: String): Boolean {
-        val p = protect ?: return false
+        val p = effective(ctx) ?: return false
         if (p.mode == "off") return false
         if (pkg == ownPackage(ctx) || pkg in NEVER_BLOCK) return false
         when (p.apps[pkg]) {
             "allow" -> return false
             "block" -> return true
         }
-        // Not decided yet: a browser we can see is blocked if "block new" is on (and reported either way).
-        return p.blockNew && knownBrowserPkgs(ctx).contains(pkg)
+        if (!p.blockNew) return false
+        // Not decided yet: block a browser. Use the found-list if we have it, otherwise check this app on the spot.
+        if (knownBrowserPkgs(ctx).contains(pkg)) return true
+        return isBrowserPkg(ctx, pkg)
     }
+
+    /** Does [pkg] handle opening https pages (a web browser)? A cheap, targeted check for an app we haven't listed yet. */
+    fun isBrowserPkg(ctx: Context, pkg: String): Boolean = runCatching {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(pkg)
+        @Suppress("DEPRECATION")
+        ctx.packageManager.queryIntentActivities(intent, 0).isNotEmpty()
+    }.getOrDefault(false)
 
     /** Package names of browsers we've found (cached between checks, refreshed by [report]). */
     private fun knownBrowserPkgs(ctx: Context): Set<String> =
@@ -124,7 +153,7 @@ object BrowserGuard {
 
     /** Every package that should be kept from opening right now (for the cover and for device owner to suspend). */
     fun blockedPackages(ctx: Context): Set<String> {
-        val p = protect ?: return emptySet()
+        val p = effective(ctx) ?: return emptySet()
         if (p.mode == "off") return emptySet()
         val out = HashSet<String>()
         for ((pkg, v) in p.apps) if (v == "block" && pkg != ownPackage(ctx) && pkg !in NEVER_BLOCK) out.add(pkg)
@@ -153,8 +182,8 @@ object BrowserGuard {
             appList.put(JSONObject().put("pkg", app.pkg).put("label", app.label).put("kind", "app").put("installed", app.installed))
         prefs(ctx).edit().putString("appList", appList.toString()).apply()
         // A newly found browser the admin hasn't decided on yet: ask (blocked straight away if "block new" is on).
-        val p = protect ?: return
-        if (!on()) return
+        val p = effective(ctx) ?: return
+        if (!on(ctx)) return
         val reported = prefs(ctx).getStringSet("reported", emptySet()) ?: emptySet()
         val newOnes = found.filter { it.pkg !in before && it.pkg !in reported && p.apps[it.pkg] == null && it.kind != "system" }
         if (newOnes.isNotEmpty() && Requests.isSetUp()) {

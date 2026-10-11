@@ -19,6 +19,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Figtree:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
   :root {
+    color-scheme: light;
     --bg: #F5F3EE; --card: #FFFFFF; --ink: #1C2B2D; --ink2: #3E4B49; --muted: #5B6B69; --faint: #9AA5A3;
     --line: #E7E3DB; --line2: #EFECE5; --field: #D5D1C8;
     --accent: #1F5F55; --accent-dark: #16463F; --accent-soft: #E1EEEA; --mint: #7FD1A8;
@@ -392,6 +393,8 @@
   :root .seg button.strict[aria-pressed="true"] { background: var(--danger); color: #fff; }
   :root .seg.wrap button[aria-pressed="true"]:not([data-v=""]):not(.strict) { background: var(--accent); color: #fff; }
   .during .drow { display: flex; flex-direction: column; gap: 6px; padding: 12px 0; }
+  .during .drow.sublists { border-top: 0; margin-top: 2px; padding: 4px 0 12px 12px; border-left: 2px solid var(--accent-soft); }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }
   .daychips .lc { min-width: 3.2rem; justify-content: center; }
 </style>
 </head>
@@ -592,7 +595,15 @@ const b64u8 = t => Uint8Array.from(atob(t), c => c.charCodeAt(0));
 const enc8 = s => new TextEncoder().encode(s);
 const dec8 = b => new TextDecoder().decode(b);
 // The phone's back button (the app asks this first): go back a screen if there is one.
-window.wlBack = () => { if (S.connected && S.sub) { back(); return true; } return false; };
+window.wlBack = () => {
+  if (S.connected && S.sub) { back(); return true; }
+  // Back on the top screen with unsaved changes: our own themed dialog (not the system one), then close if confirmed.
+  if (S.connected && (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length)) {
+    uiConfirmDanger('Leave without saving?', 'Your changes haven\'t been saved yet.', 'Leave', 'warn').then(ok => { if (ok) closeAdmin(); });
+    return true;
+  }
+  return false;
+};
 const closeAdmin = () => { location.href = 'wladmin://close'; };
 const branch = () => C.branch || 'main';
 
@@ -1337,7 +1348,7 @@ function renderSaveBar() {
 }
 $('saveBtn').onclick = saveAll;
 $('undoBtn').onclick = undoAll;
-window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length) { e.preventDefault(); e.returnValue = ''; } });
+if (!INAPP) window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- lists ----------
 // Unsaved changes to the open list: ask before leaving them.
@@ -4121,7 +4132,7 @@ function phoneBrowsers(id, d, M) {
   return h('div', { class: 'field', id: 'pBrowsers' },
     h('button', { type: 'button', class: 'row tap', style: 'width:100%;text-align:left', onclick: () => open({ name: 'browsers', id }) },
       h('span', { class: 'ic' }, icon('globe', 20)),
-      h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, 'Other browsers'),
+      h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, 'Only this browser'),
         h('span', { class: 'dom' }, browsersSummary(id, d))),
       icon('chev', 16)));
 }
@@ -4162,7 +4173,7 @@ function browsersScreen() {
     h('input', { type: 'checkbox', class: 'sw', checked: on, disabled: !!disabled, onchange: e => { change(e.target.checked); markDevices(); render(); } }));
   const isOwner = seenProtect(id) && seenProtect(id).owner;
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(d.name || id, () => open({ name: 'phone', id })),
-    screenTitle('Other browsers', `Apps on ${possessive(name)} phone that can open websites`),
+    screenTitle('Only this browser', `Keep this the only way ${name} can open websites`),
     // What's set up on the phone now.
     h('div', { class: 'card', style: 'gap:8px' },
       h('div', { style: 'display:flex;align-items:center;gap:8px' }, h('b', { style: 'flex:1' }, 'Protection on the phone'),
@@ -4311,19 +4322,19 @@ function timerScreen() {
       ['search', 'Search', [['', 'No change'], ['on', 'On'], ['off', 'Off']], { '': 'As the phone is set', on: 'A search box', off: 'No search box' }],
       ['ask', 'Asking for sites', [['', 'No change'], ['no', 'Can\'t ask']], { '': 'Requests can still be sent', no: 'Nothing new can be asked for (they can still ask for time)' }],
       ['temporary', 'Temporary access', [['', 'No change'], ['paused', 'Paused']], { '': 'Ones you approved still work', paused: 'Sites open "for a while" wait until it\'s over' }]];
-    parts.push(h('span', { class: 'flabel' }, 'During it'), h('div', { class: 'card during', style: 'gap:0;padding:4px 14px' }, ROWS.map(([k, title, opts, says], i) =>
-      h('div', { class: 'drow', 'data-k': k, style: i ? 'border-top:1px solid var(--line2)' : '' },
-        h('b', null, title), choiceSeg(title, d[k], opts, v => set(k, v), !ed), h('span', { class: 'small muted' }, says[d[k] || ''])))));
-    if (d.sites === 'only' || d.sites === 'also') parts.push(h('div', { class: 'card', style: 'gap:8px' }, h('b', null, 'Lists that open during it'),
+    // The "lists that open" picker sits right under the Sites row, so it's clear what it belongs to.
+    const listsPicker = () => h('div', { class: 'drow sublists', 'data-k': 'tLists' },
+      h('span', { class: 'small', style: 'font-weight:600' }, d.sites === 'only' ? 'Lists that open during it' : 'Lists that also open during it'),
       h('div', { class: 'chips', style: 'gap:8px', id: 'tLists' }, S.lists.map(l => { const on = (d.lists || []).includes(l);
         return h('button', { type: 'button', class: 'lc pick', 'data-list': l, 'aria-pressed': String(on), disabled: !ed, onclick: () => ch(() => {
-          d.lists = on ? d.lists.filter(x => x !== l) : [...(d.lists || []), l]; }) }, on ? icon('check', 15, 2.4) : null, listLabel(l)); }))));
+          d.lists = on ? d.lists.filter(x => x !== l) : [...(d.lists || []), l]; }) }, on ? icon('check', 15, 2.4) : null, listLabel(l)); })));
+    parts.push(h('span', { class: 'flabel' }, 'During it'), h('div', { class: 'card during', style: 'gap:0;padding:4px 14px' },
+      ROWS.flatMap(([k, title, opts, says], i) => {
+        const row = h('div', { class: 'drow', 'data-k': k, style: i ? 'border-top:1px solid var(--line2)' : '' },
+          h('b', null, title), choiceSeg(title, d[k], opts, v => set(k, v), !ed), h('span', { class: 'small muted' }, says[d[k] || '']));
+        return (k === 'sites' && (d.sites === 'only' || d.sites === 'also')) ? [row, listsPicker()] : [row];
+      })));
   }
-  // Its time zone (the one it was made in).
-  const zones = (() => { try { return Intl.supportedValuesOf('timeZone'); } catch { return []; } })();
-  const tzSel = h('select', { class: 'inp', id: 'tTz', disabled: !ed, onchange: e => ch(() => { t.tz = e.target.value; }) },
-    [...new Set([t.tz, localTz(), ...zones].filter(Boolean))].map(z => h('option', { value: z }, z.replace(/_/g, ' '))));
-  tzSel.value = t.tz;
   const del = async () => {
     if (!(await uiConfirmDanger(`Delete ${t.name || 'this timer'}?`, 'It stops on every phone it\'s for, within a few minutes.', 'Delete', 'trash'))) return;
     delete S.D.timers[id]; markDevices(); backTo(); say('Deleted. Tap Save to keep the change.');
@@ -4335,8 +4346,7 @@ function timerScreen() {
     h('span', { class: 'flabel' }, 'For'), forChips,
     !t.for.groups.length && !t.for.phones.length ? h('p', { class: 'warn', style: 'margin:0' }, 'Pick who it\'s for: a group, or phones.') : null,
     h('span', { class: 'flabel' }, 'Kind of timer'), kinds, ...parts,
-    h('div', { class: 'field' }, h('label', { for: 'tTz' }, 'Time zone'), tzSel,
-      h('span', { class: 'hint' }, `Its times are in this zone (the one it was made in), wherever the phone is. Now there: ${new Date().toLocaleTimeString([], { timeZone: t.tz || undefined, hour: '2-digit', minute: '2-digit' })}.`)),
+    h('p', { class: 'hint' }, 'Times follow the phone\'s own clock and time zone, so "16:00" means 4pm where the phone is.'),
     ed ? h('div', { class: 'acts' }, h('button', { type: 'button', class: 'btn dline', id: 'tDelete', onclick: del }, 'Delete timer'),
       h('button', { type: 'button', class: 'btn p grow', id: 'tDone', onclick: async () => { await saveAll(); backTo(); } }, 'Done')) : null,
     ed ? null : h('p', { class: 'hint' }, 'Only the main admin can change this one.'));

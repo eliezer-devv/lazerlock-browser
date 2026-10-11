@@ -302,7 +302,7 @@ many as you like, each with a name and an on/off switch (off = paused, not delet
   **Asking for sites** (Can't ask), **Temporary access** (Paused).
 - **Timers that overlap all apply, and the strictest wins:** an allowance that's used up blocks its sites even while
   another timer opens them; Blocked beats Open.
-- **Time zones:** each timer keeps the time zone it was made in (changeable on its screen), wherever the phone is.
+- **Time zones:** times follow the **child phone's own clock and time zone**, automatically — "16:00" means 4pm where the phone is, and travelling with the phone moves the timer with it. There's no setting for it.
 - **On the phone:** the home page shows only what's open, with *"Homework time until 18:00 · Ask for time"* on top;
   *Nothing opens* shows a full screen instead. 5 minutes before a timer starts, a note says so. A page that's no longer
   allowed shows the blocked page saying which timer, and until when. **Ask for time** sends a request
@@ -880,7 +880,7 @@ The private repo's `devices.json` looks like this:
 }
 ```
 
-## 3c. Other browsers (supervised protection)
+## 3c. Only this browser (supervised protection)
 
 On a supervised phone (a child's, say), this keeps the managed browser the only way to the web. It's set up by
 whoever manages the phone, with physical access, and it's deliberately **visible**: a blocked app shows a plain
@@ -898,7 +898,7 @@ page at any time. It never touches apps Android itself needs (Phone, Settings, t
 ### Two ways to keep it in place (Phones → a phone → Other browsers)
 - **Screen cover** (no computer): an accessibility service covers a blocked app the moment it opens — in split
   screen and pop-up windows too — and covers the few settings screens where the protection could be switched off
-  (Accessibility, this app's App info, and the device-admin screen). With **uninstall protection** (a device admin)
+  (Accessibility, this app's App info, and the device-admin screen). **On Android 13+** the Accessibility switch may be greyed out for a sideloaded app until you allow it (**Settings → Apps → Whitelist Browser → ⋮ → Allow restricted settings**); the phone's own **Only this browser** screen has a button that opens that page. With **uninstall protection** (a device admin)
   Android won't uninstall the app until it's switched off there, and that screen is covered. It's the weaker option:
   someone who knows Android could still get round it (for example in safe mode), and you'd be told.
 - **Device owner** (set up once, with a computer): the strongest. Blocked apps are **switched off** so they won't
@@ -1187,11 +1187,11 @@ says if its clock was changed by hand. **Search phones** filters by name, ID, mo
 ### Timers
 Every timer, by who it's for, with **On now / Later / Paused**, and **New timer**. See [Timers](#timers).
 
-### Other browsers (a phone's screen)
+### Only this browser (a phone's screen)
 Lists the apps that can open websites, each with **Allow** or **Block**; sets how the managed browser is kept in
 place (**Device owner** / **Screen cover** / **Off**), the **screen cover** on/off, **Block new browsers straight
 away**, and — as device owner — keeping the clock honest and whether new apps need your OK. See
-[Other browsers](#3c-other-browsers-supervised-protection).
+[Only this browser](#3c-only-this-browser-supervised-protection).
 
 ### Settings
 - **Filters:** **Block ads**, **Block trackers**, **Hide annoyances**, **Block adult content**, **Block gambling**,

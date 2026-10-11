@@ -38,6 +38,9 @@ class GuardService : AccessibilityService() {
         AppLog.ready(applicationContext)
         AppLog.i("Cover", "Screen cover is on")
         runCatching { Requests.checkInSoon(applicationContext) }
+        // Learn which apps are browsers now, so a blocked one is covered from the first moment (not only after the
+        // next few-minute check).
+        Thread { runCatching { BrowserGuard.report(applicationContext) }.logged("Cover", "First browser check") }.start()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -45,7 +48,7 @@ class GuardService : AccessibilityService() {
         val pkg = event.packageName?.toString() ?: return
         if (pkg == packageName) { hide(); return }
         runCatching {
-            if (!BrowserGuard.coverOn()) { hide(); return }
+            if (!BrowserGuard.coverOn(applicationContext)) { hide(); return }
             val cls = event.className?.toString()?.lowercase().orEmpty()
             when {
                 BrowserGuard.blocked(applicationContext, pkg) -> show(blockedTitle(pkg),
