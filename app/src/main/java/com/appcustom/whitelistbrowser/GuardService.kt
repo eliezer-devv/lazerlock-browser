@@ -24,6 +24,9 @@ class GuardService : AccessibilityService() {
     companion object {
         @Volatile var running = false
             private set
+        @Volatile private var instance: GuardService? = null
+        /** Our own app came to the front: make sure no cover is left showing. */
+        fun dismissCover() { instance?.let { svc -> svc.main.post { svc.hide() } } }
         // The settings screens where this protection could be switched off (covered so it can't be, unawares).
         private val GUARDED_CLASS_HINTS = listOf("accessibility", "deviceadmin", "installedappdetails", "appinfo", "manageapplications")
     }
@@ -31,9 +34,11 @@ class GuardService : AccessibilityService() {
     private var wm: WindowManager? = null
     private var cover: View? = null
     private var coveringFor: String? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     override fun onServiceConnected() {
         running = true
+        instance = this
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         AppLog.ready(applicationContext)
         AppLog.i("Cover", "Screen cover is on")
@@ -46,10 +51,15 @@ class GuardService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg == packageName) { hide(); return }
+        val cls = event.className?.toString()?.lowercase().orEmpty()
+        // Our own windows: never react to the cover's own window events (that caused the flashing). Only when our
+        // real screen opens do we take the cover down.
+        if (pkg == packageName) {
+            if (cls.contains("mainactivity") || cls.contains("adminactivity")) hide()
+            return
+        }
         runCatching {
             if (!BrowserGuard.coverOn(applicationContext)) { hide(); return }
-            val cls = event.className?.toString()?.lowercase().orEmpty()
             when {
                 BrowserGuard.blocked(applicationContext, pkg) -> show(blockedTitle(pkg),
                     "Websites open in Whitelist Browser on this phone. You can ask to use this app.", "blocked:$pkg")
@@ -75,6 +85,7 @@ class GuardService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         running = false
+        instance = null
         hide()
         AppLog.w("Cover", "Screen cover was switched off")
         runCatching { Requests.checkInSoon(applicationContext) }
@@ -109,7 +120,7 @@ class GuardService : AccessibilityService() {
                 val padx = (resources.displayMetrics.density * 26).toInt()
                 minHeight = h; setPadding(padx, 0, padx, 0)
                 background = Ui.rounded(Color.parseColor("#1F5F55"), resources.displayMetrics.density * 25)
-                setOnClickListener { performGlobalAction(GLOBAL_ACTION_HOME) }
+                setOnClickListener { hide(); performGlobalAction(GLOBAL_ACTION_HOME) }
             })
         }
         val type = if (Build.VERSION.SDK_INT >= 22) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
@@ -120,8 +131,6 @@ class GuardService : AccessibilityService() {
             0,                                  // focusable and opaque: it swallows taps on whatever is behind it
             PixelFormat.OPAQUE)
         runCatching { wm?.addView(panel, lp); cover = panel; coveringFor = forWhat }.logged("Cover", "Showing the cover")
-        // Blocked app: also step back to Home so the app isn't left running underneath.
-        if (forWhat.startsWith("blocked:")) performGlobalAction(GLOBAL_ACTION_HOME)
     }
 
     private fun hide() {

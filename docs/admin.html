@@ -4144,7 +4144,16 @@ function browsersScreen() {
   const p = protectOf(d) || { mode: 'off', apps: {}, blockNew: true };
   const st = protectState(id);
   const apps = seenApps(id).slice().sort((a, b) => (a.kind === 'browser' ? 0 : 1) - (b.kind === 'browser' ? 0 : 1) || (a.label || '').localeCompare(b.label || ''));
-  const browsers = apps.filter(a => a.kind === 'browser' || a.kind === 'system' || a.kind === 'added');
+  const browsers = apps.filter(a => a.kind === 'browser' || a.kind === 'system');
+  const browserPkgs = new Set(browsers.map(a => a.pkg));
+  // Apps you've added to block (not web browsers): shown in their own list, each with the Allow/Block switch so a
+  // blocked one can be undone.
+  const addedList = (() => {
+    const out = [], seen = new Set();
+    apps.filter(a => (a.kind === 'added' || a.kind === 'app') && !browserPkgs.has(a.pkg) && p.apps && p.apps[a.pkg]).forEach(a => { if (!seen.has(a.pkg)) { out.push(a); seen.add(a.pkg); } });
+    Object.keys(p.apps || {}).filter(pk => !seen.has(pk) && !browserPkgs.has(pk)).forEach(pk => { out.push(seenApps(id).find(a => a.pkg === pk) || { pkg: pk, label: pk, kind: 'added' }); seen.add(pk); });
+    return out.sort((a, b) => (a.label || a.pkg).localeCompare(b.label || b.pkg));
+  })();
   const name = firstName(d);
   const setMode = v => { const pr = ensureProtect(d); pr.mode = v; markDevices(); render(); };
   const appRow = a => {
@@ -4198,6 +4207,10 @@ function browsersScreen() {
         : h('p', { class: 'hint', style: 'margin:0' }, 'None reported yet. The phone sends its list every few minutes once it\'s online.'),
       M ? h('div', { style: 'display:flex;gap:8px;margin-top:8px' },
         h('button', { type: 'button', class: 'btn s sm', onclick: addApp }, icon('plus', 15, 2.4), 'Add an app')) : null),
+    // Apps you added (not browsers): their own list, same style, each with Allow / Block.
+    (addedList.length || M) ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Apps you added'),
+      addedList.length ? h('div', { class: 'group' }, addedList.map(appRow))
+        : h('p', { class: 'hint', style: 'margin:0' }, 'None yet. Use Add an app above to block an app that isn\'t a web browser (a game with its own web window, say).')) : null,
     M ? sw('Block new browsers straight away', 'A newly installed browser is blocked at once; you\'re asked, and can allow it.', p.blockNew !== false, v => { ensureProtect(d).blockNew = v; }) : null,
     h('p', { class: 'hint' }, 'This protection is visible on the phone: a blocked app shows a plain screen saying the browser is managed, and who by. You can switch it all off here at any time.'));
 }

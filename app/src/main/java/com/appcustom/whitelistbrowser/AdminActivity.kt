@@ -228,6 +228,7 @@ class AdminActivity : Activity() {
     override fun onResume() {
         super.onResume()
         AdminAlerts.adminScreenOpen = true
+        runCatching { GuardService.dismissCover() }
         if (BuildConfig.ADMIN_APP) {
             checkForUpdate()
             // Notifications: a look now (the background check also runs every 15 minutes or so).

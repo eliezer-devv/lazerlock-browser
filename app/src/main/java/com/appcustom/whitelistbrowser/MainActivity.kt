@@ -244,6 +244,7 @@ class MainActivity : Activity() {
         isResumedNow = true
         UserAlerts.appVisible = true
         AppLog.i("App", "Opened")
+        runCatching { GuardService.dismissCover() }   // our app is in front: no cover needed
         InstallReceiver.showConfirm = { confirm -> runCatching { startActivity(confirm) }.onFailure { AppLog.e("Update", "Couldn't show the installer", it) } }
         installWaitingUpdate()
         if (Device.name(this) != null) askNotificationsOnce()   // (phones set up before this was asked: once, now)
@@ -1598,6 +1599,8 @@ class MainActivity : Activity() {
         if (!Whitelist.state.search && Whitelist.state.registered && Requests.isSetUp()) item(R.drawable.ic_d_search, "Ask for search") { showAskSearch() }
         val waiting = MyRequests.all(this).count { it.status == "waiting" && !it.archived } + Outbox.waitingRequests(this).size
         item(R.drawable.ic_d_inbox, "My requests", if (waiting > 0) waiting.toString() else null) { showMyRequests() }
+        // "My timers": only ever shown when this phone actually has a timer (otherwise the child never sees it).
+        if (Whitelist.state.timers.isNotEmpty()) item(R.drawable.ic_d_clock, "My timers") { showMyTimers() }
         divider()
         item(R.drawable.ic_d_gear, "Settings") { showSettings() }
 
@@ -4098,6 +4101,80 @@ class MainActivity : Activity() {
             AppLog.i("Timers", "Asking for time: $summary")
             sendPhoneRequest("timer", extra, why.text.toString().trim(), summary)
         }
+        d.show()
+    }
+
+    // ---------- My timers (read-only, on the child's phone) ----------
+
+    private fun hhmm(min: Int): String = String.format(java.util.Locale.UK, "%02d:%02d", min / 60, min % 60)
+    private fun timerDaysText(days: Set<Int>): String {
+        if (days.size == 7) return "Every day"
+        val names = listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat")
+        val d = days.sorted()
+        if (d.isEmpty()) return "No days"
+        // Runs of days in a row -> "Sun–Thu".
+        val runs = ArrayList<String>(); var start = d[0]; var prev = d[0]
+        for (x in d.drop(1) + 99) { if (x == prev + 1) { prev = x; continue }
+            runs.add(if (start == prev) names[start] else "${names[start]}–${names[prev]}"); start = x; prev = x }
+        return runs.joinToString(", ")
+    }
+    private fun timerWhen(t: Timers.Timer): String = when (t.kind) {
+        "once" -> java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.UK).format(java.util.Date(t.startAt)) + " for ${MyActivity.fmt(t.minutes * 60_000L)}"
+        "allowance" -> "${MyActivity.fmt(t.minutes * 60_000L)} a day · ${timerDaysText(t.days)}"
+        else -> "${timerDaysText(t.days)}, ${hhmm(t.from)} to ${hhmm(t.to)}"
+    }
+    private fun timerWhat(t: Timers.Timer): String {
+        if (t.kind == "allowance") {
+            val on = (t.onSites + t.onLists.map { "the $it list" })
+            return "On ${if (on.isEmpty()) "some sites" else on.joinToString(", ")}"
+        }
+        val out = ArrayList<String>()
+        when (t.sites) { "none" -> out.add("Nothing opens"); "only" -> out.add("Only some lists open"); "also" -> out.add("Extra lists open") }
+        for ((k, v) in t.media) out.add("${k.replaceFirstChar { it.uppercase() }} $v")
+        t.search?.let { out.add("Search $it") }
+        if (t.noAsk) out.add("Can't ask for sites")
+        if (t.pauseTemps) out.add("Temporary access paused")
+        return if (out.isEmpty()) "No changes" else out.joinToString(" · ")
+    }
+
+    /** A read-only list of this phone's timers, with "Ask for time" on one that's on now. */
+    private fun showMyTimers() {
+        val timers = Whitelist.state.timers.sortedBy { it.name.lowercase() }
+        val d = Ui.AppDialog(this, sheet = true)
+        d.title("My timers")
+        d.add(Ui.text(this, "When these are on, some things change on this phone. You can't edit them here — ask whoever manages this browser.", 14f, Ui.MUTED), 6)
+        val now = TrustedTime.now()
+        for (t in timers) {
+            val onNow = runCatching { if (t.kind == "allowance") Timers.onAt(t, now) else Timers.activeNow().any { it.id == t.id } }.getOrDefault(false)
+            val leftMs = if (t.kind == "allowance") runCatching { Timers.leftToday(applicationContext, t) }.getOrDefault(Long.MAX_VALUE) else Long.MAX_VALUE
+            val state = when {
+                t.kind == "allowance" && onNow && leftMs != Long.MAX_VALUE -> "${(leftMs + 59_999) / 60_000} min left today"
+                onNow -> "On now"
+                else -> "Later"
+            }
+            d.add(LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                val pad = Ui.dp(this@MainActivity, 14)
+                setPadding(pad, Ui.dp(this@MainActivity, 12), pad, Ui.dp(this@MainActivity, 12))
+                background = Ui.rounded(Ui.CARD, Ui.dp(this@MainActivity, 14).toFloat(), Ui.LINE, Ui.dp(this@MainActivity, 1))
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                    addView(Ui.text(this@MainActivity, t.name, 15.5f, Ui.INK, "bold"), LinearLayout.LayoutParams(0, -2, 1f))
+                    addView(Ui.text(this@MainActivity, state, 13f, if (onNow) Ui.ACCENT_TEXT else Ui.MUTED, "bold"))
+                })
+                addView(Ui.text(this@MainActivity, timerWhen(t), 12.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(this@MainActivity, 4), 0, 0) })
+                addView(Ui.text(this@MainActivity, timerWhat(t), 12.5f, Ui.MUTED))
+                if (onNow && Requests.isSetUp()) addView(android.widget.Button(this@MainActivity).apply {
+                    text = if (t.kind == "allowance") "Ask for more time" else "Ask for time"; isAllCaps = false
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f); setTextColor(Ui.ACCENT_TEXT)
+                    minHeight = Ui.dp(this@MainActivity, 42)
+                    background = Ui.rounded(0, 0f, Ui.OUTLINE, Ui.dp(this@MainActivity, 1))
+                    val px = Ui.dp(this@MainActivity, 16); setPadding(px, 0, px, 0)
+                    setOnClickListener { d.dismiss(); showAskForTime(t, more = t.kind == "allowance") }
+                }.also { it.layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = Ui.dp(this@MainActivity, 8) } })
+            }.also { it.layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@MainActivity, 8) } })
+        }
+        d.button("Close", Ui.Kind.PRIMARY) { it.dismiss() }
         d.show()
     }
 
