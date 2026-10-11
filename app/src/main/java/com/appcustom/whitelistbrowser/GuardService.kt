@@ -28,19 +28,19 @@ class GuardService : AccessibilityService() {
         @Volatile private var instance: GuardService? = null
         /** Our own app came to the front: make sure no cover is left showing. */
         fun dismissCover() { instance?.let { svc -> svc.main.post { svc.hide() } } }
-        // Extra words (besides our own app's name) that mark a settings screen where protection could be switched
-        // off — the "restricted settings" dialog shows these without naming the app.
-        private val GUARDED_WORDS = listOf("restricted setting")
-        // Known Settings screen class names across phone brands (matched as substrings, lowercased): App info,
-        // Accessibility (service detail), Device admin, and uninstall. A broad net; harmless extras are fine.
+        // Class names of the SPECIFIC screens where this protection could be switched off (matched as substrings,
+        // lowercased) — the app-info / accessibility-detail / device-admin-detail pages, across phone brands. These
+        // are detail pages, never the Settings home or the full apps list (so those are never covered).
         private val CLASS_HINTS = listOf(
-            "installedappdetails", "appinfodashboard", "applicationdetail", "appinfo",      // App info (AOSP, OEMs)
-            "accessibilitydetail", "accessibilityservice", "toggleaccessibility", "accessibilitysettings",
-            "deviceadminadd", "deviceadminsettings", "deviceadmin",                           // device admin
-            "uninstalleruactivity", "uninstallapp")                                          // uninstall prompt
-        // View resource-id fragments that mark those same screens (from the node tree).
-        private val ID_HINTS = listOf("installed_app_detail", "app_info", "appinfo", "accessibilit",
-            "device_admin", "deviceadmin", "uninstall", "force_stop", "restricted")
+            "installedappdetails", "appinfodashboard", "applicationsdetailsactivity", "applicationdetailsactivity",
+            "accessibilitydetailssettings", "toggleaccessibilityservicepreferencefragment", "accessibilityservicesettings",
+            "deviceadminadd")
+        // Words that appear on OUR app's App info page (its buttons), but not on the plain apps list.
+        private val APPINFO_WORDS = listOf("force stop", "uninstall", "clear storage", "clear data", "clear cache")
+        // A distinctive phrase from this app's own accessibility-service description (shown only on its own page).
+        private const val DESC_PHRASE = "covers blocked apps"
+        // A specific view id for the app-info page (won't match the Settings home, unlike "app"/"accessibilit").
+        private const val APPINFO_ID = "installed_app_detail"
         private const val SETUP_GRACE_MS = 8000L
     }
 
@@ -129,8 +129,15 @@ class GuardService : AccessibilityService() {
     private fun guardedSetting(eventCls: String): Boolean {
         if (CLASS_HINTS.any { eventCls.contains(it) }) return true
         val (text, ids) = runCatching { windowTextAndIds() }.logged("Cover", "Reading the settings screen").getOrDefault("" to "")
-        if (text.contains(ourName) || text.contains(ourPkgLower) || GUARDED_WORDS.any { text.contains(it) }) return true
-        if (ID_HINTS.any { ids.contains(it) }) return true
+        if (text.contains("restricted setting")) return true          // the "allow restricted settings" dialog
+        if (ids.contains(APPINFO_ID)) return true                     // an App info page (specific id)
+        // Otherwise it must clearly be one of THIS app's own pages: its name on screen, AND something only on that
+        // page (so the Settings home and the full apps list — which merely lists our app — aren't covered).
+        val hasUs = text.contains(ourName) || text.contains(ourPkgLower)
+        if (!hasUs) return false
+        if (APPINFO_WORDS.any { text.contains(it) }) return true      // our App info page (Force stop / Uninstall…)
+        if (text.contains(DESC_PHRASE)) return true                   // our accessibility-service page
+        if (text.contains("deactivate") && text.contains("device admin")) return true   // our device-admin page
         return false
     }
 
