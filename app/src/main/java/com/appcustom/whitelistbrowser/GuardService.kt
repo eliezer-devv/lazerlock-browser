@@ -31,6 +31,16 @@ class GuardService : AccessibilityService() {
         // Extra words (besides our own app's name) that mark a settings screen where protection could be switched
         // off — the "restricted settings" dialog shows these without naming the app.
         private val GUARDED_WORDS = listOf("restricted setting")
+        // Known Settings screen class names across phone brands (matched as substrings, lowercased): App info,
+        // Accessibility (service detail), Device admin, and uninstall. A broad net; harmless extras are fine.
+        private val CLASS_HINTS = listOf(
+            "installedappdetails", "appinfodashboard", "applicationdetail", "appinfo",      // App info (AOSP, OEMs)
+            "accessibilitydetail", "accessibilityservice", "toggleaccessibility", "accessibilitysettings",
+            "deviceadminadd", "deviceadminsettings", "deviceadmin",                           // device admin
+            "uninstalleruactivity", "uninstallapp")                                          // uninstall prompt
+        // View resource-id fragments that mark those same screens (from the node tree).
+        private val ID_HINTS = listOf("installed_app_detail", "app_info", "appinfo", "accessibilit",
+            "device_admin", "deviceadmin", "uninstall", "force_stop", "restricted")
         private const val SETUP_GRACE_MS = 8000L
     }
 
@@ -83,11 +93,11 @@ class GuardService : AccessibilityService() {
                 // Content events fire a lot; check at most ~4x a second.
                 if (contentChanged && android.os.SystemClock.uptimeMillis() - lastContentCheck < 250L) return
                 lastContentCheck = android.os.SystemClock.uptimeMillis()
-                if (settingsAboutUs()) { show("This setting is locked",
+                if (guardedSetting(cls)) { show("This setting is locked",
                     "It's set by whoever manages Whitelist Browser on this phone.", "setting"); return }
                 // Still loading when the screen first opened: look again a moment later.
                 if (stateChanged) main.postDelayed({ runCatching {
-                    if (BrowserGuard.coverOn(applicationContext) && isForegroundSettings() && settingsAboutUs())
+                    if (BrowserGuard.coverOn(applicationContext) && isForegroundSettings() && guardedSetting(cls))
                         show("This setting is locked", "It's set by whoever manages Whitelist Browser on this phone.", "setting")
                 }.logged("Cover", "Re-checking the settings screen") }, 150L)
                 if (stateChanged) hide()                // navigated to an unrelated Settings screen
@@ -106,27 +116,40 @@ class GuardService : AccessibilityService() {
     private fun isSettingsPkg(pkg: String): Boolean = pkg.contains("settings")
     private fun isForegroundSettings(): Boolean = runCatching { rootInActiveWindow?.packageName?.toString()?.contains("settings") == true }.getOrDefault(false)
 
-    /** Does the Settings screen in front show it's about Whitelist Browser (so switching the protection off)? */
-    private fun settingsAboutUs(): Boolean {
-        val text = runCatching { windowText() }.logged("Cover", "Reading the settings screen").getOrDefault("")
-        if (text.isEmpty()) return false
-        return text.contains(ourName) || GUARDED_WORDS.any { text.contains(it) }
+    private val ourPkgLower by lazy { packageName.lowercase() }
+
+    /**
+     * Is the Settings screen in front one where this protection could be switched off? Decided from three signals,
+     * any of which is enough (so what one misses, another catches):
+     *   1. the screen's visible text names this app, or is the "restricted settings" dialog;
+     *   2. a view's resource id marks it as App info / Accessibility / Device admin / Uninstall / Force stop;
+     *   3. the window's class name matches a known Settings screen (a broad list across phone brands).
+     * (1) and (2) come from one read of the screen; (3) needs no reading at all.
+     */
+    private fun guardedSetting(eventCls: String): Boolean {
+        if (CLASS_HINTS.any { eventCls.contains(it) }) return true
+        val (text, ids) = runCatching { windowTextAndIds() }.logged("Cover", "Reading the settings screen").getOrDefault("" to "")
+        if (text.contains(ourName) || text.contains(ourPkgLower) || GUARDED_WORDS.any { text.contains(it) }) return true
+        if (ID_HINTS.any { ids.contains(it) }) return true
+        return false
     }
 
-    /** The visible text of the active window, lowercased (bounded). Used only to recognise our own protection screens. */
-    private fun windowText(): String {
-        val root = rootInActiveWindow ?: return ""
-        val sb = StringBuilder()
+    /** The visible text and the view resource-ids of the active window, lowercased (bounded). Only to recognise our
+     *  own protection screens; never read or kept beyond this check. */
+    private fun windowTextAndIds(): Pair<String, String> {
+        val root = rootInActiveWindow ?: return "" to ""
+        val text = StringBuilder(); val ids = StringBuilder()
         val queue = ArrayDeque<AccessibilityNodeInfo>()
         queue.add(root)
         var seen = 0
-        while (queue.isNotEmpty() && seen < 500 && sb.length < 4000) {
+        while (queue.isNotEmpty() && seen < 600 && text.length < 4000) {
             val n = queue.removeFirst(); seen++
-            n.text?.let { sb.append(it).append(' ') }
-            n.contentDescription?.let { sb.append(it).append(' ') }
+            n.text?.let { text.append(it).append(' ') }
+            n.contentDescription?.let { text.append(it).append(' ') }
+            n.viewIdResourceName?.let { ids.append(it).append(' ') }
             for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
         }
-        return sb.toString().lowercase()
+        return text.toString().lowercase() to ids.toString().lowercase()
     }
 
     override fun onInterrupt() {}
