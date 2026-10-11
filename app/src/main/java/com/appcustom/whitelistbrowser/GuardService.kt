@@ -9,6 +9,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.LinearLayout
 import android.widget.TextView
 
@@ -27,8 +28,10 @@ class GuardService : AccessibilityService() {
         @Volatile private var instance: GuardService? = null
         /** Our own app came to the front: make sure no cover is left showing. */
         fun dismissCover() { instance?.let { svc -> svc.main.post { svc.hide() } } }
-        // The settings screens where this protection could be switched off (covered so it can't be, unawares).
-        private val GUARDED_CLASS_HINTS = listOf("accessibility", "deviceadmin", "installedappdetails", "appinfo", "manageapplications")
+        // Extra words (besides our own app's name) that mark a settings screen where protection could be switched
+        // off — the "restricted settings" dialog shows these without naming the app.
+        private val GUARDED_WORDS = listOf("restricted setting")
+        private const val SETUP_GRACE_MS = 8000L
     }
 
     private var wm: WindowManager? = null
@@ -36,9 +39,12 @@ class GuardService : AccessibilityService() {
     private var coveringFor: String? = null
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
+    private var connectedAt = 0L
+
     override fun onServiceConnected() {
         running = true
         instance = this
+        connectedAt = android.os.SystemClock.uptimeMillis()
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         AppLog.ready(applicationContext)
         AppLog.i("Cover", "Screen cover is on")
@@ -48,25 +54,46 @@ class GuardService : AccessibilityService() {
         Thread { runCatching { BrowserGuard.report(applicationContext) }.logged("Cover", "First browser check") }.start()
     }
 
+    private var lastContentCheck = 0L
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null || event.eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return
+        if (event == null) return
+        val stateChanged = event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+        val contentChanged = event.eventType == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+        if (!stateChanged && !contentChanged) return
         val pkg = event.packageName?.toString() ?: return
         val cls = event.className?.toString()?.lowercase().orEmpty()
         // Our own windows: never react to the cover's own window events (that caused the flashing). Only when our
         // real screen opens do we take the cover down.
         if (pkg == packageName) {
-            if (cls.contains("mainactivity") || cls.contains("adminactivity")) hide()
+            if (stateChanged && (cls.contains("mainactivity") || cls.contains("adminactivity"))) hide()
             return
         }
         runCatching {
-            if (!BrowserGuard.coverOn(applicationContext)) { hide(); return }
-            when {
-                BrowserGuard.blocked(applicationContext, pkg) -> show(blockedTitle(pkg),
-                    "Websites open in Whitelist Browser on this phone. You can ask to use this app.", "blocked:$pkg")
-                isGuardedSetting(pkg, cls) -> show("This setting is locked",
-                    "It's set by whoever manages Whitelist Browser on this phone.", "setting:$cls")
-                else -> hide()
+            if (!BrowserGuard.coverOn(applicationContext)) { if (stateChanged) hide(); return }
+            // A blocked app in front: cover it straight away.
+            if (BrowserGuard.blocked(applicationContext, pkg)) { show(blockedTitle(pkg),
+                "Websites open in Whitelist Browser on this phone. You can ask to use this app.", "blocked:$pkg"); return }
+            // The Settings app: cover the screens that could switch this protection off (App info, Accessibility,
+            // Device admin). Told apart by the visible text (our app's name, or the "restricted settings" dialog),
+            // which works the same across phones, unlike screen class names.
+            // Settings screens aren't covered for the first few seconds after the cover is switched on, so whoever
+            // set it up can see the confirmation and leave the screen. Blocked apps are covered straight away.
+            if (isSettingsPkg(pkg) && android.os.SystemClock.uptimeMillis() - connectedAt > SETUP_GRACE_MS) {
+                // Content events fire a lot; check at most ~4x a second.
+                if (contentChanged && android.os.SystemClock.uptimeMillis() - lastContentCheck < 250L) return
+                lastContentCheck = android.os.SystemClock.uptimeMillis()
+                if (settingsAboutUs()) { show("This setting is locked",
+                    "It's set by whoever manages Whitelist Browser on this phone.", "setting"); return }
+                // Still loading when the screen first opened: look again a moment later.
+                if (stateChanged) main.postDelayed({ runCatching {
+                    if (BrowserGuard.coverOn(applicationContext) && isForegroundSettings() && settingsAboutUs())
+                        show("This setting is locked", "It's set by whoever manages Whitelist Browser on this phone.", "setting")
+                }.logged("Cover", "Re-checking the settings screen") }, 150L)
+                if (stateChanged) hide()                // navigated to an unrelated Settings screen
+                return
             }
+            if (stateChanged) hide()                    // any other app in front
         }.logged("Cover", "Checking the open app")
     }
 
@@ -75,10 +102,31 @@ class GuardService : AccessibilityService() {
         return "$label is blocked on this phone"
     }
 
-    /** A settings screen that could switch this protection off (Accessibility, Device admin, this app's App info). */
-    private fun isGuardedSetting(pkg: String, cls: String): Boolean {
-        if (!pkg.contains("settings")) return false
-        return GUARDED_CLASS_HINTS.any { cls.contains(it) }
+    private val ourName by lazy { runCatching { getString(R.string.app_name) }.getOrDefault("Whitelist Browser").lowercase() }
+    private fun isSettingsPkg(pkg: String): Boolean = pkg.contains("settings")
+    private fun isForegroundSettings(): Boolean = runCatching { rootInActiveWindow?.packageName?.toString()?.contains("settings") == true }.getOrDefault(false)
+
+    /** Does the Settings screen in front show it's about Whitelist Browser (so switching the protection off)? */
+    private fun settingsAboutUs(): Boolean {
+        val text = runCatching { windowText() }.logged("Cover", "Reading the settings screen").getOrDefault("")
+        if (text.isEmpty()) return false
+        return text.contains(ourName) || GUARDED_WORDS.any { text.contains(it) }
+    }
+
+    /** The visible text of the active window, lowercased (bounded). Used only to recognise our own protection screens. */
+    private fun windowText(): String {
+        val root = rootInActiveWindow ?: return ""
+        val sb = StringBuilder()
+        val queue = ArrayDeque<AccessibilityNodeInfo>()
+        queue.add(root)
+        var seen = 0
+        while (queue.isNotEmpty() && seen < 500 && sb.length < 4000) {
+            val n = queue.removeFirst(); seen++
+            n.text?.let { sb.append(it).append(' ') }
+            n.contentDescription?.let { sb.append(it).append(' ') }
+            for (i in 0 until n.childCount) n.getChild(i)?.let { queue.add(it) }
+        }
+        return sb.toString().lowercase()
     }
 
     override fun onInterrupt() {}

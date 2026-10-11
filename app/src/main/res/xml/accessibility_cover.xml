@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The screen cover. It only reads which app or settings screen is in front (package and class),
-     never window content, so it can't see what's typed or shown. -->
+<!-- The screen cover. It reads the Settings app's visible text only to tell whether the open screen is about
+     Whitelist Browser (App info, Accessibility, Device admin) so it can cover it; it never reads or stores what's
+     typed, and only acts on the supervised phone's own protection screens. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault"
-    android:canRetrieveWindowContent="false"
-    android:notificationTimeout="100"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="0"
     android:description="@string/cover_description" />
