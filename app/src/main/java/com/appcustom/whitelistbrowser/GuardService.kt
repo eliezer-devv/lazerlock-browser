@@ -70,6 +70,8 @@ class GuardService : AccessibilityService() {
     }
 
     private var lastContentCheck = 0L
+    private var lastDiagCls = ""        // dedupes the per-screen diagnostic log
+    private var lastCoverWhy = ""       // dedupes the "why covered" diagnostic log
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
@@ -101,11 +103,19 @@ class GuardService : AccessibilityService() {
                 // Device-admin confirm page: the "Deactivate" button is right there, so cover the instant the window
                 // opens — decided from the event's own class name, with no screen read to wait for. A beat later we
                 // confirm it's really OUR device-admin page and take the cover back down if it was another app's.
-                if (stateChanged && cls.contains(CLASS_DEVICEADMIN)) { showSetting(); verifyDeviceAdmin(cls); return }
+                if (stateChanged && cls.contains(CLASS_DEVICEADMIN)) {
+                    AppLog.i("CoverDiag", "device-admin fast-cover, cls=$cls"); showSetting(); verifyDeviceAdmin(cls); return }
                 // Content events fire a lot; check at most ~8x a second.
                 if (contentChanged && android.os.SystemClock.uptimeMillis() - lastContentCheck < 120L) return
                 lastContentCheck = android.os.SystemClock.uptimeMillis()
                 val (text, ids) = runCatching { windowTextAndIds() }.logged("Cover", "Reading the settings screen").getOrDefault("" to "")
+                // DIAGNOSTIC: record what each Settings screen actually reports on this phone (class + a short slice
+                // of its view-ids and text), so the accessibility list / detail and device-admin screens can be told
+                // apart precisely from shared logs. Deduped by class so it logs once per screen, not on every tick.
+                if (stateChanged && cls != lastDiagCls) {
+                    lastDiagCls = cls
+                    AppLog.i("CoverDiag", "settings cls=$cls | ids=${ids.take(240)} | txt=${text.take(180)}")
+                }
                 if (guardedSetting(cls, text, ids)) { showSetting(); return }
                 // Not (yet) a guarded screen. A settings screen often isn't drawn the instant it opens, so instead of
                 // reading once and giving up, re-check a few times over the next second so the cover appears quickly.
@@ -149,18 +159,24 @@ class GuardService : AccessibilityService() {
         val hasUs = text.contains(ourName) || text.contains(ourPkgLower) || ids.contains(ourPkgLower)
         if (!hasUs) return false                                       // nothing of ours on screen → never cover
 
+        // Returns true, and logs WHY (deduped) so shared logs show which rule covered a screen — the quickest way to
+        // see why, say, the accessibility list is being covered on a given phone.
+        fun hit(why: String): Boolean {
+            if (why != lastCoverWhy) { lastCoverWhy = why; AppLog.i("CoverDiag", "cover: $why | cls=$eventCls") }
+            return true
+        }
         // Our App info page — its class, its own view-id, or its buttons (Force stop / Uninstall / Clear storage).
-        if (CLASS_APPINFO.any { eventCls.contains(it) }) return true
-        if (ids.contains(APPINFO_ID)) return true
-        if (APPINFO_WORDS.any { text.contains(it) }) return true
+        if (CLASS_APPINFO.any { eventCls.contains(it) }) return hit("appinfo-class")
+        if (ids.contains(APPINFO_ID)) return hit("appinfo-id")
+        APPINFO_WORDS.firstOrNull { text.contains(it) }?.let { return hit("appinfo-word:$it") }
         // Our accessibility DETAIL page — by its fragment class, or by the master switch bar that the list lacks.
-        if (CLASS_ACCESSIBILITY.any { eventCls.contains(it) }) return true
-        if (SWITCHBAR_IDS.any { ids.contains(it) }) return true
+        if (CLASS_ACCESSIBILITY.any { eventCls.contains(it) }) return hit("acc-class")
+        SWITCHBAR_IDS.firstOrNull { ids.contains(it) }?.let { return hit("switchbar:$it") }
         // Our device-admin confirm / deactivate page.
-        if (eventCls.contains(CLASS_DEVICEADMIN)) return true
-        if (text.contains("deactivate") && text.contains("device admin")) return true
+        if (eventCls.contains(CLASS_DEVICEADMIN)) return hit("devadmin-class")
+        if (text.contains("deactivate") && text.contains("device admin")) return hit("devadmin-text")
         // The "allow restricted settings" dialog — shown while our app is the one being configured.
-        if (text.contains("restricted setting")) return true
+        if (text.contains("restricted setting")) return hit("restricted")
         return false
     }
 
