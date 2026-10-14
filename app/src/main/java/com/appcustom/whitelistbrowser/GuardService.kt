@@ -28,19 +28,24 @@ class GuardService : AccessibilityService() {
         @Volatile private var instance: GuardService? = null
         /** Our own app came to the front: make sure no cover is left showing. */
         fun dismissCover() { instance?.let { svc -> svc.main.post { svc.hide() } } }
-        // Class names of the SPECIFIC screens where this protection could be switched off (matched as substrings,
-        // lowercased) — the app-info / accessibility-detail / device-admin-detail pages, across phone brands. These
-        // are detail pages, never the Settings home or the full apps list (so those are never covered).
-        private val CLASS_HINTS = listOf(
-            "installedappdetails", "appinfodashboard", "applicationsdetailsactivity", "applicationdetailsactivity",
-            "accessibilitydetailssettings", "toggleaccessibilityservicepreferencefragment", "accessibilityservicesettings",
-            "deviceadminadd")
-        // Words that appear on OUR app's App info page (its buttons), but not on the plain apps list.
-        private val APPINFO_WORDS = listOf("force stop", "uninstall", "clear storage", "clear data", "clear cache")
-        // A distinctive phrase from this app's own accessibility-service description (shown only on its own page).
-        private const val DESC_PHRASE = "covers blocked apps"
-        // A specific view id for the app-info page (won't match the Settings home, unlike "app"/"accessibilit").
+        // The App info detail page. NOTE: this page uses the SAME layout, class and view-ids for EVERY app on the
+        // phone, so none of these identify *our* app on their own — they only say "this is an app-info page". The
+        // guard additionally requires our app's name to be on screen before covering, so only our own App info is
+        // covered, never another app's.
+        private val CLASS_APPINFO = listOf(
+            "installedappdetails", "appinfodashboard", "applicationsdetailsactivity", "applicationdetailsactivity")
         private const val APPINFO_ID = "installed_app_detail"
+        private val APPINFO_WORDS = listOf("force stop", "uninstall", "clear storage", "clear data", "clear cache")
+        // The per-service accessibility DETAIL page (the one with the big on/off toggle for one service) — never the
+        // list of all services. Again only used together with our app's name, or the description phrase below.
+        private val CLASS_ACCESSIBILITY = listOf(
+            "accessibilitydetailssettings", "toggleaccessibilityservicepreferencefragment")
+        // A distinctive phrase from this app's own accessibility-service description. It's shown in full ONLY on this
+        // app's own detail page — the list of all services shows just names — so it tells our detail page apart from
+        // the list without needing the class name (which many phones report only as a generic host activity).
+        private const val DESC_PHRASE = "covers blocked apps"
+        // The device-admin confirm / deactivate page. Same layout for every admin app, so also name-gated.
+        private const val CLASS_DEVICEADMIN = "deviceadminadd"
         private const val SETUP_GRACE_MS = 8000L
     }
 
@@ -89,18 +94,20 @@ class GuardService : AccessibilityService() {
             // which works the same across phones, unlike screen class names.
             // Settings screens aren't covered for the first few seconds after the cover is switched on, so whoever
             // set it up can see the confirmation and leave the screen. Blocked apps are covered straight away.
-            if (isSettingsPkg(pkg) && android.os.SystemClock.uptimeMillis() - connectedAt > SETUP_GRACE_MS) {
-                // Content events fire a lot; check at most ~4x a second.
-                if (contentChanged && android.os.SystemClock.uptimeMillis() - lastContentCheck < 250L) return
+            if (isSettingsPkg(pkg)) {
+                // Settings screens aren't covered for the first few seconds after the cover is switched on, so
+                // whoever set it up can read the confirmation and leave the screen.
+                if (android.os.SystemClock.uptimeMillis() - connectedAt <= SETUP_GRACE_MS) { if (stateChanged) hide(); return }
+                // Content events fire a lot; check at most ~8x a second.
+                if (contentChanged && android.os.SystemClock.uptimeMillis() - lastContentCheck < 120L) return
                 lastContentCheck = android.os.SystemClock.uptimeMillis()
                 if (guardedSetting(cls)) { show("This setting is locked",
                     "It's set by whoever manages Whitelist Browser on this phone.", "setting"); return }
-                // Still loading when the screen first opened: look again a moment later.
-                if (stateChanged) main.postDelayed({ runCatching {
-                    if (BrowserGuard.coverOn(applicationContext) && isForegroundSettings() && guardedSetting(cls))
-                        show("This setting is locked", "It's set by whoever manages Whitelist Browser on this phone.", "setting")
-                }.logged("Cover", "Re-checking the settings screen") }, 150L)
-                if (stateChanged) hide()                // navigated to an unrelated Settings screen
+                // Not (yet) a guarded screen. A settings screen often isn't drawn at the instant it opens, so rather
+                // than read once and give up, re-check a few times over the next second — this is what makes the
+                // cover appear quickly. The final check takes the cover down if the screen settled on something
+                // unrelated. We don't hide() up front, so moving between two guarded screens never flashes.
+                if (stateChanged) scheduleGuardChecks(cls)
                 return
             }
             if (stateChanged) hide()                    // any other app in front
@@ -119,26 +126,64 @@ class GuardService : AccessibilityService() {
     private val ourPkgLower by lazy { packageName.lowercase() }
 
     /**
-     * Is the Settings screen in front one where this protection could be switched off? Decided from three signals,
-     * any of which is enough (so what one misses, another catches):
-     *   1. the screen's visible text names this app, or is the "restricted settings" dialog;
-     *   2. a view's resource id marks it as App info / Accessibility / Device admin / Uninstall / Force stop;
-     *   3. the window's class name matches a known Settings screen (a broad list across phone brands).
-     * (1) and (2) come from one read of the screen; (3) needs no reading at all.
+     * Is the Settings screen in front one of THIS app's own pages where the protection could be switched off?
+     *
+     * The guiding rule that fixes the over-covering: the App info page, the accessibility detail page and the
+     * device-admin page all use the SAME layout, class and view-ids for every app on the phone — so none of those,
+     * on their own, mean the screen is ours. The screen is covered only when this app's own name is on it (or our
+     * unique description phrase, which only ever appears on our own accessibility page). That's why another app's
+     * App info or accessibility page, the full apps list and the Settings home are all left uncovered.
      */
     private fun guardedSetting(eventCls: String): Boolean {
-        if (CLASS_HINTS.any { eventCls.contains(it) }) return true
         val (text, ids) = runCatching { windowTextAndIds() }.logged("Cover", "Reading the settings screen").getOrDefault("" to "")
-        if (text.contains("restricted setting")) return true          // the "allow restricted settings" dialog
-        if (ids.contains(APPINFO_ID)) return true                     // an App info page (specific id)
-        // Otherwise it must clearly be one of THIS app's own pages: its name on screen, AND something only on that
-        // page (so the Settings home and the full apps list — which merely lists our app — aren't covered).
-        val hasUs = text.contains(ourName) || text.contains(ourPkgLower)
+
+        // Our own accessibility-service detail page: its full description is shown only here, never in the list of
+        // all services — so this one phrase tells our page apart from the list on its own.
+        if (text.contains(DESC_PHRASE)) return true
+
+        // Everything below is a page whose layout is identical for every app, so it's only OURS to cover when this
+        // app's own name (or package) is on the screen.
+        val hasUs = text.contains(ourName) || text.contains(ourPkgLower) || ids.contains(ourPkgLower)
         if (!hasUs) return false
-        if (APPINFO_WORDS.any { text.contains(it) }) return true      // our App info page (Force stop / Uninstall…)
-        if (text.contains(DESC_PHRASE)) return true                   // our accessibility-service page
-        if (text.contains("deactivate") && text.contains("device admin")) return true   // our device-admin page
+
+        // Our App info page — recognised by its class, its own view-id, or its buttons (Force stop / Uninstall…).
+        if (CLASS_APPINFO.any { eventCls.contains(it) }) return true
+        if (ids.contains(APPINFO_ID)) return true
+        if (APPINFO_WORDS.any { text.contains(it) }) return true
+        // Our accessibility detail page (fallback for when its description hasn't drawn yet), by class.
+        if (CLASS_ACCESSIBILITY.any { eventCls.contains(it) }) return true
+        // Our device-admin confirm / deactivate page.
+        if (eventCls.contains(CLASS_DEVICEADMIN)) return true
+        if (text.contains("deactivate") && text.contains("device admin")) return true
+        // The "allow restricted settings" dialog — shown while our app is the one being configured.
+        if (text.contains("restricted setting")) return true
         return false
+    }
+
+    /**
+     * A settings screen often isn't fully drawn the instant it opens, so instead of reading it once and giving up,
+     * re-check a handful of times across the next second. The first check at 0 ms catches simple screens (like the
+     * device-admin confirm page) immediately — important, because that page's "off" button is right there — and the
+     * later checks catch screens that render their text a beat later. Each check both shows the cover when the
+     * screen turns out to be guarded, and (on the last pass) takes it down if the screen settled on something
+     * unrelated. A generation counter cancels an older burst when a newer screen opens.
+     */
+    private var guardGen = 0
+    private fun scheduleGuardChecks(eventCls: String) {
+        val gen = ++guardGen
+        val delays = longArrayOf(0L, 60L, 150L, 350L, 700L)
+        for (i in delays.indices) {
+            val last = i == delays.size - 1
+            main.postDelayed({
+                if (gen != guardGen) return@postDelayed
+                runCatching {
+                    if (!BrowserGuard.coverOn(applicationContext)) return@runCatching
+                    if (isForegroundSettings() && guardedSetting(eventCls))
+                        show("This setting is locked", "It's set by whoever manages Whitelist Browser on this phone.", "setting")
+                    else if (last) hide()
+                }.logged("Cover", "Checking the settings screen")
+            }, delays[i])
+        }
     }
 
     /** The visible text and the view resource-ids of the active window, lowercased (bounded). Only to recognise our
