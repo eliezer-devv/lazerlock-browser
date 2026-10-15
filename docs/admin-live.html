@@ -1602,6 +1602,8 @@ let lastScreenKey = '';
 function go(tab) { S.tab = tab; S.sub = null; render(); }
 function open(sub) { S.sub = sub; render(); }
 function back() { S.sub = null; render(); }
+// After answering a request from its detail screen, go back to the requests list instead of the "already answered" card.
+function backOrRender() { if (S.sub && S.sub.name === 'request') back(); else render(); }
 const screenTitle = (title, sub) => h('div', { class: 'title' }, h('h1', null, title), sub ? h('p', null, sub) : null);
 const backLink = (label, onclick = back) => h('button', { type: 'button', class: 'back', onclick }, icon('back', 20, 2), label);
 function render() {
@@ -2376,7 +2378,11 @@ function requestsScreen() {
   const sub = reqs === null ? 'Checking for requests…' : waiting ? `${plural(waiting, 'request')} waiting for you` : 'Nothing waiting for you';
   const kids = [screenTitle('Requests', sub)];
   if (S.inboxError) kids.push(h('div', { class: 'card' }, h('p', { class: 'warn' }, S.inboxError)));
-  if (reqs && reqs.length) kids.push(...reqs.map(requestCard));
+  // Waiting requests: each a compact row (like an answered one) — tap to open its details and answer.
+  if (reqs && reqs.length) {
+    kids.push(h('h2', { class: 'sec' }, 'Waiting'));
+    kids.push(h('div', { class: 'group' }, reqs.map(waitingRow)));
+  }
   else if (reqs && !S.inboxError) kids.push(h('div', { class: 'empty' }, h('b', null, 'All caught up'), 'New requests from phones appear here.'));
   if (S.newPhones.length) {
     kids.push(h('h2', { class: 'sec' }, S.newPhones.length === 1 ? 'New phone' : 'New phones'));
@@ -2410,6 +2416,18 @@ function requestsScreen() {
   return h('main', { class: 'stack' }, kids);
 }
 const possessive = n => /^the /.test(n) ? `${n}'s` : `${n}'${/s$/i.test(n) ? '' : 's'}`;
+// A waiting request, as a compact row: tap it to open the details and answer there.
+function waitingRow(issue) {
+  const req = marker(issue.body);
+  const { title } = describe(req);
+  const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
+  return h('button', { type: 'button', class: 'row tap', 'data-n': issue.number, onclick: () => open({ name: 'request', number: issue.number }) },
+    h('span', { class: 'ic', style: 'color:var(--accent)' }, icon('clock', 20, 2.2)),
+    h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, title),
+      h('span', { class: 'dom' }, `${phone} · ${ago(issue.created_at)}`)),
+    chip('Waiting', 'amber'),
+    icon('chev', 16));
+}
 function requestCard(issue) {
   const req = marker(issue.body);
   if (req.type === 'mediaDefault' || req.type === 'search') return settingRequestCard(issue, req);
@@ -2486,7 +2504,7 @@ function requestCard(issue) {
       S.requests = S.requests.filter(i => i.number !== issue.number);
       const where = approving ? targets.filter(t => t.box.checked).map(t => t.label) : [];
       S.answered.unshift({ title, label: `${label}${where.length ? ', in ' + where.join(', ') : ''}` });
-      render();
+      backOrRender();
       say(`${label}. GitHub does it within a minute, and ${phone} is told a few minutes after.`);
     } catch (e) {
       actions.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -2584,7 +2602,7 @@ function answeredDetailsScreen() {
   const kids = [backLink('Requests'), screenTitle(title, `Request #${x.number} · ${status}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || x.phone} (${x.phone})` : x.phone),
-      x.asked ? kv('Asked', whenText(x.asked)) : null,
+      x.asked ? kv('Date asked', whenText(x.asked)) : null,
       noSite ? null : kv('What', req.action === 'block' ? (req.media === 'off' ? `Block only the ${mediaWords(req.mediaKind)}` : 'Block it')
         : req.media === 'on' ? (req.item ? 'One photo or video' : `Turn ${mediaWords(req.mediaKind)} back on`)
         : Array.isArray(req.frames) && req.frames.length ? 'Embedded content' : 'Open it'),
@@ -2592,12 +2610,9 @@ function answeredDetailsScreen() {
       kv('One item', req.item || null),
       isSet || req.action === 'block' ? null : kv(req.type === 'timer' ? 'Asked for' : 'How long', asked ? `${fmtMin(asked)}${req.timeMode === 'use' ? ', time on the site only' : ', from when it\'s approved'}` : 'Always'),
       kv('Note', req.note ? `“${req.note}”` : null),
-      kv('Answered', `${status === 'Approval undone' ? 'Undone' : status} ${answeredBy(a).replace(/^On/, 'on')}, ${whenText(a.at)}`),
-      kv('Reason', a.reason || null),
-      kv('It changed', !denied && changed.length ? changed.join('\n') : null),
-      kv('Phone told', a.message ? `“${a.message}”` : null),
-      kv('Before that', (x.earlier || []).length ? x.earlier.map(e => `${e.verdict === 'denied' ? 'Denied' : 'Approved'} ${answeredBy(e).replace(/^On/, 'on')}, ${whenText(e.at)}`).join('\n') : null),
-      kv('History', (x.log || []).length ? x.log.map(e => `${new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${String(e.text).replace(/\*\*/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\n+/g, ' ').slice(0, 300)}`).join('\n') : null))];
+      kv('Answered', `${answeredBy(a)}, ${whenText(a.at)}`),
+      kv('Reason', a.reason ? `“${a.reason}”` : (a.message ? `“${a.message}”` : null)),
+      kv('Before that', (x.earlier || []).length ? x.earlier.map(e => `${e.verdict === 'denied' ? 'Denied' : 'Approved'} ${answeredBy(e).replace(/^On/, 'on')}, ${whenText(e.at)}`).join('\n') : null))];
   const mayAnswer = isSet ? (canDo('manage') || fullAdmin()) : canDo('requests');
   if (mayAnswer && req.type !== 'register') {
     if (!denied && a.undoable) {
@@ -2650,7 +2665,7 @@ function browserRequestCard(issue, req) {
       S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
       S.requests = S.requests.filter(i => i.number !== issue.number);
       S.answered.unshift({ title: `A new browser: ${label}`, label: `${labelTxt} for ${phone}` });
-      render();
+      backOrRender();
       say(`${labelTxt}. GitHub does it within a minute, and ${phone} is told a few minutes after.`);
     } catch (e) { actions.querySelectorAll('button').forEach(b => b.disabled = false); say(e.message === 'NO_ISSUES' ? NO_ISSUES_MSG : e.message, true); }
   };
@@ -2687,7 +2702,7 @@ function timerRequestCard(issue, req) {
       S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
       S.requests = S.requests.filter(i => i.number !== issue.number);
       S.answered.unshift({ title, label: `${label} for ${phone}` });
-      render();
+      backOrRender();
       say(`${label}. GitHub does it within a minute, and ${phone} is told a few minutes after.`);
     } catch (e) { actions.querySelectorAll('button').forEach(b => b.disabled = false); say(e.message === 'NO_ISSUES' ? NO_ISSUES_MSG : e.message, true); }
   };
@@ -2751,16 +2766,16 @@ function requestDetailsScreen() {
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
-      kv('Asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
+      kv('Date asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
       kv('Note', field(issue.body, 'Note') ? `“${field(issue.body, 'Note')}”` : null),
-      kv('History', (issue._log || []).length ? issue._log.map(e => `${new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${String(e.text).replace(/\*\*/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\n+/g, ' ').slice(0, 300)}`).join('\n') : null)),
+      null),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
     requestCard(issue));
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Requests'),
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
-      kv('Asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
+      kv('Date asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
       kv('What', req.action === 'block' ? (req.media === 'off' ? `Block only the ${mediaWords(req.mediaKind)}` : 'Block it')
         : req.media === 'on' ? (req.item ? 'One photo or video' : `Turn ${mediaWords(req.mediaKind)} back on`)
         : Array.isArray(req.frames) && req.frames.length ? 'Embedded content' : 'Open it'),
@@ -2774,8 +2789,7 @@ function requestDetailsScreen() {
       kv('Note', field(issue.body, 'Note') ? `“${field(issue.body, 'Note')}”` : null),
       kv('Passes through', hopText.length ? hopText.join('\n') : null),
       kv('On a filter list', Array.isArray(req.filtered) && req.filtered.length ? req.filtered.join(', ') : null),
-      kv('Unverified', req.unverified ? 'The phone couldn\'t find this site when asking: check for a typo' : null),
-      kv('History', (issue._log || []).length ? issue._log.map(e => `${new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${String(e.text).replace(/\*\*/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\n+/g, ' ').slice(0, 300)}`).join('\n') : null)),
+      kv('Unverified', req.unverified ? 'The phone couldn\'t find this site when asking: check for a typo' : null)),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
     requestCard(issue));
 }
@@ -2805,7 +2819,7 @@ function settingRequestCard(issue, req) {
       S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
       S.requests = S.requests.filter(i => i.number !== issue.number);
       S.answered.unshift({ title, label: `${label} for ${phone}` });
-      render();
+      backOrRender();
       say(`${label}. GitHub does it within a minute, and ${phone} is told a few minutes after.`);
     } catch (e) {
       actions.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -3064,7 +3078,7 @@ function siteScreen() {
       toggle('sSubs', 'Include subdomains', `Also m.${bare}, and other addresses ending in ${bare}`, 'subdomains'),
       toggle('sOnly', 'Only some pages', 'Everything else on the site stays blocked', 'only')),
     pages,
-    siteMedia(d),
+    siteMediaCompact(d, isNew),
     h('div', { class: 'group' },
       toggle('sFrames', 'Allow content embedded from other sites', 'Embedded videos, maps and sign-in boxes work, from any site. Leaving this site is still blocked, and the ad and adult filters still apply.', 'frames')),
     d.frames ? h('p', { class: 'warn' }, 'Only for sites you trust: whatever this site chooses to embed will show, even from sites that aren\'t on your lists.') : null,
@@ -3082,15 +3096,49 @@ function siteScreen() {
         return h('button', { type: 'button', class: 'lc pick', id: 'sOff_' + k, 'aria-pressed': String(off), onclick: () => {
           d.filtersOff = off ? d.filtersOff.filter(x => x !== k) : [...d.filtersOff, k]; render(); } }, off ? icon('check', 15, 2.4) : null, t);
       }))),
-    h('details', { class: 'more' }, h('summary', null, 'More options'),
-      h('div', { class: 'field', style: 'margin-top:8px' }, h('label', { for: 'sUrl' }, 'Where the tile opens (optional)'), url,
-        h('p', { class: 'hint', style: 'margin:0' }, 'Leave empty to open the site\'s front page.'))),
     !isNew && normalize(d.domain) ? h('a', { href: '#', class: 'tempcard', onclick: e => { e.preventDefault(); open({ name: 'temp', entry: normalize(d.domain), what: 'site' }); } },
       icon('clock', 20), h('span', { class: 'grow' }, 'Open it temporarily instead'), icon('chev', 18)) : null,
     h('button', { type: 'button', class: 'btn p wide', id: 'sDone', onclick: done }, isNew ? 'Add site' : 'Done'),
     !isNew ? h('button', { type: 'button', class: 'btn d', id: 'sRemove', onclick: remove }, 'Remove this site') : null);
 }
 
+// The small photos/videos/sound row on the site screen: one Open/Blocked/Default choice for all three at once, with a
+// "Set each" disclosure that opens the full per-part control and this site's always-blocked pages. Stays on this one
+// screen (no navigating away) so a half-typed new site is never lost.
+function siteMediaCompact(d, isNew) {
+  const agg = MKINDS.map(([k]) => { const K = capFirst(k); return d['no' + K] ? 'blocked' : d['on' + K] ? 'open' : 'default'; });
+  const uniform = agg.every(v => v === agg[0]) ? agg[0] : 'mixed';
+  const setAll = nv => { MKINDS.forEach(([k]) => { const K = capFirst(k); d['no' + K] = nv === 'blocked'; d['on' + K] = nv === 'open'; }); render(); };
+  const dom = (normalize(d.domain) || '').replace(/^www\./, '');
+  // This site's always-blocked pages (the subset of the list's "always blocked" that's on this site).
+  const mine = dom ? S.L.block.filter(b => pageOnSite(b, dom, d.subdomains)) : [];
+  const ta = h('textarea', { class: 'inp', id: 'sBlockHere', rows: 3, placeholder: dom ? `${dom}/forum` : 'e.g. example.com/forum',
+    autocapitalize: 'off', spellcheck: 'false', style: 'min-height:72px;padding-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:13px' }, mine.join('\n'));
+  const saveBlk = () => {
+    const lines = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
+    const bad = lines.filter(l => !blockEntry(l));
+    if (bad.length) { ta.classList.add('bad'); return say(`These don't look like page addresses: ${bad.join(', ')}`, true); }
+    ta.classList.remove('bad');
+    const cleaned = lines.map(l => blockEntry(l));
+    const others = S.L.block.filter(b => !(dom && pageOnSite(b, dom, d.subdomains)));   // keep entries for other sites
+    const next = [...new Set([...others, ...cleaned])];
+    if (next.join('\n') !== S.L.block.join('\n')) { S.L.block = next; markList(); say('Always-blocked pages updated. Tap Save to apply it.'); }
+  };
+  ta.addEventListener('change', saveBlk);
+  return h('div', { class: 'stack', style: 'gap:8px' },
+    // Label and note on their own lines (full width), the segment below — so the text isn't squeezed next to the buttons.
+    h('div', { class: 'mrow' },
+      h('b', null, 'Photos, videos and sound'),
+      h('span', { class: 's' }, uniform === 'mixed' ? 'Set differently per part — open “Set each” below' : 'Tap “Set each” to split them'),
+      h('div', { style: 'margin-top:4px' }, obSeg('Photos, videos and sound', uniform === 'mixed' ? '' : uniform, setAll,
+        { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMediaAll' }))),
+    h('details', { class: 'more' }, h('summary', null, 'Set each & add always-blocked pages'),
+      h('div', { style: 'margin-top:10px' }, siteMedia(d)),
+      h('div', { class: 'field', style: 'margin-top:12px' }, h('span', { class: 'flabel' }, 'Always blocked here'),
+        dom ? h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Pages of this site to keep blocked, even though the site is open. One per line.')
+            : h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Type the address above first, then add pages of this site to keep blocked here.'),
+        dom ? ta : null)));
+}
 // A site's photos, videos and sound: Default (each phone's own default), Open or Blocked (for every phone using this list).
 function siteMedia(d) {
   const users = Object.entries(S.D.devices).filter(([, x]) => (x.lists || []).includes(S.current)).map(([, x]) => x);
@@ -3106,8 +3154,12 @@ function siteMedia(d) {
     h('span', { class: 'flabel', style: 'margin-top:4px' }, 'Photos, videos and sound on this site'),
     h('div', { class: 'mrows' }, MKINDS.map(([k, t]) => {
       const K = capFirst(k), v = d['no' + K] ? 'blocked' : d['on' + K] ? 'open' : 'default';
-      return h('div', { class: 'mrow' }, h('div', { class: 'top' }, h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, t), h('span', { class: 's' }, DESC[k])),
-        obSeg(t, v, nv => { d['no' + K] = nv === 'blocked'; d['on' + K] = nv === 'open'; render(); }, { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMedia_' + k })),
+      // Short label beside the buttons; the longer description sits on its own full-width line below (so it doesn't
+      // get squeezed into a tall, narrow column next to the three-wide segment).
+      return h('div', { class: 'mrow' },
+        h('div', { class: 'top' }, h('b', null, t),
+          obSeg(t, v, nv => { d['no' + K] = nv === 'blocked'; d['on' + K] = nv === 'open'; render(); }, { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMedia_' + k })),
+        h('span', { class: 's' }, DESC[k]),
         h('span', { class: 's', 'data-sub': k }, sub(k, v)));
     })),
     h('div', { class: 'explain' },
@@ -3125,26 +3177,31 @@ function tempScreen() {
   const host = h('div', { 'data-sync': '' });
   const picker = makePicker(host, sub.minutes || 30, m => { sub.minutes = m; len.textContent = `How long: ${fmtMin(m)}`; });
   host._picker = picker;
+  if (sub.what === 'media' && !sub.mediaSel) sub.mediaSel = ['photos', 'videos', 'sound'];
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'What to open' },
-    [['site', 'Whole site'], ['page', 'One page'], ['media', 'Photos/videos']].map(([v, t]) => {
-      const on = v === 'media' ? MEDIA_T.includes(sub.what) : sub.what === v;
-      return h('button', { type: 'button', 'aria-pressed': String(on), onclick: () => { if (!(v === 'media' && on)) { sub.what = v; render(); } } }, t);
-    }));
-  // Photos and videos back on for a while: which of them.
-  const seg2 = MEDIA_T.includes(sub.what) ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Which' },
-    [['photos', 'Photos'], ['videos', 'Videos'], ['sound', 'Sound'], ['media', 'All']].map(([v, t]) =>
-      h('button', { type: 'button', 'aria-pressed': String(sub.what === v), onclick: () => { sub.what = v; render(); } }, t))) : null;
+    [['site', 'Whole site'], ['page', 'One page'], ['media', 'Photos/videos/sound']].map(([v, t]) =>
+      h('button', { type: 'button', 'aria-pressed': String(sub.what === v), onclick: () => { if (sub.what !== v) { sub.what = v; if (v === 'media' && !sub.mediaSel) sub.mediaSel = ['photos', 'videos', 'sound']; render(); } } }, t)));
+  // Photos, videos and sound: pick any (more than one is fine) — no "All".
+  const toggleMedia = v => { const s = new Set(sub.mediaSel || []); if (s.has(v)) s.delete(v); else s.add(v); sub.mediaSel = [...s]; render(); };
+  const seg2 = sub.what === 'media' ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Which' },
+    [['photos', 'Photos'], ['videos', 'Videos'], ['sound', 'Sound']].map(([v, t]) =>
+      h('button', { type: 'button', 'aria-pressed': String((sub.mediaSel || []).includes(v)), onclick: () => toggleMedia(v) }, t))) : null;
   const radio = (v, t, s) => h('label', { class: 'radio' }, h('input', { type: 'radio', name: 'tMode', value: v, checked: sub.mode === v, onchange: () => { sub.mode = v; } }),
     h('span', null, h('b', { style: 'font-weight:600' }, t), h('span', { class: 'small muted', style: 'display:block' }, s)));
   const add = () => {
     const raw = (sub.entry || '').trim();
-    const entry = sub.what === 'page' || (MEDIA_T.includes(sub.what) && hasPath(raw)) ? pageKey(raw) : normalize(raw);
+    const isMedia = sub.what === 'media';
+    const entry = sub.what === 'page' || (isMedia && hasPath(raw)) ? pageKey(raw) : normalize(raw);
     if (!entry) return say(sub.what === 'page' ? 'Type the page address, e.g. youtube.com/watch?v=abc' : 'Type a website address.', true);
     if (sub.what === 'page' && !hasPath(raw)) return say('For One page, type the full page address.', true);
+    const kinds = isMedia ? (sub.mediaSel || []) : [sub.what];
+    if (isMedia && !kinds.length) return say('Pick at least one of photos, videos or sound.', true);
     const minutes = picker.get();
     if (!minutes) return say('Choose how long on the wheels.', true);
-    S.L.temporary = S.L.temporary.filter(t => !(t.what === sub.what && t.entry === entry));
-    S.L.temporary.push({ id: 't' + Date.now().toString(36), what: sub.what, entry, mode: sub.mode, minutes, from: new Date().toISOString() });
+    kinds.forEach(k => {
+      S.L.temporary = S.L.temporary.filter(t => !(t.what === k && t.entry === entry));
+      S.L.temporary.push({ id: 't' + Date.now().toString(36) + k, what: k, entry, mode: sub.mode, minutes, from: new Date().toISOString() });
+    });
     markList(); back();
     say(`${entry}: ${fmtMin(minutes)}${sub.mode === 'use' ? ' of use' : ''}. Tap Save to apply it.`);
   };
@@ -3291,7 +3348,7 @@ function importScreen() {
     } catch (e) { say(e.message, true); }
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites'),
-    screenTitle('Import from a spreadsheet', `Into ${listLabel(S.current)}`),
+    screenTitle('Import or download a spreadsheet', `Into ${listLabel(S.current)}`),
     h('p', { class: 'hint' }, 'Paste cells from Excel or Google Sheets, or choose a file. Columns: domain, name, home page, tile opens, subdomains, only these pages, no photos or videos. Only the domain is needed.'),
     ta, h('div', { class: 'field' }, h('label', { for: 'bulkFile' }, 'Or choose a file (.csv, .xlsx)'), file),
     h('div', { class: 'group' }, mode('merge'), mode('replace')),
@@ -3305,10 +3362,6 @@ function importScreen() {
 // ---------- list settings ----------
 function listSettingsScreen() {
   const L = S.L;
-  const home = h('input', { class: 'inp', id: 'lHome', value: L.homepage, placeholder: 'Empty = the built-in home page', autocapitalize: 'off', spellcheck: 'false',
-    oninput: e => { L.homepage = e.target.value; markList(); } });
-  const val = h('span', null, `${L.refreshMinutes} min`);
-  const step = d => { L.refreshMinutes = Math.max(1, Math.min(1440, L.refreshMinutes + d)); val.textContent = `${L.refreshMinutes} min`; markList(); };
   const users = phonesUsing(S.current);
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites'),
     screenTitle(S.current === 'public' ? listLabel(S.current) : `${listLabel(S.current)} list`,
@@ -3321,13 +3374,9 @@ function listSettingsScreen() {
         if (on) set.add(S.current); else set.delete(S.current);
         S.D.publicLists = [...set]; markDevices();
       } }))) : null,
-    h('div', { class: 'field' }, h('label', { for: 'lHome' }, 'Start page'), home, h('p', { class: 'hint', style: 'margin:0' }, 'The page the app opens on. Leave empty for the home page with tiles.')),
-    h('div', { class: 'group' }, h('div', { class: 'tg', style: 'cursor:default' }, h('span', { class: 'grow' }, h('span', { class: 't' }, 'Phones check for changes every'),
-      h('span', { class: 's' }, 'Lower is quicker, but uses a little more data')),
-      h('div', { class: 'stepper' }, h('button', { type: 'button', 'aria-label': 'Fewer minutes', onclick: () => step(-1) }, '−'), val, h('button', { type: 'button', 'aria-label': 'More minutes', onclick: () => step(1) }, '+')))),
     // Import, and the list-wide overviews (each site's own are in its settings).
     h('div', { class: 'group' },
-      settingsRow('table', 'Import from a spreadsheet', null, () => open({ name: 'import' }), 'openImport'),
+      settingsRow('table', 'Import or download a spreadsheet', null, () => open({ name: 'import' }), 'openImport'),
       settingsRow('photooff', 'Pages without photos, videos or sound (all sites)', new Set([...L.noPhotoPages, ...L.noVideoPages, ...L.noSoundPages]).size,
         () => open({ name: 'nomedia' }), 'openNoMedia'),
       settingsRow('link', 'Embedded content allowed (all sites)', Object.values((L.extra && L.extra.embeds) || {}).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0),
@@ -3655,6 +3704,8 @@ function phoneScreen() {
   const own = isOwner(), M = fullAdmin() || canDo('manage'), E = fullAdmin() || canDo('edit');
   const first = h('input', { class: 'inp', id: 'pFirst', value: d.first || '', placeholder: 'e.g. Emma', readonly: !M, oninput: e => { d.first = e.target.value; setName(); } });
   const last = h('input', { class: 'inp', id: 'pLast', value: d.last || '', placeholder: 'e.g. Smith', readonly: !M, oninput: e => { d.last = e.target.value; setName(); } });
+  // The owner's email, typed at setup on the phone. Editable by the main admin; kept in devices.json.
+  const email = h('input', { class: 'inp', id: 'pEmail', type: 'email', value: d.email || '', placeholder: 'e.g. parent@email.com', readonly: !M, oninput: e => { const v = e.target.value.trim(); if (v !== (d.email || '')) delete d.emailConfirmed; if (v) d.email = v; else delete d.email; markDevices(); render(); } });
   const lists = h('div', { class: 'chips', style: 'gap:8px' }, S.lists.map(l => {
     const on = (d.lists || []).includes(l);
     return h('button', { type: 'button', class: 'lc pick', 'aria-pressed': String(on), disabled: !!d.blocked || !E, onclick: () => {
@@ -3701,6 +3752,9 @@ function phoneScreen() {
     h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:10px' },
       h('div', { class: 'field' }, h('label', { for: 'pFirst' }, 'First name'), first),
       h('div', { class: 'field' }, h('label', { for: 'pLast' }, 'Last name'), last)),
+    h('div', { class: 'field' }, h('label', { for: 'pEmail' }, 'Owner\'s email'), email,
+      d.email ? h('p', { class: 'hint', style: `margin:0;${d.emailConfirmed ? 'color:var(--accent-text)' : ''}` },
+        d.emailConfirmed ? '✓ Confirmed by the owner.' : 'Not confirmed yet — the owner enters the emailed code on the phone.') : null),
     // My requests PIN locked (5 wrong PINs): a yellow banner at the top, with Unlock.
     locked ? h('div', { class: 'warn', id: 'pinLockedBanner', style: 'display:flex;align-items:center;gap:10px;flex-wrap:wrap' },
       h('span', { style: 'flex:1;min-width:12rem' }, `My requests PIN is locked (5 wrong PINs), until ${new Date(d.pinLockedUntil).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`),
@@ -3731,9 +3785,10 @@ function phoneScreen() {
       locked ? null
         : h('button', { type: 'button', class: 'btn s sm', id: 'pinUnlockAny', onclick: () => unlockPin(id) }, 'Unlock PIN approvals on this phone'),
       locked ? null : h('p', { class: 'hint', style: 'margin:0' }, 'If the phone says PIN approval is locked, this unlocks it (it picks it up within a few minutes).')),
-    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Ads'), ads),
-    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Filters'), ...filterRows,
-      h('p', { class: 'hint', style: 'margin:0' }, 'Usual follows Settings → Filters.')),
+    h('details', { class: 'more' }, h('summary', null, 'Ads & content filters'),
+      h('div', { class: 'field', style: 'margin-top:8px' }, h('span', { class: 'flabel' }, 'Ads'), ads),
+      h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Filters'), ...filterRows,
+        h('p', { class: 'hint', style: 'margin:0' }, 'Usual follows Settings → Filters.'))),
     h('label', { class: 'tg', for: 'pAdmin' }, h('span', { class: 'grow' }, h('span', { class: 't' }, 'Admin phone'),
         h('span', { class: 's' }, 'Gets phone notifications about new requests, logs and crashes (it can switch them off in its Settings)')),
       h('input', { type: 'checkbox', class: 'sw', id: 'pAdmin', checked: d.admin === true, onchange: e => {
@@ -3765,15 +3820,14 @@ function phoneSeenPart(id, d, M) {
 function phoneMediaAndSearch(d, M) {
   const fname = firstName(d), who = possessive(fname);
   const sw = (id, on, change, disabled) => h('input', { type: 'checkbox', class: 'sw', id, checked: on, disabled, onchange: e => change(e.target.checked) });
-  return h('div', { class: 'stack', style: 'gap:12px' },
-    h('div', { class: 'stack', style: 'gap:8px' },
-      h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound: this phone\'s default'),
-        h('span', { class: 'hint', style: 'margin:0' }, 'On every site this phone opens, unless that site is set to Open or Blocked on its own.')),
-      defaultRows(k => defBlocks(d, k) ? 'blocked' : 'open', (k, v) => { setDefault(d, k, v); markDevices(); render(); }, !M, 'pMedia_'),
-      h('div', { class: 'warn', style: 'margin:0' }, `Changing this changes every site on ${who} phone that's on Default, straight away. Sites set to Open or Blocked stay as they are.`)),
-    h('div', { class: 'stack', style: 'gap:8px' },
+  return h('div', { class: 'stack', style: 'gap:10px' },
+    h('div', { class: 'stack', style: 'gap:6px' },
+      h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound'),
+        h('span', { class: 'hint', style: 'margin:0' }, `The default on every site, unless a site is set to Open or Blocked on its own. Changing it changes every site on ${who} phone that's on Default, straight away.`)),
+      defaultRows(k => defBlocks(d, k) ? 'blocked' : 'open', (k, v) => { setDefault(d, k, v); markDevices(); render(); }, !M, 'pMedia_')),
+    h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Text search'),
-        h('span', { class: 'hint', style: 'margin:0' }, 'A search box on this phone. Results are words only (no pictures, videos or sound), safe search on, and nothing the filters block. Opening a result follows this phone\'s lists as usual.')),
+        h('span', { class: 'hint', style: 'margin:0' }, 'A search box, words only (no pictures, video or sound), safe search on, nothing the filters block. Opening a result follows this phone\'s lists.')),
       h('div', { class: 'mrows' },
         h('div', { class: 'mrow' }, h('div', { class: 'top' }, h('b', null, 'Text search'),
           obSeg('Text search', d.search === true ? 'open' : 'blocked', v => { if (v === 'open') d.search = true; else { delete d.search; delete d.searchApprovedOnly; } markDevices(); render(); },
@@ -3988,13 +4042,6 @@ function settingsScreen() {
         h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'PIN for all phones'),
           h('span', { class: 'dom' }, D.approvalPin ? 'Set: type it on a phone to approve a request there' : 'Not set')),
         h('span', { class: 'chev' }, icon('chev', 18))))),
-    !isOwner() ? null : section('Notifications', h('div', { class: 'group' },
-      h('a', { class: 'row', id: 'ghEmails', href: 'https://github.com/settings/notifications', target: '_blank', rel: 'noopener' },
-        h('span', { class: 'ic' }, icon('bell', 20)),
-        h('span', { class: 'grow' }, h('span', { class: 't' }, 'Turn off GitHub emails'),
-          h('span', { class: 's' }, 'Opens GitHub\'s notification settings: under "Participating", untick Email. ' +
-            'Turn on phone notifications first (Phones → your phone → Admin phone), so you\'re never without either.')),
-        h('span', { class: 'chev' }, icon('chev', 18))))),
     accountSection(section),
     INAPP && !ADMINAPP ? h('button', { type: 'button', class: 'btn s wide', onclick: () => $('closeBtn').click() }, 'Close admin and go back to the browser') : null);
 }
@@ -4132,7 +4179,7 @@ function phoneBrowsers(id, d, M) {
   return h('div', { class: 'field', id: 'pBrowsers' },
     h('button', { type: 'button', class: 'row tap', style: 'width:100%;text-align:left', onclick: () => open({ name: 'browsers', id }) },
       h('span', { class: 'ic' }, icon('globe', 20)),
-      h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, 'Only this browser'),
+      h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, 'Block other browsers'),
         h('span', { class: 'dom' }, browsersSummary(id, d))),
       icon('chev', 16)));
 }
@@ -4156,7 +4203,7 @@ function browsersScreen() {
   })();
   const name = firstName(d);
   const setMode = v => { const pr = ensureProtect(d); pr.mode = v; markDevices(); render(); };
-  const appRow = a => {
+  const appRow = (a, added) => {
     const dec = appDecision(d, a);
     return h('div', { class: 'row', style: 'align-items:center;gap:10px' },
       h('span', { class: 'av', style: 'background:var(--chipoff);color:var(--ink2)' }, (a.label || '?')[0].toUpperCase()),
@@ -4164,7 +4211,11 @@ function browsersScreen() {
         h('span', { class: 'dom mono', style: 'font-size:11px' }, a.pkg)),
       h('div', { class: 'seg', role: 'group', 'aria-label': `${a.label}: allow or block`, style: 'flex:none;width:9.5rem' },
         [['allow', 'Allow'], ['block', 'Block']].map(([v, t]) => h('button', { type: 'button', class: v === 'block' ? 'strict' : '', 'aria-pressed': String(dec === v),
-          disabled: !M, onclick: () => { const pr = ensureProtect(d); pr.apps[a.pkg] = v; markDevices(); render(); } }, t))));
+          disabled: !M, onclick: () => {
+            const pr = ensureProtect(d);
+            // An app you added yourself drops off this list once you set it to Allow; real browsers stay listed.
+            if (added && v === 'allow') delete pr.apps[a.pkg]; else pr.apps[a.pkg] = v;
+            markDevices(); render(); } }, t))));
   };
   // Add an app the phone didn't flag as a browser (one with its own web view).
   const addApp = async () => {
@@ -4182,7 +4233,7 @@ function browsersScreen() {
     h('input', { type: 'checkbox', class: 'sw', checked: on, disabled: !!disabled, onchange: e => { change(e.target.checked); markDevices(); render(); } }));
   const isOwner = seenProtect(id) && seenProtect(id).owner;
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(d.name || id, () => open({ name: 'phone', id })),
-    screenTitle('Only this browser', `Keep this the only way ${name} can open websites`),
+    screenTitle('Block other browsers', `Keep this the only way ${name} can open websites`),
     // What's set up on the phone now.
     h('div', { class: 'card', style: 'gap:8px' },
       h('div', { style: 'display:flex;align-items:center;gap:8px' }, h('b', { style: 'flex:1' }, 'Protection on the phone'),
@@ -4208,9 +4259,10 @@ function browsersScreen() {
       M ? h('div', { style: 'display:flex;gap:8px;margin-top:8px' },
         h('button', { type: 'button', class: 'btn s sm', onclick: addApp }, icon('plus', 15, 2.4), 'Add an app')) : null),
     // Apps you added (not browsers): their own list, same style, each with Allow / Block.
-    (addedList.length || M) ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Apps you added'),
-      addedList.length ? h('div', { class: 'group' }, addedList.map(appRow))
-        : h('p', { class: 'hint', style: 'margin:0' }, 'None yet. Use Add an app above to block an app that isn\'t a web browser (a game with its own web window, say).')) : null,
+    (addedList.length || M) ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Apps you added to block'),
+      addedList.length ? h('div', { class: 'group' }, addedList.map(a => appRow(a, true)))
+        : h('p', { class: 'hint', style: 'margin:0' }, 'None yet. Use Add an app above to block an app that isn\'t a web browser (a game with its own web window, say).'),
+      addedList.length ? h('p', { class: 'hint', style: 'margin:0' }, 'Set one to Allow and it drops off this list. Only phone-detected browsers stay.') : null) : null,
     M ? sw('Block new browsers straight away', 'A newly installed browser is blocked at once; you\'re asked, and can allow it.', p.blockNew !== false, v => { ensureProtect(d).blockNew = v; }) : null,
     h('p', { class: 'hint' }, 'This protection is visible on the phone: a blocked app shows a plain screen saying the browser is managed, and who by. You can switch it all off here at any time.'));
 }
