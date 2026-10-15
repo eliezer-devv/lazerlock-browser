@@ -3895,7 +3895,7 @@ class MainActivity : Activity() {
         val name = Device.name(this) ?: "Not registered yet"
         menuSheet("Settings", null, null, listOf(
             Triple(R.drawable.ic_d_theme, "Appearance" to look) { showAppearance() },
-            Triple(R.drawable.ic_d_user, "This phone" to "Photos, videos and sound · Search · My activity · Phone's browser") { showThisPhone() },
+            Triple(R.drawable.ic_d_user, "Phone protection" to "Photos, videos and sound · Search · My activity · Phone's browser") { showThisPhone() },
             Triple(R.drawable.ic_d_cookie, "Cookies and cache" to "Sign out of sites, free up space") { showCookiesAndCache() },
             Triple(R.drawable.ic_d_update, "App update" to "Version ${BuildConfig.VERSION_NAME}. Check for a new one") { checkForUpdate(manual = true) },
             Triple(R.drawable.ic_d_user, "About this phone" to "$name · ${Device.id(this)}") { showAbout() }))
@@ -3903,7 +3903,7 @@ class MainActivity : Activity() {
 
     /** Settings → This phone: its default for photos, videos and sound, search, my activity, and being the phone's browser. */
     private fun showThisPhone() {
-        menuSheet("This phone", "Settings", { showSettings() }, listOf(
+        menuSheet("Phone protection", "Settings", { showSettings() }, listOf(
             Triple(R.drawable.ic_d_photo, "Photos, videos and sound" to ("This phone's default: " + Whitelist.MEDIA_KINDS.joinToString(", ") { k ->
                 "$k ${if (Whitelist.defaultBlocks(k)) "blocked" else "open"}" })) { showPhoneDefault() },
             Triple(R.drawable.ic_d_search, "Search" to searchNow()) { showSearchSettings() },
@@ -3932,7 +3932,7 @@ class MainActivity : Activity() {
         val admin = DeviceOwner.isAdminActive(this)
         val cover = GuardService.running
         val d = Ui.AppDialog(this, sheet = true)
-        d.add(Ui.text(this, "‹ This phone", 15f, Ui.ACCENT_TEXT, "bold").apply {
+        d.add(Ui.text(this, "‹ Phone protection", 15f, Ui.ACCENT_TEXT, "bold").apply {
             minHeight = Ui.dp(this@MainActivity, 36); gravity = android.view.Gravity.CENTER_VERTICAL
             setOnClickListener { d.dismiss(); showThisPhone() }
         }, 0)
@@ -4182,7 +4182,7 @@ class MainActivity : Activity() {
     private fun showMyActivity(days: Int = 1) {
         runCatching { MyActivity.save(applicationContext) }.logged("Activity", "Saving")
         val d = Ui.AppDialog(this, sheet = true)
-        d.add(Ui.text(this, "‹ This phone", 15f, Ui.ACCENT_TEXT, "bold").apply {
+        d.add(Ui.text(this, "‹ Phone protection", 15f, Ui.ACCENT_TEXT, "bold").apply {
             minHeight = Ui.dp(this@MainActivity, 36); gravity = android.view.Gravity.CENTER_VERTICAL
             setOnClickListener { d.dismiss(); showThisPhone() }
         }, 0)

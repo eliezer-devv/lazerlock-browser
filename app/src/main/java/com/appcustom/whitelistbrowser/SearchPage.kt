@@ -38,32 +38,33 @@ object SearchPage {
         body.append("<form class=\"search\" action=\"/search/\" method=\"get\" role=\"search\">")
             .append(ICON_SEARCH)
             .append("<input type=\"search\" name=\"q\" value=\"${esc(q)}\" placeholder=\"Search\" aria-label=\"Search\" autocomplete=\"off\" enterkeyhint=\"search\"")
-            .append(if (q.isEmpty()) " autofocus" else "").append("></form>")
+            .append(if (q.isEmpty()) " autofocus" else "").append(">")
+            .append("<button class=\"go\" type=\"submit\" aria-label=\"Search\">").append(ICON_SEARCH).append("</button></form>")
         when {
             !Whitelist.searchOn() && s.search -> body.append("<p class=\"note\">Search is off during ${esc(Timers.activeNow().firstOrNull { it.search == "off" }?.name ?: "a timer")}.</p>")
             !Whitelist.searchOn() -> body.append("<p class=\"note\">Search isn't turned on for this phone. You can ask for it: ⋮ → Ask for search.</p>")
             q.isEmpty() -> body.append("<p class=\"note\">Type what you're looking for.</p>")
             else -> try {
+                // One page at a time, with numbered page links at the foot (no more cumulative "More results").
+                val got = Discovery.searchPages(q, pages)
                 val shown = ArrayList<String>()
-                var firstOfLast = 0
-                var lastPageHadResults = true
-                for (p in 0..pages) {
-                    val got = Discovery.searchPages(q, p)
-                    if (p == pages) firstOfLast = shown.size
-                    lastPageHadResults = got.isNotEmpty()
-                    for (r in got) {
-                        if (Whitelist.hiddenFromSearch(r.url)) continue          // filtered or always blocked: not shown
-                        val opens = Whitelist.isAllowed(r.url)
-                        if (s.searchApprovedOnly && !opens) continue
-                        shown += result(r, opens, if (shown.size == firstOfLast && p == pages && p > 0) "more" else null)
-                    }
-                    if (got.isEmpty()) break
+                for (r in got) {
+                    if (Whitelist.hiddenFromSearch(r.url)) continue              // filtered or always blocked: not shown
+                    val opens = Whitelist.isAllowed(r.url)
+                    if (s.searchApprovedOnly && !opens) continue
+                    shown += result(r, opens, null)
                 }
-                if (shown.isEmpty()) body.append("<p class=\"note\">No results. Try other words.</p>")
+                if (shown.isEmpty()) body.append("<p class=\"note\">${if (pages == 0) "No results. Try other words." else "No more results."}</p>")
                 else shown.forEach { body.append(it) }
-                if (lastPageHadResults && pages < 9)
-                    body.append("<a class=\"more\" href=\"/search/?q=${esc(URLEncoder.encode(q, "UTF-8"))}&amp;p=${pages + 1}#more\">More results</a>")
-                AppLog.i("Search", "Searched (${shown.size} results shown)")
+                val hasNext = got.isNotEmpty() && pages < 9
+                if (pages > 0 || hasNext) {
+                    body.append("<nav class=\"pager\" aria-label=\"Pages\">")
+                    if (pages > 0) body.append(pageLink(q, pages - 1, "‹", false))
+                    for (i in 0..pages) body.append(pageLink(q, i, (i + 1).toString(), i == pages))
+                    if (hasNext) body.append(pageLink(q, pages + 1, "›", false))
+                    body.append("</nav>")
+                }
+                AppLog.i("Search", "Searched (${shown.size} results shown, page ${pages + 1})")
             } catch (e: Discovery.Challenge) {
                 body.append("<div class=\"note\"><p>DuckDuckGo wants to check that a person is searching (there have been many searches).</p>")
                     .append("<a class=\"btn\" href=\"wlb://search-check?u=${esc(URLEncoder.encode(e.url, "UTF-8"))}\">Answer the check</a></div>")
@@ -91,6 +92,12 @@ object SearchPage {
             "<span class=\"tag ${if (opens) "ok" else "ask"}\">${if (opens) "Opens on this phone" else "Ask to open this page"}</span></article>"
     }
 
+    /** A numbered page link (or the ‹ / › arrows) for the search results foot. */
+    private fun pageLink(q: String, p: Int, label: String, current: Boolean): String {
+        val href = "/search/?q=${esc(URLEncoder.encode(q, "UTF-8"))}" + if (p > 0) "&amp;p=$p" else ""
+        return "<a class=\"pg${if (current) " on" else ""}\"${if (current) " aria-current=\"page\"" else ""} href=\"$href\">$label</a>"
+    }
+
     private const val ICON_SEARCH = "<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-4-4\"/></svg>"
 
     private val PAGE = """<!doctype html>
@@ -106,10 +113,15 @@ object SearchPage {
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 Figtree, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
   main { max-width: 40rem; margin: 0 auto; padding: .9rem 1rem 3rem; display: flex; flex-direction: column; gap: .7rem; }
-  .search { display: flex; align-items: center; gap: .6rem; min-height: 48px; border-radius: 24px; background: var(--tile); border: 1px solid var(--edge); padding: 0 1rem; }
-  .search svg { flex: none; color: var(--muted); }
+  .search { display: flex; align-items: center; gap: .6rem; min-height: 52px; border-radius: 26px; background: var(--tile); border: 1px solid var(--edge); padding: 0 .4rem 0 1.1rem; }
+  .search > svg { flex: none; color: var(--muted); }
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 44px; }
   .search:focus-within { border-color: var(--accent); }
+  .search .go { flex: none; width: 44px; height: 44px; border-radius: 15px; border: 0; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .search .go svg { color: #fff; }
+  .pager { display: flex; justify-content: center; align-items: center; gap: .4rem; margin: .5rem 0 .2rem; }
+  .pager .pg { min-width: 40px; height: 40px; padding: 0 .55rem; border-radius: 11px; border: 1px solid var(--edge); background: var(--tile); color: var(--muted); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
+  .pager .pg.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .r { background: var(--tile); border: 1px solid var(--edge); border-radius: 14px; padding: .75rem .9rem; display: flex; flex-direction: column; gap: .3rem; scroll-margin-top: .8rem; }
   .where { display: flex; align-items: center; gap: .5rem; min-width: 0; }
   .fav { flex: none; width: 22px; height: 22px; border-radius: 6px; background: var(--soft); color: var(--accent-text); display: grid; place-items: center; font-size: 12px; font-weight: 700; overflow: hidden; }

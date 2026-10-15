@@ -77,12 +77,14 @@
     .ask { margin-top: 1.4rem; padding: .7rem 1.1rem; font-size: .9rem; }
   }
   /* Text search (when it's on for this phone): words only, safe search on. */
-  .search { display: flex; align-items: center; gap: .6rem; min-height: 52px; border-radius: 26px; background: var(--tile);
-    border: 1px solid var(--edge); padding: 0 1.1rem; margin: 0 0 1.4rem; }
-  .search svg { flex: none; color: var(--muted); }
+  .search { display: flex; align-items: center; gap: .6rem; min-height: 54px; border-radius: 27px; background: var(--tile);
+    border: 1px solid var(--edge); padding: 0 .4rem 0 1.1rem; margin: 0 0 1.4rem; }
+  .search > svg { flex: none; color: var(--muted); }
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 48px; }
   .search input::placeholder { color: var(--muted); }
   .search:focus-within { border-color: var(--accent); }
+  .search .go { flex: none; width: 44px; height: 44px; border-radius: 15px; border: 0; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .search .go svg { color: #fff; }
   .search[hidden] { display: none; }
   /* Folders: small versions of the first four tiles; drop a tile on another to make one. */
   .icon.fold { background: var(--soft); border-color: transparent; display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; gap: 4px; padding: 7px; box-sizing: border-box; place-items: stretch; }
@@ -114,6 +116,7 @@
   <form class="search" id="search" action="/search/" method="get" role="search" hidden>
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
     <input type="search" name="q" placeholder="Search" aria-label="Search" autocomplete="off" enterkeyhint="search">
+    <button class="go" type="submit" aria-label="Search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button>
   </form>
   <h1 class="hello" id="hello">Your sites</h1>
   <div class="grid" id="grid"></div>
