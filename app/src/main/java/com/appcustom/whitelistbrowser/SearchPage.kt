@@ -32,7 +32,7 @@ object SearchPage {
     /** Called on the WebView's own thread for loading (not the main thread): searching here is fine. */
     fun respond(ctx: Context, uri: Uri): WebResourceResponse {
         val q = uri.getQueryParameter("q").orEmpty().trim().take(200)
-        val pages = (uri.getQueryParameter("p")?.toIntOrNull() ?: 0).coerceIn(0, 9)
+        val pages = (uri.getQueryParameter("p")?.toIntOrNull() ?: 0).coerceIn(0, MAX_PAGES - 1)
         val s = Whitelist.state
         val body = StringBuilder()
         body.append("<form class=\"search\" action=\"/search/\" method=\"get\" role=\"search\">")
@@ -44,10 +44,7 @@ object SearchPage {
             !Whitelist.searchOn() -> body.append("<p class=\"note\">Search isn't turned on for this phone. You can ask for it: ⋮ → Ask for search.</p>")
             q.isEmpty() -> body.append("<p class=\"note\">Type what you're looking for.</p>")
             else -> try {
-                // One page at a time, with numbered page links at the foot. The highest page we've found (n) is
-                // carried in the address so the numbers don't vanish when you step back to an earlier page, and we
-                // peek one page ahead so "›" and the count only show a next page when there really is one.
-                val got = Discovery.searchPages(q, pages)
+                val got = Discovery.searchPages(q, pages)                        // current page (may throw Challenge)
                 val shown = ArrayList<String>()
                 for (r in got) {
                     if (Whitelist.hiddenFromSearch(r.url)) continue              // filtered or always blocked: not shown
@@ -55,28 +52,20 @@ object SearchPage {
                     if (s.searchApprovedOnly && !opens) continue
                     shown += result(r, opens, null)
                 }
-                val carried = (uri.getQueryParameter("n")?.toIntOrNull() ?: 0).coerceIn(0, 9)
-                val nextHas = when {
-                    pages < carried -> true                                       // already found a later page before
-                    pages < 9 && got.isNotEmpty() ->                              // at the frontier: peek one ahead
-                        runCatching { Discovery.searchPages(q, pages + 1).isNotEmpty() }.getOrDefault(false)
-                    else -> false
-                }
-                val knownMax = maxOf(carried, pages, if (nextHas) pages + 1 else pages)
+                // The total number of pages (up front, so the foot shows 1 2 3 … and you know what to expect).
+                var total = runCatching { Discovery.pageCountUpTo(q, MAX_PAGES) }.getOrDefault(0)
+                if (shown.isNotEmpty()) total = maxOf(total, pages + 1)
+                total = total.coerceIn(1, MAX_PAGES)
                 if (shown.isEmpty()) body.append("<p class=\"note\">${if (pages == 0) "No results. Try other words." else "No more results."}</p>")
-                else {
-                    val lastKnown = !nextHas && pages >= knownMax                  // nothing beyond this one
-                    body.append("<p class=\"pageline\">Page ${pages + 1} of ${knownMax + 1}${if (lastKnown) "" else "+"}</p>")
-                    shown.forEach { body.append(it) }
-                }
-                if (pages > 0 || knownMax > 0) {
+                else shown.forEach { body.append(it) }
+                if (shown.isNotEmpty() && total > 1) {
                     body.append("<nav class=\"pager\" aria-label=\"Pages\">")
-                    if (pages > 0) body.append(pageLink(q, pages - 1, knownMax, "‹", false))
-                    for (i in 0..knownMax) body.append(pageLink(q, i, knownMax, (i + 1).toString(), i == pages))
-                    if (pages < knownMax) body.append(pageLink(q, pages + 1, knownMax, "›", false))
+                    if (pages > 0) body.append(pageLink(q, pages - 1, "‹", false))
+                    for (i in 0 until total) body.append(pageLink(q, i, (i + 1).toString(), i == pages))
+                    if (pages < total - 1) body.append(pageLink(q, pages + 1, "›", false))
                     body.append("</nav>")
                 }
-                AppLog.i("Search", "Searched (${shown.size} results shown, page ${pages + 1} of ${knownMax + 1})")
+                AppLog.i("Search", "Searched (${shown.size} results shown, page ${pages + 1} of $total)")
             } catch (e: Discovery.Challenge) {
                 body.append("<div class=\"note\"><p>DuckDuckGo wants to check that a person is searching (there have been many searches).</p>")
                     .append("<a class=\"btn\" href=\"wlb://search-check?u=${esc(URLEncoder.encode(e.url, "UTF-8"))}\">Answer the check</a></div>")
@@ -104,12 +93,14 @@ object SearchPage {
             "<span class=\"tag ${if (opens) "ok" else "ask"}\">${if (opens) "Opens on this phone" else "Ask to open this page"}</span></article>"
     }
 
-    /** A numbered page link (or the ‹ / › arrows) for the search results foot. [known] is carried as n= so the page
-     * numbers we've already found stay visible when you step back to an earlier page. */
-    private fun pageLink(q: String, p: Int, known: Int, label: String, current: Boolean): String {
-        val href = "/search/?q=${esc(URLEncoder.encode(q, "UTF-8"))}" + (if (p > 0) "&amp;p=$p" else "") + (if (known > 0) "&amp;n=$known" else "")
+    /** A numbered page link (or the ‹ / › arrows) for the search results foot. */
+    private fun pageLink(q: String, p: Int, label: String, current: Boolean): String {
+        val href = "/search/?q=${esc(URLEncoder.encode(q, "UTF-8"))}" + if (p > 0) "&amp;p=$p" else ""
         return "<a class=\"pg${if (current) " on" else ""}\"${if (current) " aria-current=\"page\"" else ""} href=\"$href\">$label</a>"
     }
+
+    /** How many pages of results to offer at most (words-only results; plenty for this browser). */
+    private const val MAX_PAGES = 5
 
     private const val ICON_SEARCH = "<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-4-4\"/></svg>"
 

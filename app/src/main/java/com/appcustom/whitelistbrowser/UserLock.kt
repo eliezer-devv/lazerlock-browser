@@ -125,24 +125,15 @@ object UserLock {
 
     // ----- the screens -----
 
-    /** The lock screen, shown when the browser opens and a PIN is set. [onUnlock] runs once, when unlocked. */
+    /** The full-screen lock shown when the browser opens and a PIN is set. [onUnlock] runs once, when unlocked. */
     fun promptUnlock(activity: Activity, onUnlock: () -> Unit) {
         if (!isSet(activity)) { unlocked = true; onUnlock(); return }
-        val d = Ui.AppDialog(activity, sheet = false, cancelable = false)
-        d.title("Enter PIN", "to open Whitelist Browser", R.drawable.ic_d_pin)
-        val pad = PinPad(activity)
-        val err = errLine(activity)
-        d.add(pad.view); d.add(err, 2)
-        pad.onChange = { err.visibility = View.GONE }
-        d.button("Unlock", Ui.Kind.PRIMARY) {
-            if (matches(activity, pad.value)) { unlocked = true; it.dismiss(); onUnlock() }
-            else { err.text = "Wrong PIN"; err.visibility = View.VISIBLE; pad.clear() }
+        PinScreen.show(activity, "Enter PIN", "to open Whitelist Browser", "Unlock", cancelable = false,
+            biometric = if (canBiometric(activity)) { done -> askBiometric(activity, done) } else null,
+            onBiometricOk = { unlocked = true; onUnlock() }) { pin, ctl ->
+            if (matches(activity, pin)) { unlocked = true; ctl.close(); onUnlock() }
+            else { ctl.error("Wrong PIN"); ctl.clear() }
         }
-        if (canBiometric(activity)) d.button("Fingerprint", Ui.Kind.SECONDARY) {
-            askBiometric(activity) { ok -> if (ok) { unlocked = true; it.dismiss(); onUnlock() } }
-        }
-        d.show()
-        if (canBiometric(activity)) askBiometric(activity) { ok -> if (ok && d.isShowing) { unlocked = true; d.dismiss(); onUnlock() } }
     }
 
     /** Settings → turn the PIN on, change it, or remove it. [after] refreshes the settings row. */

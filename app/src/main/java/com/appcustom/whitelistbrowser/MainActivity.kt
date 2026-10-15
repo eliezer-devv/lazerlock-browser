@@ -3456,19 +3456,12 @@ class MainActivity : Activity() {
         // Locked after 5 wrong PINs: no PIN screen at all, just when it unlocks.
         if (MyRequests.pinLockedUntil(this) > 0L) { toast(pinLockedText()); return }   // (locked while approval mode was open)
         val n = items.size
-        val field = Ui.field(this, "An admin's PIN",
-            type = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD)
-        Ui.AppDialog(this, sheet = false).apply {
-            title(if (approve) "Approve $n request${if (n == 1) "" else "s"}?" else "Deny $n request${if (n == 1) "" else "s"}?",
-                icon = R.drawable.ic_d_pin, iconBg = if (approve) Ui.SOFT else Ui.RED_BG, iconFg = if (approve) Ui.ACCENT_TEXT else Ui.RED_INK)
-            add(Ui.text(this@MainActivity, items.joinToString("\n") { "• " + it.summary }, 14.5f, Ui.INK2))
-            add(Ui.label(this@MainActivity, "An admin's PIN"))
-            add(field, 6)
-            button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
-            button(if (approve) "Approve" else "Deny", if (approve) Ui.Kind.PRIMARY else Ui.Kind.DANGER) { dlg ->
-                val pin = field.text.toString().trim()
-                if (!Regex("^\\d{4,8}$").matches(pin)) { field.error = "The PIN is 4 to 8 digits"; return@button }
-                dlg.dismiss()
+        // The same full-screen keypad as opening the app. The approval PIN is 4–8 digits.
+        val title = if (approve) "Approve $n request${if (n == 1) "" else "s"}?" else "Deny $n request${if (n == 1) "" else "s"}?"
+        PinScreen.show(this, title, "Enter an admin's PIN", if (approve) "Approve" else "Deny", cancelable = true) { pin, ctl ->
+            if (!Regex("^\\d{4,8}$").matches(pin)) { ctl.error("The PIN is 4 to 8 digits"); ctl.clear() }
+            else {
+                ctl.close()
                 toast("Sending")
                 updateIo.execute {
                     // One PIN note for all of them (GitHub checks the PIN once).
@@ -3484,7 +3477,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
-        }.show()
+        }
     }
 
     /** What swiping a row one way does: its word and icon on the trail, the trail's colour, and the action. */

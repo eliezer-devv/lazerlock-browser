@@ -2767,7 +2767,7 @@ function requestDetailsScreen() {
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
       kv('Date asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
       kv('Note', field(issue.body, 'Note') ? `“${field(issue.body, 'Note')}”` : null),
-      kv('History', (issue._log || []).length ? issue._log.map(e => `${new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${String(e.text).replace(/\*\*/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\n+/g, ' ').slice(0, 300)}`).join('\n') : null)),
+      null),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
     requestCard(issue));
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Requests'),
@@ -2788,8 +2788,7 @@ function requestDetailsScreen() {
       kv('Note', field(issue.body, 'Note') ? `“${field(issue.body, 'Note')}”` : null),
       kv('Passes through', hopText.length ? hopText.join('\n') : null),
       kv('On a filter list', Array.isArray(req.filtered) && req.filtered.length ? req.filtered.join(', ') : null),
-      kv('Unverified', req.unverified ? 'The phone couldn\'t find this site when asking: check for a typo' : null),
-      kv('History', (issue._log || []).length ? issue._log.map(e => `${new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${String(e.text).replace(/\*\*/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\n+/g, ' ').slice(0, 300)}`).join('\n') : null)),
+      kv('Unverified', req.unverified ? 'The phone couldn\'t find this site when asking: check for a typo' : null)),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
     requestCard(issue));
 }
