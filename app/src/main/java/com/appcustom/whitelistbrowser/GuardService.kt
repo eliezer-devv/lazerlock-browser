@@ -68,11 +68,18 @@ class GuardService : AccessibilityService() {
         // "secdeviceadminadd"). Only used together with our name on screen, so another app's page is never covered.
         private val DETAIL_CLASS = listOf("installedappdetails", "deviceadminadd")
         // Visible-text markers of a page we must cover (checked only when our own name is also on screen).
-        private const val DEVICE_ADMIN = "device admin"       // the whole Samsung device-admin page says this
+        private const val DEVICE_ADMIN = "device admin"       // our app's device-admin detail page says this (with our name)
+        // The "Device admin apps" LIST itself (by its screen title), covered up front — before the toggle is tapped —
+        // so a fast tap can't beat the cover. Matched by the title + "navigate up", so a mere link to it (e.g. on the
+        // Security page, titled otherwise) isn't covered.
+        private val ADMIN_LIST = listOf("device admin apps navigate up", "device admin navigate up")
         private val DETAIL_WORDS = listOf(
             "force stop", "uninstall", "deactivate", "disable", "turn off",
             "clear storage", "clear data", "clear cache")
         private const val DESC_PHRASE = "covers blocked apps" // our accessibility-service description
+        // The Accessibility "Installed apps" LIST (its title). Our name and description show in that list, which would
+        // otherwise cover the whole list; we cover only our own service page (opened from it), not the list itself.
+        private const val ACCESS_LIST = "installed apps navigate up"
         private const val RESTRICTED = "restricted setting"
         private const val SETUP_GRACE_MS = 8000L
         private const val HIDE_DELAY_MS = 500L
@@ -169,9 +176,13 @@ class GuardService : AccessibilityService() {
     private fun isForegroundSettings(): Boolean = runCatching { rootInActiveWindow?.packageName?.toString()?.contains("settings") == true }.getOrDefault(false)
 
     private fun isGuarded(cls: String, text: String, us: Boolean): Boolean {
+        // The Device admin apps LIST (by its own title) is covered even before our row/name is read, so the toggle is
+        // under the cover from the moment the screen opens — not only once someone taps it.
+        if (ADMIN_LIST.any { text.contains(it) }) return true
         if (!us) return false
         if (DETAIL_CLASS.any { cls.contains(it) }) return true          // our App info / device-admin page (by class)
         if (text.contains(DEVICE_ADMIN)) return true                    // the whole device-admin page (by text)
+        if (text.contains(ACCESS_LIST)) return false                    // the Accessibility "Installed apps" LIST: leave it, cover only our own page
         if (DETAIL_WORDS.any { text.contains(it) }) return true         // Force stop / Uninstall / Deactivate / …
         if (text.contains(RESTRICTED)) return true                      // the "restricted setting" dialog
         if (text.contains(DESC_PHRASE)) return true                     // our accessibility-service detail page
