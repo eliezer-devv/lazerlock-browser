@@ -15,20 +15,47 @@ import android.widget.TextView
 
 /**
  * The screen cover: a plain full-screen panel over a blocked app, or over one of THIS app's own Settings pages
- * where the protection could be switched off — its App info (Force stop / Uninstall), its accessibility detail,
- * and the device-admin "deactivate" page. The panel names this browser and says who manages it; a Back button
- * sends the phone Home.
+ * where the protection could be switched off (its App info, its accessibility detail, the device-admin page). The
+ * panel names this browser, says who manages it, and its Back button sends the phone Home.
  *
- * Which page it's on is worked out GENERALLY, from this app's own name in the on-screen text together with the
- * Settings screen's class name. The class names used below are the plain Android ones (and Samsung's equivalents),
- * not one brand's private screens — "installedappdetails", "deviceadminadd" and so on appear across phones. It only
- * ever looks at *which* app or settings screen is open, never at what's typed or shown.
+ * ── How this was meant to work first (before any real-phone logs) ───────────────────────────────────────────────
+ * The first design was deliberately device-agnostic: find THIS app's own name in the live accessibility tree and
+ * use WHERE it sits on screen. On a *list* (the device-admin list, the accessibility list, the apps list) it would
+ * place a small "row cover" over just our own entry — blocking the one on/off toggle while leaving the rest of the
+ * screen usable — and on one of our *detail* pages it would cover the whole screen. Nothing keyed on a particular
+ * phone brand's private Settings class names.
  *
- * Two things keep it steady rather than flickering: the cover is never rebuilt while it's already up for the same
- * reason, and a page that briefly reads as "not ours" (which happens constantly while a Settings screen is drawing,
- * as the active window bounces between panels) does NOT take the cover down straight away — it's only removed once
- * the screen has settled on something that clearly isn't ours. It's part of a supervised, parental-control setup,
- * always visible for what it is; the admin can switch it off.
+ * ── Why that didn't survive contact with a real phone ───────────────────────────────────────────────────────────
+ * Tested on a Samsung Galaxy A54 (model SM-A546E, Android 16 / SDK 36, from this project's shared logs), three
+ * things broke the row-cover idea:
+ *   1. viewIdResourceName comes back EMPTY for every node, so any view-id-based detection is dead there.
+ *   2. A Settings screen fires a storm of events as it draws, and rootInActiveWindow bounces between panels, so our
+ *      name flickers in and out of the read — rebuilding covers each time made them glitch.
+ *   3. The on-screen bounds of "our row" resolved to the wrong (too-large) container, so the small covers landed in
+ *      the wrong place.
+ * So row covers were dropped in favour of a single, steady, full-screen cover.
+ *
+ * ── How it works now (steady full-screen cover) ─────────────────────────────────────────────────────────────────
+ * A Settings screen is recognised as one of OURS from two kinds of signal, and our own app name must be present
+ * either way, so another app's pages are never covered:
+ *   • CLASS-name fragments of the detail pages — plain Android ones that also match Samsung's: "installedappdetails"
+ *     (App info) and "deviceadminadd" (which matches Samsung's "secdeviceadminadd").
+ *   • VISIBLE-TEXT markers — "device admin" (covers the whole Samsung device-admin page, not just its toggle),
+ *     the Force stop / Uninstall / Deactivate / Turn off words, the "restricted setting" dialog, and our own
+ *     accessibility-service description ("covers blocked apps").
+ * Two rules keep it steady rather than flickering: the cover is never rebuilt while it's already up for the same
+ * reason; and it is only ever taken down on a *navigation* (a WINDOW_STATE_CHANGED to a settled screen that clearly
+ * isn't ours) — never on a content/scroll event — so scrolling an App info page can't close it. Reads of our own
+ * cover window are ignored, so the cover's text is never mistaken for a settings screen.
+ *
+ * ── Tuning for more phones later ────────────────────────────────────────────────────────────────────────────────
+ * Known-good: Samsung SM-A546E / Android 16. The knobs are DETAIL_CLASS (class-name fragments) and the text markers
+ * in isGuarded(). If another brand names these screens differently, add its class fragment or a text marker. The
+ * CoverDiag log line prints each Settings screen's class + a slice of its text, so a new device can be tuned from a
+ * shared log without a phone in hand.
+ *
+ * It only ever looks at WHICH app or settings screen is open, never at what's typed or shown. Part of a supervised,
+ * parental-control setup, always visible for what it is; the admin can switch it off.
  */
 class GuardService : AccessibilityService() {
     companion object {
@@ -37,18 +64,18 @@ class GuardService : AccessibilityService() {
         @Volatile private var instance: GuardService? = null
         fun dismissCover() { instance?.let { svc -> svc.main.post { svc.hideAll() } } }
 
-        // Class-name fragments of OUR app's own detail pages. Plain Android names; "deviceadminadd" also matches
-        // Samsung's "secdeviceadminadd". Only used together with our app's name being on the screen, so another
-        // app's App info or device-admin page is never covered.
+        // Class-name fragments of OUR app's own detail pages (plain Android; "deviceadminadd" also matches Samsung's
+        // "secdeviceadminadd"). Only used together with our name on screen, so another app's page is never covered.
         private val DETAIL_CLASS = listOf("installedappdetails", "deviceadminadd")
-        // Words that appear on OUR detail / confirm pages, not on a plain list — the second way to recognise one.
+        // Visible-text markers of a page we must cover (checked only when our own name is also on screen).
+        private const val DEVICE_ADMIN = "device admin"       // the whole Samsung device-admin page says this
         private val DETAIL_WORDS = listOf(
-            "force stop", "uninstall", "deactivate", "disable this device admin", "turn off",
+            "force stop", "uninstall", "deactivate", "disable", "turn off",
             "clear storage", "clear data", "clear cache")
-        private const val DESC_PHRASE = "covers blocked apps"     // our accessibility-service description
+        private const val DESC_PHRASE = "covers blocked apps" // our accessibility-service description
         private const val RESTRICTED = "restricted setting"
         private const val SETUP_GRACE_MS = 8000L
-        private const val HIDE_DELAY_MS = 450L
+        private const val HIDE_DELAY_MS = 500L
     }
 
     private var wm: WindowManager? = null
@@ -92,14 +119,40 @@ class GuardService : AccessibilityService() {
             }
             if (isSettingsPkg(pkg)) {
                 if (android.os.SystemClock.uptimeMillis() - connectedAt <= SETUP_GRACE_MS) { if (stateChanged) hideAll(); return }
-                if (contentChanged && android.os.SystemClock.uptimeMillis() - lastContentCheck < 120L) return
-                lastContentCheck = android.os.SystemClock.uptimeMillis()
-                applySettingsGuard(cls)
-                if (stateChanged) scheduleGuardChecks(cls)   // re-check as the screen finishes drawing
+                if (stateChanged) onSettingsStateChange(cls)
+                else onSettingsContentChange(cls)
                 return
             }
             if (stateChanged) hideAll()                       // any other app in front
         }.logged("Cover", "Checking the open app")
+    }
+
+    /** A new Settings screen opened (navigation): show if it's ours, otherwise start the short delay before hiding
+     *  — and re-check a few times as it finishes drawing. This is the ONLY place a settings cover is taken down. */
+    private fun onSettingsStateChange(cls: String) {
+        lastContentCheck = android.os.SystemClock.uptimeMillis()
+        val s = scanSettings()
+        diag(cls, s)
+        if (s.ourCover) return                                // the active window is our own cover → leave it up
+        if (isGuarded(cls, s.text, s.us)) { showSettingCover(); return }
+        // Not ours. Whether it read blank (still drawing) or settled, start the cancellable hide; the re-checks
+        // below cancel it the moment the screen turns out to be one of ours.
+        if (coveringFor == "setting") scheduleHide()
+        scheduleGuardChecks(cls)
+    }
+
+    /** The current Settings screen changed or scrolled: only ever (re)assert the cover, NEVER take it down — so
+     *  scrolling an App info page can't close it. */
+    private fun onSettingsContentChange(cls: String) {
+        if (android.os.SystemClock.uptimeMillis() - lastContentCheck < 120L) return
+        lastContentCheck = android.os.SystemClock.uptimeMillis()
+        val s = scanSettings()
+        diag(cls, s)
+        if (!s.ourCover && isGuarded(cls, s.text, s.us)) showSettingCover()
+    }
+
+    private fun diag(cls: String, s: Scan) {
+        if (cls != lastDiagCls) { lastDiagCls = cls; AppLog.i("CoverDiag", "settings cls=$cls | us=${s.us} | txt=${s.text.take(150)}") }
     }
 
     private fun blockedTitle(pkg: String): String {
@@ -112,26 +165,13 @@ class GuardService : AccessibilityService() {
     private fun isSettingsPkg(pkg: String): Boolean = pkg.contains("settings")
     private fun isForegroundSettings(): Boolean = runCatching { rootInActiveWindow?.packageName?.toString()?.contains("settings") == true }.getOrDefault(false)
 
-    private fun applySettingsGuard(cls: String) {
-        val s = runCatching { scanSettings() }.logged("Cover", "Reading the settings screen").getOrNull() ?: return
-        if (cls != lastDiagCls) { lastDiagCls = cls; AppLog.i("CoverDiag", "settings cls=$cls | us=${s.us} | txt=${s.text.take(150)}") }
-        if (isGuarded(cls, s.text, s.us)) { showSettingCover(); return }
-        // Not ours on this read. A blank read means the screen is still drawing — keep whatever is up. A settled
-        // read that isn't ours, while we're covering a setting, starts the (cancellable) delay before uncovering.
-        if (s.text.isBlank()) return
-        if (coveringFor == "setting") scheduleHide()
-    }
-
-    /**
-     * Is this Settings screen one of OUR pages to cover? Class-first, because this phone gives reliable class names
-     * but no view-ids. Our own name must be present either way, so no other app's pages are ever covered.
-     */
     private fun isGuarded(cls: String, text: String, us: Boolean): Boolean {
         if (!us) return false
-        if (DETAIL_CLASS.any { cls.contains(it) }) return true                 // our App info / device-admin page
-        if (DETAIL_WORDS.any { text.contains(it) }) return true                // our App info / device-admin by words
-        if (text.contains(RESTRICTED)) return true                            // the "restricted setting" dialog
-        if (text.contains("accessibility") && text.contains(DESC_PHRASE)) return true   // our accessibility detail
+        if (DETAIL_CLASS.any { cls.contains(it) }) return true          // our App info / device-admin page (by class)
+        if (text.contains(DEVICE_ADMIN)) return true                    // the whole device-admin page (by text)
+        if (DETAIL_WORDS.any { text.contains(it) }) return true         // Force stop / Uninstall / Deactivate / …
+        if (text.contains(RESTRICTED)) return true                      // the "restricted setting" dialog
+        if (text.contains(DESC_PHRASE)) return true                     // our accessibility-service detail page
         return false
     }
 
@@ -141,40 +181,44 @@ class GuardService : AccessibilityService() {
     private var guardGen = 0
     private fun scheduleGuardChecks(cls: String) {
         val gen = ++guardGen
-        for (delay in longArrayOf(0L, 80L, 200L, 450L, 800L)) {
+        for (delay in longArrayOf(80L, 200L, 450L, 800L)) {
             main.postDelayed({
                 if (gen != guardGen) return@postDelayed
                 runCatching {
-                    if (BrowserGuard.coverOn(applicationContext) && isForegroundSettings()) applySettingsGuard(cls)
+                    if (!BrowserGuard.coverOn(applicationContext) || !isForegroundSettings()) return@runCatching
+                    val s = scanSettings()
+                    if (!s.ourCover && isGuarded(cls, s.text, s.us)) showSettingCover()
                 }.logged("Cover", "Re-checking the settings screen")
             }, delay)
         }
     }
 
-    private class Scan(val text: String, val us: Boolean)
+    private class Scan(val text: String, val us: Boolean, val ourCover: Boolean)
 
-    /** All the visible text of the active window, lowercased (bounded). Only to recognise our own protection
-     *  screens; never read or kept beyond this check. */
+    /** All the visible text of the active window, lowercased (bounded). If the active window is our OWN cover, say
+     *  so (ourCover) rather than mistaking the cover's words for a settings screen. Only to recognise our own
+     *  protection screens; never read or kept beyond this check. */
     private fun scanSettings(): Scan {
-        val root = rootInActiveWindow ?: return Scan("", false)
+        val root = rootInActiveWindow ?: return Scan("", false, false)
+        if (root.packageName?.toString() == packageName) return Scan("", false, true)
         val sb = StringBuilder()
         val q = ArrayDeque<AccessibilityNodeInfo>(); q.add(root)
         var seen = 0
-        while (q.isNotEmpty() && seen < 900 && sb.length < 6000) {
+        while (q.isNotEmpty() && seen < 1200 && sb.length < 8000) {
             val n = q.removeFirst(); seen++
             n.text?.let { if (it.isNotBlank()) sb.append(it).append(' ') }
             n.contentDescription?.let { if (it.isNotBlank()) sb.append(it).append(' ') }
             for (i in 0 until n.childCount) n.getChild(i)?.let { q.add(it) }
         }
         val text = sb.toString().lowercase()
-        return Scan(text, text.contains(ourName) || text.contains(ourPkgLower))
+        return Scan(text, text.contains(ourName) || text.contains(ourPkgLower), false)
     }
 
     // ---- cover management (one full-screen panel; steady, never rebuilt while it's up for the same reason) ----
 
     private fun showFull(title: String, sub: String, forWhat: String) {
         pendingHide = false
-        if (coveringFor == forWhat && cover != null) return        // already showing this exact cover → leave it
+        if (coveringFor == forWhat && cover != null) return
         removeCover()
         val ctx = this
         val panel = LinearLayout(ctx).apply {
@@ -208,7 +252,7 @@ class GuardService : AccessibilityService() {
     }
 
     /** Start the short, cancellable delay before taking a settings cover down — a guarded read in the meantime
-     *  (which calls showFull) cancels it, so a brief "not ours" read mid-draw never makes the cover blink. */
+     *  (which calls showFull) cancels it, so a brief "not ours" read never makes the cover blink. */
     private fun scheduleHide() {
         if (pendingHide) return
         pendingHide = true
