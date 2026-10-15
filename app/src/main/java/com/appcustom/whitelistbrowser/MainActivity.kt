@@ -4568,6 +4568,8 @@ class MainActivity : Activity() {
         val nameType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_WORDS
         val firstField = Ui.field(this, "e.g. Emma", type = nameType)
         val lastField = Ui.field(this, "e.g. Smith", type = nameType)
+        val emailField = Ui.field(this, "e.g. parent@email.com",
+            type = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
         // First and last name: side by side, or one above the other on small screens.
         fun column(label: String, f: View) = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -4585,16 +4587,22 @@ class MainActivity : Activity() {
                 addView(column("Last name", lastField), LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = gapPx })
             }
         }
-        Ui.AppDialog(this, sheet = false, cancelable = false).apply {
-            title("What's your name?", icon = R.drawable.ic_d_user)
-            add(Ui.text(this@MainActivity, "So whoever manages this browser knows whose phone this is.", 14.5f, Ui.MUTED))
+        Ui.AppDialog(this, sheet = true, cancelable = false).apply {
+            title("Set up this phone", icon = R.drawable.ic_d_user)
+            add(Ui.text(this@MainActivity, "Whose phone is this? First and last name are both needed. The email is for whoever the phone belongs to — it's used to reach them.", 14.5f, Ui.MUTED))
             add(names)
+            add(Ui.label(this@MainActivity, "Email"))
+            add(emailField, 6)
+            add(Ui.text(this@MainActivity, "The email for whoever this phone belongs to.", 12.5f, Ui.MUTED), 2)
             button("Continue", Ui.Kind.PRIMARY) {
                 val first = firstField.text.toString().trim()
                 val last = lastField.text.toString().trim()
+                val email = emailField.text.toString().trim()
                 if (first.isEmpty()) { firstField.error = "Type your first name"; return@button }
                 if (last.isEmpty()) { lastField.error = "Type your last name"; return@button }
+                if (email.isNotEmpty() && !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) { emailField.error = "That doesn't look like an email"; return@button }
                 Device.setNames(this@MainActivity, first, last)
+                Device.setEmail(this@MainActivity, email)
                 it.dismiss()
                 sendWaiting(registerFirst = true) // registers now (or as soon as it's online)
                 askNotificationsOnce()            // then, once: notifications (answers to requests)

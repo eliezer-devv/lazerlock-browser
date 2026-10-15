@@ -275,6 +275,7 @@ object Requests {
             .apply { runCatching { Seal.publicKey() }.getOrNull()?.let { put("key", it) } }   // its lists are sealed with this
             .apply { Device.name(ctx)?.let { put("name", it) } }
             .apply { Device.first(ctx)?.let { put("first", it) }; Device.last(ctx)?.let { put("last", it) } }
+            .apply { Device.email(ctx)?.let { put("email", it) } }   // the owner's email, typed at setup
             .put("lastSeen", now).put("installed", Device.installedOn(ctx))
             .put("version", BuildConfig.VERSION_NAME)
             .apply { runCatching { put("clock", TrustedTime.report(ctx)) }.onFailure { AppLog.w("Clock", "Couldn't add the clock to the record: ${it.message}") } }

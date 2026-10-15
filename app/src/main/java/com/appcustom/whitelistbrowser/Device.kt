@@ -71,6 +71,11 @@ object Device {
             .putString("first", f).putString("last", l).putString("name", listOf(f, l).filter { it.isNotEmpty() }.joinToString(" ")).apply()
     }
 
+    /** The owner's email, typed at setup (kept on the phone and sent when it registers; shown on the admin page). */
+    fun email(ctx: Context): String? = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("email", null)
+    fun setEmail(ctx: Context, email: String) =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("email", email.trim().take(120).ifEmpty { null }).apply()
+
     /** The date the app first ran on this phone (kept on the phone), e.g. "2026-09-23". */
     fun installedOn(ctx: Context): String {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
