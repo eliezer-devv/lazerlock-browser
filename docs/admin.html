@@ -3078,7 +3078,7 @@ function siteScreen() {
       toggle('sSubs', 'Include subdomains', `Also m.${bare}, and other addresses ending in ${bare}`, 'subdomains'),
       toggle('sOnly', 'Only some pages', 'Everything else on the site stays blocked', 'only')),
     pages,
-    siteMedia(d),
+    siteMediaCompact(d, isNew),
     h('div', { class: 'group' },
       toggle('sFrames', 'Allow content embedded from other sites', 'Embedded videos, maps and sign-in boxes work, from any site. Leaving this site is still blocked, and the ad and adult filters still apply.', 'frames')),
     d.frames ? h('p', { class: 'warn' }, 'Only for sites you trust: whatever this site chooses to embed will show, even from sites that aren\'t on your lists.') : null,
@@ -3096,15 +3096,48 @@ function siteScreen() {
         return h('button', { type: 'button', class: 'lc pick', id: 'sOff_' + k, 'aria-pressed': String(off), onclick: () => {
           d.filtersOff = off ? d.filtersOff.filter(x => x !== k) : [...d.filtersOff, k]; render(); } }, off ? icon('check', 15, 2.4) : null, t);
       }))),
-    h('details', { class: 'more' }, h('summary', null, 'More options'),
-      h('div', { class: 'field', style: 'margin-top:8px' }, h('label', { for: 'sUrl' }, 'Where the tile opens (optional)'), url,
-        h('p', { class: 'hint', style: 'margin:0' }, 'Leave empty to open the site\'s front page.'))),
     !isNew && normalize(d.domain) ? h('a', { href: '#', class: 'tempcard', onclick: e => { e.preventDefault(); open({ name: 'temp', entry: normalize(d.domain), what: 'site' }); } },
       icon('clock', 20), h('span', { class: 'grow' }, 'Open it temporarily instead'), icon('chev', 18)) : null,
     h('button', { type: 'button', class: 'btn p wide', id: 'sDone', onclick: done }, isNew ? 'Add site' : 'Done'),
     !isNew ? h('button', { type: 'button', class: 'btn d', id: 'sRemove', onclick: remove }, 'Remove this site') : null);
 }
 
+// The small photos/videos/sound row on the site screen: one Open/Blocked/Default choice for all three at once, with a
+// "Set each" disclosure that opens the full per-part control and this site's always-blocked pages. Stays on this one
+// screen (no navigating away) so a half-typed new site is never lost.
+function siteMediaCompact(d, isNew) {
+  const agg = MKINDS.map(([k]) => { const K = capFirst(k); return d['no' + K] ? 'blocked' : d['on' + K] ? 'open' : 'default'; });
+  const uniform = agg.every(v => v === agg[0]) ? agg[0] : 'mixed';
+  const setAll = nv => { MKINDS.forEach(([k]) => { const K = capFirst(k); d['no' + K] = nv === 'blocked'; d['on' + K] = nv === 'open'; }); render(); };
+  const dom = (normalize(d.domain) || '').replace(/^www\./, '');
+  // This site's always-blocked pages (the subset of the list's "always blocked" that's on this site).
+  const mine = dom ? S.L.block.filter(b => pageOnSite(b, dom, d.subdomains)) : [];
+  const ta = h('textarea', { class: 'inp', id: 'sBlockHere', rows: 3, placeholder: dom ? `${dom}/forum` : 'e.g. example.com/forum',
+    autocapitalize: 'off', spellcheck: 'false', style: 'min-height:72px;padding-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:13px' }, mine.join('\n'));
+  const saveBlk = () => {
+    const lines = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
+    const bad = lines.filter(l => !blockEntry(l));
+    if (bad.length) { ta.classList.add('bad'); return say(`These don't look like page addresses: ${bad.join(', ')}`, true); }
+    ta.classList.remove('bad');
+    const cleaned = lines.map(l => blockEntry(l));
+    const others = S.L.block.filter(b => !(dom && pageOnSite(b, dom, d.subdomains)));   // keep entries for other sites
+    const next = [...new Set([...others, ...cleaned])];
+    if (next.join('\n') !== S.L.block.join('\n')) { S.L.block = next; markList(); say('Always-blocked pages updated. Tap Save to apply it.'); }
+  };
+  ta.addEventListener('change', saveBlk);
+  return h('div', { class: 'stack', style: 'gap:8px' },
+    h('div', { class: 'mrow' }, h('div', { class: 'top' },
+      h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Photos, videos and sound'),
+        h('span', { class: 's' }, uniform === 'mixed' ? 'Set differently per part — open “Set each” below' : 'Tap “Set each” to split them')),
+      obSeg('Photos, videos and sound', uniform === 'mixed' ? '' : uniform, setAll,
+        { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMediaAll' }))),
+    h('details', { class: 'more' }, h('summary', null, 'Set each & add always-blocked pages'),
+      h('div', { style: 'margin-top:10px' }, siteMedia(d)),
+      h('div', { class: 'field', style: 'margin-top:12px' }, h('span', { class: 'flabel' }, 'Always blocked here'),
+        dom ? h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Pages of this site to keep blocked, even though the site is open. One per line.')
+            : h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Type the address above first, then add pages of this site to keep blocked here.'),
+        dom ? ta : null)));
+}
 // A site's photos, videos and sound: Default (each phone's own default), Open or Blocked (for every phone using this list).
 function siteMedia(d) {
   const users = Object.entries(S.D.devices).filter(([, x]) => (x.lists || []).includes(S.current)).map(([, x]) => x);

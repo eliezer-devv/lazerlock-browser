@@ -3859,6 +3859,14 @@ class MainActivity : Activity() {
     // ---------- settings ----------
 
     /** ⋮ → Settings: appearance, cookies and site data, cache, app update, and about this phone. */
+    /** A "‹ back" link above a sheet's title, taking you to the previous menu screen. Call it before [d].title(). */
+    private fun backRow(d: Ui.AppDialog, label: String, to: () -> Unit) {
+        d.add(Ui.text(this, "‹ $label", 15f, Ui.ACCENT_TEXT, "bold").apply {
+            minHeight = Ui.dp(this@MainActivity, 36); gravity = android.view.Gravity.CENTER_VERTICAL
+            setOnClickListener { d.dismiss(); to() }
+        }, 0)
+    }
+
     /** A sheet of rows (icon, title, line under it), each opening its own screen. [back]: a "‹ back" link above the title. */
     private fun menuSheet(title: String, backLabel: String?, back: (() -> Unit)?, rows: List<Triple<Int, Pair<String, String>, () -> Unit>>) {
         val d = Ui.AppDialog(this, sheet = true)
@@ -4249,6 +4257,7 @@ class MainActivity : Activity() {
     /** ⋮ → Settings → This phone's default: view only. "Ask to change it" lets them choose, then sends a request. */
     private fun showPhoneDefault() {
         val d = Ui.AppDialog(this, sheet = true)
+        backRow(d, "Phone protection") { showThisPhone() }
         d.title("This phone's default")
         d.add(Ui.text(this, "Photos, videos and sound on every site, unless a site is set otherwise.", 14.5f, Ui.MUTED), 6)
         d.add(LinearLayout(this).apply {
@@ -4333,6 +4342,7 @@ class MainActivity : Activity() {
     private fun showSearchSettings() {
         if (!Whitelist.state.search) { showAskSearch(); return }
         val d = Ui.AppDialog(this, sheet = true)
+        backRow(d, "Phone protection") { showThisPhone() }
         d.title("Search")
         d.add(Ui.text(this, "The search box on this phone's home page.", 14.5f, Ui.MUTED), 6)
         d.add(Ui.box(this, if (Whitelist.state.searchApprovedOnly) "On. It shows only results this phone can already open."
@@ -4450,7 +4460,9 @@ class MainActivity : Activity() {
         val options = listOf("system" to "Phone's setting", "light" to "Light", "dark" to "Dark")
         val current = options.indexOfFirst { it.first == Ui.choice(this) }.coerceAtLeast(0)
         var picked = current
-        Ui.AppDialog(this, sheet = false).apply {
+        val dlg = Ui.AppDialog(this, sheet = true)
+        backRow(dlg, "Settings") { showSettings() }
+        dlg.apply {
             title("Appearance", icon = R.drawable.ic_d_theme)
             add(Ui.Segmented(this@MainActivity, options.map { it.second }, current, true) { picked = it }.view)
             add(Ui.text(this@MainActivity, "\"Phone's setting\" switches between light and dark along with the phone.", 13.5f, Ui.MUTED), 8)
@@ -4651,7 +4663,9 @@ class MainActivity : Activity() {
         if (waiting > 0) phone += row("Waiting to send", "$waiting (${Outbox.lastProblem ?: "sends when online"})")
         phone += row("App version", BuildConfig.VERSION_NAME)
         // (The technical details, ad blocking, what's playing, the last crash, go in the log: Share log.)
-        Ui.AppDialog(this, sheet = true).apply {
+        val dlg = Ui.AppDialog(this, sheet = true)
+        backRow(dlg, "Settings") { showSettings() }
+        dlg.apply {
             title("About this phone", icon = R.drawable.ic_d_user)
             add(table(phone))
             // The filters: hidden until asked for (most people never need them).
