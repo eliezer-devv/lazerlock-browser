@@ -76,6 +76,10 @@ class GuardService : AccessibilityService() {
         private val DEVICE_ADMIN = listOf("device admin")
         // The "Device admin apps" LIST (by its screen title + the Up button), for the optional whole-list cover.
         private val ADMIN_LIST = listOf("device admin apps navigate up", "device admin navigate up")
+        // The same two list screens, matched on the WINDOW TITLE instead — a clean, early signal (the probe log
+        // confirmed Samsung has no unique class or resource-id for these lists, so the title is the best handle).
+        private val ADMIN_LIST_TITLE = listOf("device admin apps", "device admin")
+        private val ACCESS_LIST_TITLE = listOf("installed apps")
         private val DETAIL_WORDS = listOf(
             "force stop", "uninstall", "deactivate", "disable", "turn off", "clear storage", "clear data", "clear cache")
         private const val DESC_PHRASE = "covers blocked apps" // our accessibility-service description (our own string)
@@ -163,7 +167,7 @@ class GuardService : AccessibilityService() {
         val s = scanSettings()
         diag(cls, s)
         if (s.ourCover) return                                // only our own cover is up → leave it
-        if (isGuarded(cls, s.text, s.us)) { showSettingCover(); return }
+        if (isGuarded(cls, s.text, s.us, s.titles)) { showSettingCover(); return }
         // Not ours. Only start the cancellable hide on a real, SETTLED read — a blank read just means the screen is
         // still drawing (or a sibling window came back empty), which must never take the cover down. The re-checks
         // below cancel the hide the moment the screen turns out to be one of ours.
@@ -178,7 +182,7 @@ class GuardService : AccessibilityService() {
         lastContentCheck = android.os.SystemClock.uptimeMillis()
         val s = scanSettings()
         diag(cls, s)
-        if (!s.ourCover && isGuarded(cls, s.text, s.us)) showSettingCover()
+        if (!s.ourCover && isGuarded(cls, s.text, s.us, s.titles)) showSettingCover()
     }
 
     private fun diag(cls: String, s: Scan) {
@@ -237,18 +241,23 @@ class GuardService : AccessibilityService() {
      * language), our App info page, and our own Accessibility service page — but NOT the whole "Installed apps" or
      * "Device admin apps" lists. OPTIONAL (coverLists on): also cover those two whole list screens.
      */
-    private fun isGuarded(cls: String, text: String, us: Boolean): Boolean {
+    private fun isGuarded(cls: String, text: String, us: Boolean, titles: String = ""): Boolean {
         // Our device-admin detail / "deactivate?" screen, by class. No name/text needed, so an empty or still-drawing
         // read (the cause of the "no overlay after reopening it" glitch) is still covered, in any phone language.
         if (cls.contains("deviceadminadd")) return true
-        // Optional: the whole list screens. The Accessibility "Installed apps" list is matched by our OWN description
-        // (us + DESC_PHRASE) — language-independent, since Android shows our service's description in that list. The
-        // Device-admin apps list has no unique class or string of ours, so it falls back to its title text. (The
-        // device-admin TOGGLE page itself is always covered by class above, in any language.)
-        if (coverLists() && ((us && text.contains(DESC_PHRASE)) || ACCESS_LIST_WORDS.any { text.contains(it) } || ADMIN_LIST.any { text.contains(it) })) return true
+        // Optional: the whole list screens. Matched first on the clean WINDOW TITLE ("Device admin apps" / "Installed
+        // apps") — a tidier, earlier signal than the full text — and the accessibility list also by our OWN description
+        // (us + DESC_PHRASE, language-independent). Falls back to the old full-text phrases if a device gives no title.
+        // (The device-admin TOGGLE page itself is always covered by class above, in any language.)
+        if (coverLists() && (
+                ADMIN_LIST_TITLE.any { titles.contains(it) } ||
+                ACCESS_LIST_TITLE.any { titles.contains(it) } ||
+                (us && text.contains(DESC_PHRASE)) ||
+                ACCESS_LIST_WORDS.any { text.contains(it) } ||
+                ADMIN_LIST.any { text.contains(it) })) return true
         if (!us) return false
         if (cls.contains("installedappdetails")) return true            // our App info page (by class)
-        if (ACCESS_LIST_WORDS.any { text.contains(it) }) return false   // default: cover our Accessibility page, not the whole list
+        if (ACCESS_LIST_WORDS.any { text.contains(it) } || ACCESS_LIST_TITLE.any { titles.contains(it) }) return false // default: cover our Accessibility page, not the whole list
         if (DEVICE_ADMIN.any { text.contains(it) }) return true         // our device-admin managed page (by text)
         if (DETAIL_WORDS.any { text.contains(it) }) return true         // Force stop / Uninstall / Deactivate / …
         if (RESTRICTED.any { text.contains(it) }) return true           // the "restricted setting" dialog
@@ -277,13 +286,13 @@ class GuardService : AccessibilityService() {
                 runCatching {
                     if (!BrowserGuard.coverOn(applicationContext) || !isForegroundSettings()) return@runCatching
                     val s = scanSettings()
-                    if (!s.ourCover && isGuarded(cls, s.text, s.us)) showSettingCover()
+                    if (!s.ourCover && isGuarded(cls, s.text, s.us, s.titles)) showSettingCover()
                 }.logged("Cover", "Re-checking the settings screen")
             }, delay)
         }
     }
 
-    private class Scan(val text: String, val us: Boolean, val ourCover: Boolean)
+    private class Scan(val text: String, val us: Boolean, val ourCover: Boolean, val titles: String = "")
 
     /** The visible text of ALL on-screen windows at once (our own cover excluded), lowercased and bounded. Reading
      *  every window rather than just the "active" one is what stops the flicker: on this phone a screen like the
@@ -292,6 +301,7 @@ class GuardService : AccessibilityService() {
      *  cover is up. Only to recognise our own protection screens; never read or kept beyond this check. */
     private fun scanSettings(): Scan {
         val sb = StringBuilder()
+        val titles = StringBuilder()
         var sawOther = false
         var sawOwn = false
         val wins = runCatching { windows }.getOrNull()
@@ -300,6 +310,10 @@ class GuardService : AccessibilityService() {
                 val root = w.root ?: continue
                 if (root.packageName?.toString() == packageName) { sawOwn = true; continue }
                 sawOther = true
+                // The window's own title is the clean per-screen label ("Device admin apps", "Installed apps") —
+                // far tidier than the full flattened text, which is polluted with the status bar. Used only to
+                // recognise the optional whole-list screens. Still the system's own (localised) words.
+                w.title?.let { if (it.isNotBlank()) titles.append(it).append(" | ") }
                 collect(root, sb)
                 if (sb.length >= 8000) break
             }
@@ -310,7 +324,7 @@ class GuardService : AccessibilityService() {
             collect(root, sb)
         }
         val text = sb.toString().lowercase()
-        return Scan(text, text.contains(ourName) || text.contains(ourPkgLower), sawOwn && !sawOther)
+        return Scan(text, text.contains(ourName) || text.contains(ourPkgLower), sawOwn && !sawOther, titles.toString().lowercase())
     }
 
     private fun collect(root: AccessibilityNodeInfo, sb: StringBuilder) {
