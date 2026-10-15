@@ -2,28 +2,23 @@ package com.appcustom.whitelistbrowser
 
 import android.app.Activity
 import android.content.Context
-import android.graphics.Color
-import android.graphics.Typeface
-import android.view.Gravity
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 
 /**
  * An optional PIN the person using this phone can set to open Whitelist Browser. It's theirs: chosen by them, kept
  * only on this phone (as a one-way hash), and nothing to do with the admin or the admin's PIN. When one is set the
  * browser asks for it each time it comes to the front; a fingerprint/face works too, if the phone has one.
  *
- * The PIN is entered on a proper keypad (dots that fill as you type, a 1–9/0 grid, and a ⌫), not a plain text field.
- * Changing or removing a PIN asks for the current one first.
+ * Every PIN step — opening the app, setting a PIN, changing it, removing it — uses the same full-screen keypad
+ * (PinScreen), so the PIN screen looks the same everywhere in the app.
  */
 object UserLock {
     private const val PREF = "userlock"
 
     /** Unlocked for the current time in front; cleared when the app is sent to the background (onStop). */
     @Volatile var unlocked = false
+
+    /** Set just before opening our own admin screen, so coming back from it doesn't ask for the PIN again. */
+    @Volatile var skipNextLock = false
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREF, Context.MODE_PRIVATE)
     fun isSet(ctx: Context): Boolean = !prefs(ctx).getString("pin", null).isNullOrEmpty()
@@ -34,69 +29,6 @@ object UserLock {
     private fun hash(s: String): String =
         java.security.MessageDigest.getInstance("SHA-256").digest(("wlb-userlock:$s").toByteArray())
             .joinToString("") { "%02x".format(it) }
-
-    // ----- the keypad -----
-
-    /** The dots-and-grid PIN pad. [onChange] fires on every key, so a caller can clear an error message. */
-    private class PinPad(private val ctx: Context) {
-        private val sb = StringBuilder()
-        val value: String get() = sb.toString()
-        var onChange: (() -> Unit)? = null
-        private val dots = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        val view: LinearLayout = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            addView(dots, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                .apply { bottomMargin = Ui.dp(ctx, 18); topMargin = Ui.dp(ctx, 2) })
-            // 1–9, then blank / 0 / ⌫.
-            val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫")
-            var row: LinearLayout? = null
-            keys.forEachIndexed { i, k ->
-                if (i % 3 == 0) {
-                    row = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-                    addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-                }
-                row!!.addView(key(k), LinearLayout.LayoutParams(Ui.dp(ctx, 66), Ui.dp(ctx, 66))
-                    .apply { marginStart = Ui.dp(ctx, 7); marginEnd = Ui.dp(ctx, 7); topMargin = Ui.dp(ctx, 7); bottomMargin = Ui.dp(ctx, 7) })
-            }
-            renderDots()
-        }
-
-        private fun key(label: String): Button = Button(ctx).apply {
-            text = if (label == "⌫") "⌫" else label
-            isAllCaps = false
-            textSize = if (label == "⌫") 22f else 20f
-            minWidth = 0; minHeight = 0
-            setPadding(0, 0, 0, 0)
-            stateListAnimator = null
-            if (label.isEmpty()) {
-                background = null; isEnabled = false
-            } else {
-                setTextColor(Ui.INK)
-                typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                background = Ui.rounded(Ui.CARD, Ui.dp(ctx, 33).toFloat(), Ui.OUTLINE, Ui.dp(ctx, 1))
-                setOnClickListener {
-                    if (label == "⌫") { if (sb.isNotEmpty()) sb.deleteCharAt(sb.length - 1) }
-                    else if (sb.length < 12) sb.append(label)
-                    renderDots(); onChange?.invoke()
-                }
-            }
-        }
-
-        private fun renderDots() {
-            dots.removeAllViews()
-            val n = maxOf(4, sb.length)
-            for (i in 0 until n) dots.addView(View(ctx).apply {
-                background = Ui.rounded(if (i < sb.length) Ui.ACCENT else Ui.OUTLINE, Ui.dp(ctx, 7).toFloat())
-            }, LinearLayout.LayoutParams(Ui.dp(ctx, 13), Ui.dp(ctx, 13)).apply { marginStart = Ui.dp(ctx, 7); marginEnd = Ui.dp(ctx, 7) })
-        }
-
-        fun clear() { sb.setLength(0); renderDots() }
-    }
-
-    private fun errLine(ctx: Context): TextView = Ui.text(ctx, "", 13f, Ui.RED_INK, "bold").apply {
-        gravity = Gravity.CENTER; visibility = View.GONE
-    }
 
     // ----- biometric (fingerprint / face) -----
 
@@ -123,7 +55,7 @@ object UserLock {
         }.onFailure { once(false) }
     }
 
-    // ----- the screens -----
+    // ----- the screens (all the same full-screen keypad) -----
 
     /** The full-screen lock shown when the browser opens and a PIN is set. [onUnlock] runs once, when unlocked. */
     fun promptUnlock(activity: Activity, onUnlock: () -> Unit) {
@@ -139,53 +71,32 @@ object UserLock {
     /** Settings → turn the PIN on, change it, or remove it. [after] refreshes the settings row. */
     fun manage(activity: Activity, after: () -> Unit) {
         if (!isSet(activity)) { setFlow(activity, after); return }
-        // Changing or removing asks for the current PIN first.
-        verifyThen(activity, "Enter current PIN", "to change or remove it") {
-            val d = Ui.AppDialog(activity, sheet = false)
-            d.title("Lock with a PIN", "A PIN is set on this phone.", R.drawable.ic_d_pin)
-            d.button("Remove", Ui.Kind.DANGER) { clear(activity); it.dismiss(); after() }
-            d.button("Change", Ui.Kind.SECONDARY) { it.dismiss(); setFlow(activity, after) }
-            d.button("Close", Ui.Kind.GHOST) { it.dismiss() }
-            d.show()
-        }
-    }
-
-    /** Ask for the current PIN on the keypad; [onOk] runs only once it's right. */
-    private fun verifyThen(activity: Activity, title: String, sub: String, onOk: () -> Unit) {
-        padEntry(activity, title, sub, "Continue") { entered ->
-            if (matches(activity, entered)) { onOk(); null } else "Wrong PIN"
+        // Changing or removing asks for the current PIN first (same full-screen keypad).
+        PinScreen.show(activity, "Enter current PIN", "to change or remove it", "Continue", cancelable = true) { pin, ctl ->
+            if (!matches(activity, pin)) { ctl.error("Wrong PIN"); ctl.clear() }
+            else {
+                ctl.close()
+                val d = Ui.AppDialog(activity, sheet = false)
+                d.title("Lock with a PIN", "A PIN is set on this phone.", R.drawable.ic_d_pin)
+                d.button("Remove", Ui.Kind.DANGER) { clear(activity); it.dismiss(); after() }
+                d.button("Change", Ui.Kind.SECONDARY) { it.dismiss(); setFlow(activity, after) }
+                d.button("Close", Ui.Kind.GHOST) { it.dismiss() }
+                d.show()
+            }
         }
     }
 
     /** Set a new PIN (or change it): typed twice on the keypad. */
     private fun setFlow(activity: Activity, after: () -> Unit) {
-        padEntry(activity, "Set a PIN", "It's yours, kept only on this phone. Nothing to do with the admin.", "Next") { first ->
-            if (first.length < 4) "At least 4 digits"
+        PinScreen.show(activity, "Set a PIN", "It's yours, kept only on this phone. Nothing to do with the admin.", "Next", cancelable = true) { first, ctl ->
+            if (first.length < 4) { ctl.error("At least 4 digits"); ctl.clear() }
             else {
-                padEntry(activity, "PIN again", "Type it once more", "Save") { second ->
-                    if (second != first) "PINs don't match" else { setPin(activity, first); after(); null }
+                ctl.close()
+                PinScreen.show(activity, "PIN again", "Type it once more", "Save", cancelable = true) { second, ctl2 ->
+                    if (second != first) { ctl2.error("PINs don't match"); ctl2.clear() }
+                    else { setPin(activity, first); ctl2.close(); after() }
                 }
-                null
             }
         }
-    }
-
-    /**
-     * A keypad dialog. [onValue] is given the entered PIN when the main button is tapped; it returns an error message
-     * to show (and the pad is cleared to try again), or null when it's handled (and the dialog closes).
-     */
-    private fun padEntry(activity: Activity, title: String, sub: String, okLabel: String, onValue: (String) -> String?) {
-        val d = Ui.AppDialog(activity, sheet = false)
-        d.title(title, sub, R.drawable.ic_d_pin)
-        val pad = PinPad(activity)
-        val err = errLine(activity)
-        d.add(pad.view); d.add(err, 2)
-        pad.onChange = { err.visibility = View.GONE }
-        d.button(okLabel, Ui.Kind.PRIMARY) {
-            val msg = onValue(pad.value)
-            if (msg == null) it.dismiss() else { err.text = msg; err.visibility = View.VISIBLE; pad.clear() }
-        }
-        d.button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
-        d.show()
     }
 }

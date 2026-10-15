@@ -76,6 +76,7 @@ class GuardService : AccessibilityService() {
         private const val RESTRICTED = "restricted setting"
         private const val SETUP_GRACE_MS = 8000L
         private const val HIDE_DELAY_MS = 500L
+        private const val BACK_HOME_MS = 1800L   // Back tapped but still on a locked screen within this → go Home
     }
 
     private var wm: WindowManager? = null
@@ -85,6 +86,7 @@ class GuardService : AccessibilityService() {
     private var cover: View? = null
     private var coveringFor: String? = null
     private var pendingHide = false
+    private var backPressedAt = 0L               // when our cover's Back was last tapped (for the Home fallback)
 
     override fun onServiceConnected() {
         running = true
@@ -176,8 +178,17 @@ class GuardService : AccessibilityService() {
         return false
     }
 
-    private fun showSettingCover() =
+    private fun showSettingCover() {
+        // Back was just tapped but we're still on a locked screen (e.g. App info opened straight from a long-press,
+        // with nothing to go back to): go to the home screen instead of covering it again and looping forever.
+        if (backPressedAt != 0L && android.os.SystemClock.uptimeMillis() - backPressedAt < BACK_HOME_MS) {
+            backPressedAt = 0L
+            hideAll()
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            return
+        }
         showFull("This setting is locked", "It's set by whoever manages Whitelist Browser on this phone.", "setting")
+    }
 
     private var guardGen = 0
     private fun scheduleGuardChecks(cls: String) {
@@ -262,8 +273,9 @@ class GuardService : AccessibilityService() {
                 val h = (resources.displayMetrics.density * 50).toInt(); val padx = (resources.displayMetrics.density * 26).toInt()
                 minHeight = h; setPadding(padx, 0, padx, 0)
                 background = Ui.rounded(Color.parseColor("#1F5F55"), resources.displayMetrics.density * 25)
-                // Back goes back one screen (the previous page), like the phone's own Back — not all the way Home.
-                setOnClickListener { hideAll(); performGlobalAction(GLOBAL_ACTION_BACK) }
+                // Back goes back one screen (the previous page), like the phone's own Back. If there's nothing to go
+                // back to and we stay on the locked screen, showSettingCover sends the phone Home instead of looping.
+                setOnClickListener { backPressedAt = android.os.SystemClock.uptimeMillis(); hideAll(); performGlobalAction(GLOBAL_ACTION_BACK) }
             })
         }
         val type = if (Build.VERSION.SDK_INT >= 22) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY

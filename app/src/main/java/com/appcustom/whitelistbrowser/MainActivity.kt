@@ -185,6 +185,7 @@ class MainActivity : Activity() {
             if (now - firstTap > 4000) { firstTap = now; taps = 0 }
             if (++taps >= 7) {
                 taps = 0
+                UserLock.skipNextLock = true     // coming back from our own admin screen shouldn't ask for the PIN
                 startActivity(Intent(this, AdminActivity::class.java))
             }
         }
@@ -245,6 +246,7 @@ class MainActivity : Activity() {
         UserAlerts.appVisible = true
         AppLog.i("App", "Opened")
         runCatching { GuardService.dismissCover() }   // our app is in front: no cover needed
+        if (UserLock.skipNextLock) { UserLock.skipNextLock = false; UserLock.unlocked = true }   // back from our admin screen
         if (UserLock.isSet(this) && !UserLock.unlocked) {   // the person's own PIN (if they set one): lock on open
             web.visibility = View.INVISIBLE
             UserLock.promptUnlock(this) { web.visibility = View.VISIBLE }
@@ -491,6 +493,7 @@ class MainActivity : Activity() {
         if (u.path?.endsWith("/admin.html") != true) return false
         val part = u.fragment?.takeIf { Regex("(confirm|invite|reset)=[A-Za-z0-9_.-]+").matches(it) } ?: return false
         AppLog.i("Admin", "Opening an admin email's link (${part.substringBefore('=')})")
+        UserLock.skipNextLock = true                               // back from our admin screen shouldn't ask for the PIN
         runCatching { startActivity(Intent(this, AdminActivity::class.java).putExtra(AdminActivity.EXTRA_LINK, part)) }
         return true
     }
@@ -499,6 +502,7 @@ class MainActivity : Activity() {
     private fun openAdmin(from: Intent? = null) {
         val i = Intent(this, AdminActivity::class.java)
         from?.extras?.let { i.putExtras(it) }                      // what the notification was about
+        UserLock.skipNextLock = true                               // back from our admin screen shouldn't ask for the PIN
         runCatching { startActivity(i) }
     }
 
