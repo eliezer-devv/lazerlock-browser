@@ -4524,8 +4524,8 @@ class MainActivity : Activity() {
         runCatching { timerTick(cur, countTime) }.onFailure { AppLog.e("Timers", "Checking the timers", it) }
         // "My activity" (on this phone only): time on each site while it's on screen.
         if (countTime) runCatching {
-            // Search and the app's own pages aren't counted in My activity (only real sites).
-            val site = if (SearchPage.isSearch(cur) || HomePage.isOwn(cur)) null
+            // Time on search is shown in My activity as "Search"; the app's own pages aren't counted.
+            val site = if (SearchPage.isSearch(cur)) "Search" else if (HomePage.isOwn(cur)) null
                 else Uri.parse(cur).host?.lowercase()?.removePrefix("www.")
             if (site != null) MyActivity.add(applicationContext, site, tempTick)
         }.onFailure { AppLog.w("Activity", "Couldn't count the time: ${it.message}") }

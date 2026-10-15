@@ -48,9 +48,12 @@
   .menu .tip { padding: .6rem 1rem; font-size: .8rem; color: var(--muted); background: var(--bg); }
   .empty { text-align: center; color: var(--muted); padding: 3rem 1rem 1rem; }
   .empty h1 { color: var(--ink); font: 700 1.35rem/1.25 'Bricolage Grotesque', Figtree, sans-serif; margin: 0 0 .4rem; }
-  /* Pinned at the bottom: the tiles scroll underneath it rather than it scrolling away. */
-  .ask { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 12;
-    display: flex; align-items: center; justify-content: center; gap: .45rem; width: max-content; max-width: calc(100% - 32px);
+  /* A solid bar pinned at the bottom holds the button, so tiles scroll underneath rather than showing behind it. */
+  .askbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 12; display: flex; justify-content: center;
+    padding: 1.1rem 1rem calc(1.1rem + env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, var(--bg) 0%, var(--bg) 62%, transparent 100%); }
+  .askbar[hidden] { display: none; }
+  .ask { display: flex; align-items: center; justify-content: center; gap: .45rem; width: max-content; max-width: 100%;
     background: var(--accent); color: #fff; font-weight: 700; text-decoration: none; padding: .8rem 1.3rem;
     border-radius: 999px; min-height: 48px; box-shadow: 0 8px 22px -6px rgba(16, 28, 29, .5); }
   .ask svg { flex: none; }
@@ -79,9 +82,11 @@
     .ask { margin-top: 1.4rem; padding: .7rem 1.1rem; font-size: .9rem; }
   }
   /* Text search (when it's on for this phone): words only, safe search on. */
-  /* Stays pinned at the top while the tiles scroll underneath. */
-  .search { position: sticky; top: 0; z-index: 12; display: flex; align-items: center; gap: .6rem; min-height: 54px; border-radius: 27px; background: var(--tile);
-    border: 1px solid var(--edge); padding: 0 .4rem 0 1.1rem; margin: 0 0 1.4rem; box-shadow: 0 6px 14px -8px rgba(16, 28, 29, .45); }
+  /* A solid strip that stays pinned at the top, so tiles scroll underneath it (not showing through). */
+  .searchwrap { position: sticky; top: 0; z-index: 12; background: var(--bg); padding: .5rem 0 .9rem; box-shadow: 0 10px 10px -8px var(--bg); }
+  .searchwrap[hidden] { display: none; }
+  .search { display: flex; align-items: center; gap: .6rem; min-height: 54px; border-radius: 27px; background: var(--tile);
+    border: 1px solid var(--edge); padding: 0 .4rem 0 1.1rem; margin: 0; box-shadow: 0 2px 8px -4px rgba(16, 28, 29, .3); }
   .search > svg { flex: none; color: var(--muted); }
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 48px; }
   .search input::placeholder { color: var(--muted); }
@@ -120,14 +125,18 @@
     <span class="moon" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
     <h1 id="timerfulltitle"></h1><p id="timerfulltext"></p><a id="timerfullask" href="#">Ask for time</a>
   </div>
-  <form class="search" id="search" action="/search/" method="get" role="search" hidden>
-    <input type="search" name="q" placeholder="Search" aria-label="Search" autocomplete="off" enterkeyhint="search">
-    <button class="go" type="submit" aria-label="Search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button>
-  </form>
+  <div class="searchwrap" id="searchwrap" hidden>
+    <form class="search" id="search" action="/search/" method="get" role="search">
+      <input type="search" name="q" placeholder="Search" aria-label="Search" autocomplete="off" enterkeyhint="search">
+      <button class="go" type="submit" aria-label="Search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button>
+    </form>
+  </div>
   <h1 class="hello" id="hello">Your sites</h1>
   <div class="grid" id="grid"></div>
   <div class="empty" id="empty" hidden><h1 id="emptyTitle"></h1><p id="emptyText"></p></div>
-  <a class="ask" id="ask" href="wlb://request?action=allow" hidden><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Ask for a new site</a>
+  <div class="askbar" id="askbar" hidden>
+    <a class="ask" id="ask" href="wlb://request?action=allow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Ask for a new site</a>
+  </div>
 </main>
 <script>
   function tile(t) {
@@ -235,7 +244,7 @@
     const empty = document.getElementById('empty');
     empty.hidden = d.tiles.length > 0;
     document.getElementById('hello').hidden = !d.tiles.length;
-    document.getElementById('search').hidden = !d.search;        // text search: only when it's on for this phone
+    document.getElementById('searchwrap').hidden = !d.search;     // text search: only when it's on for this phone
     if (!d.tiles.length) {
       document.getElementById('emptyTitle').textContent = d.settingUp ? 'Setting up this phone…'
         : !d.loaded ? 'Loading the list of sites' : d.siteCount ? 'No sites on the home page' : 'No sites are allowed yet';
@@ -244,7 +253,7 @@
         : !d.loaded ? 'This needs an internet connection the first time.'
         : d.siteCount ? 'None of your sites have a tile yet. Ask for a site below.' : 'Ask for a site below.';
     }
-    document.getElementById('ask').hidden = !d.canRequest || !!d.settingUp;   // asking waits until it's set up
+    document.getElementById('askbar').hidden = !d.canRequest || !!d.settingUp;   // asking waits until it's set up
     // A timer on now.
     const tm = d.timer, full = !!(tm && tm.none);
     const askHref = tm ? 'wlb://timer-ask?id=' + encodeURIComponent(tm.id) + '&k=off' : '#';
@@ -257,7 +266,7 @@
       document.getElementById('timerask').href = document.getElementById('timerfullask').href = askHref;
       document.getElementById('timerask').hidden = document.getElementById('timerfullask').hidden = !tm.canAsk;
     }
-    if (full) { ['grid', 'empty', 'hello', 'search', 'ask'].forEach(id => { document.getElementById(id).hidden = true; }); }
+    if (full) { ['grid', 'empty', 'hello', 'searchwrap', 'askbar'].forEach(id => { document.getElementById(id).hidden = true; }); }
     else grid.hidden = false;
   }
   // Saves the folders and the order (the app keeps them on this phone).

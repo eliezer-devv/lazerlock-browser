@@ -1,21 +1,24 @@
 package com.appcustom.whitelistbrowser
 
 import android.app.Activity
+import android.app.Dialog
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.ColorDrawable
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.widget.Button
-import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 
 /**
- * A full-screen PIN keypad: a lock badge, a title, dots that fill as you type, and a 1–9 / 0 / ⌫ grid. The whole
- * screen is covered (the page behind is never visible). Used for opening the app (the person's own PIN) and for the
- * My-requests approval PIN — same look in both places.
+ * A full-screen PIN keypad: a lock badge, a title, dots that fill as you type, and a 1–9 / 0 / ⌫ grid. Shown in its
+ * own dialog window so it always sits on top — even when it's opened from another sheet (e.g. My requests). Used for
+ * opening the app (the person's own PIN) and for the My-requests approval PIN — same look in both places.
  *
  * [onPin] gets the typed PIN when the main button is tapped; use [Ctl] to show an error and clear, or close the screen.
  * [cancelable] adds a Cancel (and lets the system Back close it). [biometric], when given, adds a fingerprint button
@@ -39,11 +42,11 @@ object PinScreen {
         }
         val err = Ui.text(activity, "", 13.5f, Ui.RED_INK, "bold").apply { gravity = Gravity.CENTER; visibility = View.INVISIBLE }
 
-        var rootRef: View? = null
+        val dialog = Dialog(activity)
         val ctl = object : Ctl {
             override fun error(msg: String) { err.text = msg; err.visibility = View.VISIBLE }
             override fun clear() { sb.setLength(0); renderDots() }
-            override fun close() { rootRef?.let { (it.parent as? ViewGroup)?.removeView(it) } }
+            override fun close() { runCatching { dialog.dismiss() } }
         }
         fun press(label: String) {
             if (label == "⌫") { if (sb.isNotEmpty()) sb.deleteCharAt(sb.length - 1) }
@@ -72,20 +75,17 @@ object PinScreen {
             setOnClickListener { onTap() }
         }
 
-        val root = LinearLayout(activity).apply {
+        val col = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(Ui.PAGE)
             val m = dp(28); setPadding(m, m, m, m)
             addView(Ui.badge(activity, R.drawable.ic_d_pin, Ui.SOFT, Ui.ACCENT_TEXT, 60, 20))
-            addView(Ui.text(activity, title, 20f, Ui.INK, "bold").apply {
-                gravity = Gravity.CENTER; (this as TextView)
-            }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
+            addView(Ui.text(activity, title, 20f, Ui.INK, "bold").apply { gravity = Gravity.CENTER },
+                LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
             if (sub.isNotEmpty()) addView(Ui.text(activity, sub, 13.5f, Ui.MUTED).apply { gravity = Gravity.CENTER },
                 LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
             addView(dots, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(20); bottomMargin = dp(6) })
             addView(err, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(6) })
-            // The 1–9, blank / 0 / ⌫ grid.
             val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫")
             var row: LinearLayout? = null
             keys.forEachIndexed { i, k ->
@@ -101,18 +101,22 @@ object PinScreen {
                 setOnClickListener { ctl.close(); onCancel?.invoke() }
             }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(8) })
         }
-        renderDots()
-        rootRef = root
-        activity.addContentView(root, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        // Take key focus so Back is handled here: when it can't be cancelled, Back does nothing (no sneaking past it).
-        root.isFocusableInTouchMode = true
-        root.requestFocus()
-        root.setOnKeyListener { _, keyCode, event ->
-            if (keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                if (cancelable) { ctl.close(); onCancel?.invoke() }
-                true
-            } else false
+        // A scroller so the keypad still fits on short screens; fillViewport + the column's CENTER gravity centres it when there's room.
+        val root = ScrollView(activity).apply { isFillViewport = true; addView(col, android.widget.FrameLayout.LayoutParams(-1, -2)) }
+
+        dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        dialog.setContentView(root)
+        dialog.setCancelable(cancelable)
+        dialog.setCanceledOnTouchOutside(false)
+        if (cancelable) dialog.setOnCancelListener { onCancel?.invoke() }
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Ui.PAGE))
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
+        // When it can't be cancelled, Back does nothing (no sneaking past the lock).
+        if (!cancelable) dialog.setOnKeyListener { _, keyCode, _ -> keyCode == KeyEvent.KEYCODE_BACK }
+        renderDots()
+        runCatching { dialog.show() }
         biometric?.let { bio -> bio { ok -> if (ok) { ctl.close(); onBiometricOk?.invoke() } } }
     }
 }

@@ -32,7 +32,7 @@ object SearchPage {
     /** Called on the WebView's own thread for loading (not the main thread): searching here is fine. */
     fun respond(ctx: Context, uri: Uri): WebResourceResponse {
         val q = uri.getQueryParameter("q").orEmpty().trim().take(200)
-        val pages = (uri.getQueryParameter("p")?.toIntOrNull() ?: 0).coerceIn(0, MAX_PAGES - 1)
+        val pages = (uri.getQueryParameter("p")?.toIntOrNull() ?: 0).coerceIn(0, MAX_PAGES)
         val s = Whitelist.state
         val body = StringBuilder()
         body.append("<form class=\"search\" action=\"/search/\" method=\"get\" role=\"search\">")
@@ -52,20 +52,26 @@ object SearchPage {
                     if (s.searchApprovedOnly && !opens) continue
                     shown += result(r, opens, null)
                 }
-                // The total number of pages (up front, so the foot shows 1 2 3 … and you know what to expect).
-                var total = runCatching { Discovery.pageCountUpTo(q, MAX_PAGES) }.getOrDefault(0)
-                if (shown.isNotEmpty()) total = maxOf(total, pages + 1)
-                total = total.coerceIn(1, MAX_PAGES)
+                // As many pages as there are results: we peek one page ahead to know if a next page exists, and carry
+                // the furthest page found (n=) so the numbers don't vanish when you step back to an earlier page.
+                val carried = (uri.getQueryParameter("n")?.toIntOrNull() ?: 0).coerceIn(0, MAX_PAGES)
+                val nextHas = when {
+                    pages < carried -> true                                       // already found a later page before
+                    pages < MAX_PAGES && got.isNotEmpty() ->                       // at the frontier: peek one ahead
+                        runCatching { Discovery.searchPages(q, pages + 1).isNotEmpty() }.getOrDefault(false)
+                    else -> false
+                }
+                val lastPage = maxOf(carried, pages, if (nextHas) pages + 1 else pages)   // highest page index known
                 if (shown.isEmpty()) body.append("<p class=\"note\">${if (pages == 0) "No results. Try other words." else "No more results."}</p>")
                 else shown.forEach { body.append(it) }
-                if (shown.isNotEmpty() && total > 1) {
+                if (shown.isNotEmpty() && (pages > 0 || nextHas)) {
                     body.append("<nav class=\"pager\" aria-label=\"Pages\">")
-                    if (pages > 0) body.append(pageLink(q, pages - 1, "‹", false))
-                    for (i in 0 until total) body.append(pageLink(q, i, (i + 1).toString(), i == pages))
-                    if (pages < total - 1) body.append(pageLink(q, pages + 1, "›", false))
+                    if (pages > 0) body.append(pageLink(q, pages - 1, lastPage, "‹", false))
+                    for (i in 0..lastPage) body.append(pageLink(q, i, lastPage, (i + 1).toString(), i == pages))
+                    if (pages < lastPage) body.append(pageLink(q, pages + 1, lastPage, "›", false))
                     body.append("</nav>")
                 }
-                AppLog.i("Search", "Searched (${shown.size} results shown, page ${pages + 1} of $total)")
+                AppLog.i("Search", "Searched (${shown.size} results shown, page ${pages + 1}${if (nextHas) "+" else ""})")
             } catch (e: Discovery.Challenge) {
                 body.append("<div class=\"note\"><p>DuckDuckGo wants to check that a person is searching (there have been many searches).</p>")
                     .append("<a class=\"btn\" href=\"wlb://search-check?u=${esc(URLEncoder.encode(e.url, "UTF-8"))}\">Answer the check</a></div>")
@@ -93,14 +99,15 @@ object SearchPage {
             "<span class=\"tag ${if (opens) "ok" else "ask"}\">${if (opens) "Opens on this phone" else "Ask to open this page"}</span></article>"
     }
 
-    /** A numbered page link (or the ‹ / › arrows) for the search results foot. */
-    private fun pageLink(q: String, p: Int, label: String, current: Boolean): String {
-        val href = "/search/?q=${esc(URLEncoder.encode(q, "UTF-8"))}" + if (p > 0) "&amp;p=$p" else ""
+    /** A numbered page link (or the ‹ / › arrows) for the search results foot. [known] is carried as n= so the page
+     * numbers already found stay visible when you step back to an earlier page. */
+    private fun pageLink(q: String, p: Int, known: Int, label: String, current: Boolean): String {
+        val href = "/search/?q=${esc(URLEncoder.encode(q, "UTF-8"))}" + (if (p > 0) "&amp;p=$p" else "") + (if (known > 0) "&amp;n=$known" else "")
         return "<a class=\"pg${if (current) " on" else ""}\"${if (current) " aria-current=\"page\"" else ""} href=\"$href\">$label</a>"
     }
 
-    /** How many pages of results to offer at most (words-only results; plenty for this browser). */
-    private const val MAX_PAGES = 5
+    /** A safety ceiling on how many result pages to page through (words-only results rarely approach this). */
+    private const val MAX_PAGES = 25
 
     private const val ICON_SEARCH = "<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-4-4\"/></svg>"
 

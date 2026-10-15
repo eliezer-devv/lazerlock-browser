@@ -53,24 +53,6 @@ object Discovery {
         if (got.isNotEmpty()) synchronized(pageCache) { pageCache[key] = System.currentTimeMillis() to got }
         return got
     }
-    /**
-     * How many pages (counting from the first) have results, up to [cap]. The pages are fetched together and cached,
-     * so the total can be shown up front and paging to any of them is then instant. An error or a challenge on a
-     * look-ahead page simply counts as "no more pages".
-     */
-    fun pageCountUpTo(query: String, cap: Int): Int {
-        val q = query.trim().take(200)
-        if (q.isEmpty() || cap <= 0) return 0
-        val has = BooleanArray(cap)
-        val pool = java.util.concurrent.Executors.newFixedThreadPool(minOf(cap, 4))
-        try {
-            val futs = (0 until cap).map { i -> pool.submit { has[i] = runCatching { searchPages(q, i).isNotEmpty() }.getOrDefault(false) } }
-            futs.forEach { runCatching { it.get(15, java.util.concurrent.TimeUnit.SECONDS) } }
-        } finally { pool.shutdownNow() }
-        var n = 0
-        for (i in 0 until cap) if (has[i]) n++ else break
-        return n
-    }
     private fun pagesOf(q: String, page: Int): List<Page> {
         val url = searchUrl(q, page)
         val html = get(url, accept = "text/html", agent = BROWSER_AGENT, cookies = true)
