@@ -38,7 +38,16 @@ object AdminAlerts {
         schedule(ctx)
     }
     private fun appOn(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("appOn", false)
-    private fun receives(ctx: Context) = if (BuildConfig.ADMIN_APP) appOn(ctx) else isAdminPhone()
+
+    /** Signed out of the admin on this phone: it stops acting as an admin phone (no notifications) until the admin
+     * signs in again here, even if the admin page still has it flagged as an admin phone. */
+    fun setSignedOut(ctx: Context, out: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("signedOut", out).apply()
+        schedule(ctx)
+    }
+    private fun signedOut(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("signedOut", false)
+
+    private fun receives(ctx: Context) = !signedOut(ctx) && (if (BuildConfig.ADMIN_APP) appOn(ctx) else isAdminPhone())
 
     /** Phone notifications: on unless switched off in Settings (admin phones only). */
     fun wanted(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("on", true)

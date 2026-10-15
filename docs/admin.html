@@ -1115,9 +1115,13 @@ async function signedOutHere(why) {
   await forgetDevice();
   S.connected = false; S.sub = null; ME = null;
   QUEUE.ops = []; QUEUE.failed = null; OVER.clear();
+  // Tell the app so this phone stops acting as an admin phone (notifications etc.) the moment it's signed out.
+  if (INAPP && window.WLBAdmin && WLBAdmin.adminSignedOut) try { WLBAdmin.adminSignedOut(); } catch {}
   render();
   if (why) say(why, true);
 }
+// Reopened from the background (called by the app): re-ask the PIN/fingerprint if one is set, by reloading the gate.
+window.wlRelock = () => { try { if (getPin() || getBio()) location.reload(); } catch {} };
 const NO_ISSUES_MSG = 'Couldn\'t answer it.';
 const listPathOf = name => name === 'public' ? 'docs/whitelist.json' : `docs/lists/${name}.json`;
 
@@ -1260,6 +1264,8 @@ async function loadAll(sha, opts) {
   await loadDevices();
   await openList(S.lists.includes(S.current) ? S.current : 'public');
   S.connected = true;
+  // Signed in on this phone: it may act as an admin phone again (clears the signed-out flag the app keeps).
+  if (INAPP && window.WLBAdmin && WLBAdmin.adminSignedIn) try { WLBAdmin.adminSignedIn(); } catch {}
   if (!canDo('requests') && S.tab === 'requests') S.tab = canDo('edit') ? 'sites' : seesPhones() ? 'phones' : 'settings';
   loadInbox();   // in the background; the Requests tab fills in when it arrives
   return true;
@@ -3988,6 +3994,7 @@ function accountSection(section) {
   return section('Admin page', h('div', { class: 'group' },
     row('shield', 'Your account', ME ? `${ME.email}${getPin() || getBio() ? ` · locked on this ${INAPP ? 'phone' : 'device'}` : ''}` : '', () => open({ name: 'account' }), 'openAccount'),
     isOwner() ? row('phone', 'Admins', 'Add admins for some phones, and choose what they can do', () => { S.admins = null; open({ name: 'admins' }); }, 'openAdmins') : null,
+    ADMINAPP ? row('download', 'App update', 'Check for a new version of the admin app', () => { try { WLBAdmin.updateApp(); } catch {} }, 'adminAppUpdate') : null,
     INAPP ? null : h('a', { class: 'row', href: status, target: '_blank', rel: 'noopener' }, h('span', { class: 'ic' }, icon('ext', 20)),
       h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Open the status page')))));
 }
@@ -4249,6 +4256,7 @@ function browsersScreen() {
         h('input', { type: 'radio', name: 'pmode', value: v, checked: (p.mode || 'off') === v, onchange: () => setMode(v) }),
         h('span', { class: 'grow' }, h('b', null, t), h('span', { class: 'small muted', style: 'display:block' }, s))))),
       p.mode === 'cover' ? sw('Screen cover', 'Turn the cover off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { ensureProtect(d).overlay = v; }) : null,
+      p.mode === 'cover' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them).', p.coverLists === true, v => { if (v) ensureProtect(d).coverLists = true; else delete ensureProtect(d).coverLists; }) : null,
       p.mode === 'owner' && !isOwner ? h('p', { class: 'warn', style: 'margin:0' }, 'This phone isn\'t a device owner yet. Follow the one-time setup, with a computer, first.') : null,
       p.mode === 'owner' ? sw('Keep the clock honest', 'Keeps automatic date and time on, so timers can\'t be dodged.', p.lockClock !== false, v => { ensureProtect(d).lockClock = v; }) : null,
       p.mode === 'owner' ? sw('New apps need your OK', 'Nothing new can be installed without you (device owner only).', p.blockInstalls === true, v => { ensureProtect(d).blockInstalls = v; }) : null) : null,

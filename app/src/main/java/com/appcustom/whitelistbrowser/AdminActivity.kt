@@ -163,6 +163,17 @@ class AdminActivity : Activity() {
                     runOnUiThread { requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 33) }
             }
 
+            /** The admin signed in / out on this phone: so the browser on the same phone stops (or resumes) acting as
+             * an admin phone — notifications and the like — the moment they log out, not only when the admin un-flags it. */
+            @android.webkit.JavascriptInterface
+            fun adminSignedIn() { AdminAlerts.setSignedOut(applicationContext, false) }
+            @android.webkit.JavascriptInterface
+            fun adminSignedOut() { AdminAlerts.setSignedOut(applicationContext, true) }
+
+            /** The admin app: a manual "update now" (Settings → App update), in addition to the automatic check. */
+            @android.webkit.JavascriptInterface
+            fun updateApp() { runOnUiThread { manualUpdate() } }
+
             /** Fingerprint (or face) unlock: can this phone do it? */
             @android.webkit.JavascriptInterface
             fun canBiometric(): Boolean = canUseBiometric()
@@ -220,6 +231,13 @@ class AdminActivity : Activity() {
             "&theme=${if (Ui.dark) "dark" else "light"}" + (if (BuildConfig.ADMIN_APP) "&app=admin" else "") + focusParams() + linkPart())
     }
 
+    private var wasStopped = false
+
+    override fun onStop() {
+        wasStopped = true
+        super.onStop()
+    }
+
     override fun onPause() {
         AdminAlerts.adminScreenOpen = false
         super.onPause()
@@ -229,6 +247,8 @@ class AdminActivity : Activity() {
         super.onResume()
         AdminAlerts.adminScreenOpen = true
         runCatching { GuardService.dismissCover() }
+        // Reopened after being in the background: ask for the PIN/fingerprint again (the page re-locks if one is set).
+        if (wasStopped) { wasStopped = false; runCatching { web.evaluateJavascript("window.wlRelock && window.wlRelock()", null) } }
         if (BuildConfig.ADMIN_APP) {
             checkForUpdate()
             // Notifications: a look now (the background check also runs every 15 minutes or so).
@@ -255,6 +275,28 @@ class AdminActivity : Activity() {
                     runOnUiThread { Toast.makeText(this, "Downloading an update (version ${r.versionName})", Toast.LENGTH_SHORT).show() }
                 }
             }.onFailure { AppLog.w("Update", "Couldn't check for an update: ${it.message}") }
+        }.start()
+    }
+
+    /** "App update" tapped in the admin app: check now and, if there's a newer version, download and install it. */
+    private fun manualUpdate() {
+        Toast.makeText(this, "Checking for a new version…", Toast.LENGTH_SHORT).show()
+        val ctx = applicationContext
+        Thread {
+            runCatching {
+                Updater.waiting(ctx)?.let { Updater.install(ctx, it); return@runCatching }
+                val r = Updater.fetchLatest()
+                runOnUiThread {
+                    when {
+                        r == null -> Toast.makeText(this, "Couldn't check for an update. Try again later.", Toast.LENGTH_LONG).show()
+                        !Updater.isNewer(r) -> Toast.makeText(this, "You have the latest version (${BuildConfig.VERSION_NAME}).", Toast.LENGTH_LONG).show()
+                        else -> {
+                            Toast.makeText(this, "Downloading version ${r.versionName}; it installs by itself.", Toast.LENGTH_LONG).show()
+                            Thread { runCatching { if (!Updater.downloading(ctx, r)) Updater.startDownload(ctx, r) }.onFailure { AppLog.w("Update", "Download failed: ${it.message}") } }.start()
+                        }
+                    }
+                }
+            }.onFailure { AppLog.w("Update", "Manual update check failed: ${it.message}") }
         }.start()
     }
 

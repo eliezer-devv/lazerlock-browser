@@ -30,6 +30,7 @@ object BrowserGuard {
         val blockNew: Boolean,                  // a newly found browser is blocked straight away
         val blockInstalls: Boolean,             // device owner: new apps need the admin's OK
         val lockClock: Boolean,                 // device owner: keep automatic date and time on
+        val coverLists: Boolean,                // optional: cover the whole Accessibility & Device-admin LIST screens
         val apps: Map<String, String>           // package -> "allow" | "block"
     )
 
@@ -43,6 +44,7 @@ object BrowserGuard {
             blockNew = o.optBoolean("blockNew", true),
             blockInstalls = o.optBoolean("blockInstalls", false),
             lockClock = o.optBoolean("lockClock", true),
+            coverLists = o.optBoolean("coverLists", false),
             apps = apps)
     }
 
@@ -63,6 +65,7 @@ object BrowserGuard {
             mode = if (localOwner) "owner" else "cover",
             overlay = admin?.overlay ?: true, blockNew = admin?.blockNew ?: true,
             blockInstalls = admin?.blockInstalls ?: false, lockClock = admin?.lockClock ?: true,
+            coverLists = admin?.coverLists ?: false,
             apps = admin?.apps ?: emptyMap())
         return admin
     }
@@ -71,6 +74,8 @@ object BrowserGuard {
     fun on(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" } ?: false
     /** The screen cover should run now (the admin hasn't switched it off). */
     fun coverOn(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" && it.overlay } ?: false
+    /** The stronger, optional cover (whole Accessibility & Device-admin list screens). Off unless the admin turned it on. */
+    fun coverLists(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" && it.overlay && it.coverLists } ?: false
 
     /** Our own package, and the Android pieces that must never be blocked. */
     private fun ownPackage(ctx: Context) = ctx.packageName

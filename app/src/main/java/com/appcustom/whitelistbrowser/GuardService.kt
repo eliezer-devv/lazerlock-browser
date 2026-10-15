@@ -64,23 +64,24 @@ class GuardService : AccessibilityService() {
         @Volatile private var instance: GuardService? = null
         fun dismissCover() { instance?.let { svc -> svc.main.post { svc.hideAll() } } }
 
-        // Class-name fragments of OUR app's own detail pages (plain Android; "deviceadminadd" also matches Samsung's
-        // "secdeviceadminadd"). Only used together with our name on screen, so another app's page is never covered.
+        // ── Languages ────────────────────────────────────────────────────────────────────────────────────────────
+        // Language-INDEPENDENT (works whatever the phone's language is set to): our App info and Device-admin pages are
+        // matched by Android CLASS names (installedappdetails / deviceadminadd); "is this our app?" is matched by our
+        // app NAME (R.string.app_name), which is the same in every language and follows the name automatically if it's
+        // ever changed; and our Accessibility page is matched by our OWN description string (DESC_PHRASE), which Android
+        // shows verbatim. So the three critical screens are covered in any language.
+        // Language-DEPENDENT (reads the system's own words): the text markers below and the whole-list titles. These are
+        // English only — to add a language, capture a cover log on a phone set to it and add the exact words it shows.
         private val DETAIL_CLASS = listOf("installedappdetails", "deviceadminadd")
-        // Visible-text markers of a page we must cover (checked only when our own name is also on screen).
-        private const val DEVICE_ADMIN = "device admin"       // our app's device-admin detail page says this (with our name)
-        // The "Device admin apps" LIST itself (by its screen title), covered up front — before the toggle is tapped —
-        // so a fast tap can't beat the cover. Matched by the title + "navigate up", so a mere link to it (e.g. on the
-        // Security page, titled otherwise) isn't covered.
+        private val DEVICE_ADMIN = listOf("device admin")
+        // The "Device admin apps" LIST (by its screen title + the Up button), for the optional whole-list cover.
         private val ADMIN_LIST = listOf("device admin apps navigate up", "device admin navigate up")
         private val DETAIL_WORDS = listOf(
-            "force stop", "uninstall", "deactivate", "disable", "turn off",
-            "clear storage", "clear data", "clear cache")
-        private const val DESC_PHRASE = "covers blocked apps" // our accessibility-service description
-        // The Accessibility "Installed apps" LIST (its title). Our name and description show in that list, which would
-        // otherwise cover the whole list; we cover only our own service page (opened from it), not the list itself.
-        private const val ACCESS_LIST = "installed apps navigate up"
-        private const val RESTRICTED = "restricted setting"
+            "force stop", "uninstall", "deactivate", "disable", "turn off", "clear storage", "clear data", "clear cache")
+        private const val DESC_PHRASE = "covers blocked apps" // our accessibility-service description (our own string)
+        // The Accessibility "Installed apps" LIST (its title): by default we cover only our own service page, not the list.
+        private val ACCESS_LIST_WORDS = listOf("installed apps navigate up")
+        private val RESTRICTED = listOf("restricted setting")
         private const val SETUP_GRACE_MS = 8000L
         private const val HIDE_DELAY_MS = 500L
         private const val BACK_HOME_MS = 1800L   // Back tapped but still on a locked screen within this → go Home
@@ -108,6 +109,20 @@ class GuardService : AccessibilityService() {
 
     private var lastContentCheck = 0L
     private var lastDiagCls = ""
+    private var lastBlockedDiag = ""
+
+    // The phone's home/launcher packages. The Google app's search bar and Discover feed live on the home screen, so if
+    // "the Google app" is blocked we must NOT cover the home screen itself — only the real app.
+    private val homePkgs by lazy {
+        runCatching {
+            packageManager.queryIntentActivities(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME), 0)
+                .map { it.activityInfo.packageName }.toSet()
+        }.getOrDefault(emptySet())
+    }
+    private fun onHomeScreen(): Boolean = runCatching {
+        val root = rootInActiveWindow?.packageName?.toString()
+        root != null && (homePkgs.contains(root) || root.contains("launcher"))
+    }.getOrDefault(false)
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
@@ -123,6 +138,11 @@ class GuardService : AccessibilityService() {
         runCatching {
             if (!BrowserGuard.coverOn(applicationContext)) { if (stateChanged) hideAll(); return }
             if (BrowserGuard.blocked(applicationContext, pkg)) {
+                // On the home screen, a "blocked" package is usually the Google bar/feed that's part of home — don't cover it.
+                if (onHomeScreen()) { if (stateChanged) hideAll(); return }
+                // One diagnostic line per new blocked screen (so a log shows what the cover saw, e.g. the Google case).
+                val key = "$pkg|$cls"
+                if (key != lastBlockedDiag) { lastBlockedDiag = key; AppLog.i("CoverDiag", "blocked app pkg=$pkg cls=$cls root=${runCatching { rootInActiveWindow?.packageName }.getOrNull()}") }
                 showFull(blockedTitle(pkg), "Websites open in Whitelist Browser on this phone. You can ask to use this app.", "blocked:$pkg")
                 return
             }
@@ -175,17 +195,31 @@ class GuardService : AccessibilityService() {
     private fun isSettingsPkg(pkg: String): Boolean = pkg.contains("settings")
     private fun isForegroundSettings(): Boolean = runCatching { rootInActiveWindow?.packageName?.toString()?.contains("settings") == true }.getOrDefault(false)
 
+    /** The stronger, optional protection (admin → Block other browsers): also cover the whole Accessibility and
+     *  Device-admin LIST screens, not only our own pages. Off by default. */
+    private fun coverLists(): Boolean = runCatching { BrowserGuard.coverLists(applicationContext) }.getOrDefault(false)
+
+    /**
+     * DEFAULT (always): our own device-admin page (by class — robust even when its text reads empty, and in any
+     * language), our App info page, and our own Accessibility service page — but NOT the whole "Installed apps" or
+     * "Device admin apps" lists. OPTIONAL (coverLists on): also cover those two whole list screens.
+     */
     private fun isGuarded(cls: String, text: String, us: Boolean): Boolean {
-        // The Device admin apps LIST (by its own title) is covered even before our row/name is read, so the toggle is
-        // under the cover from the moment the screen opens — not only once someone taps it.
-        if (ADMIN_LIST.any { text.contains(it) }) return true
+        // Our device-admin detail / "deactivate?" screen, by class. No name/text needed, so an empty or still-drawing
+        // read (the cause of the "no overlay after reopening it" glitch) is still covered, in any phone language.
+        if (cls.contains("deviceadminadd")) return true
+        // Optional: the whole list screens. The Accessibility "Installed apps" list is matched by our OWN description
+        // (us + DESC_PHRASE) — language-independent, since Android shows our service's description in that list. The
+        // Device-admin apps list has no unique class or string of ours, so it falls back to its title text. (The
+        // device-admin TOGGLE page itself is always covered by class above, in any language.)
+        if (coverLists() && ((us && text.contains(DESC_PHRASE)) || ACCESS_LIST_WORDS.any { text.contains(it) } || ADMIN_LIST.any { text.contains(it) })) return true
         if (!us) return false
-        if (DETAIL_CLASS.any { cls.contains(it) }) return true          // our App info / device-admin page (by class)
-        if (text.contains(DEVICE_ADMIN)) return true                    // the whole device-admin page (by text)
-        if (text.contains(ACCESS_LIST)) return false                    // the Accessibility "Installed apps" LIST: leave it, cover only our own page
+        if (cls.contains("installedappdetails")) return true            // our App info page (by class)
+        if (ACCESS_LIST_WORDS.any { text.contains(it) }) return false   // default: cover our Accessibility page, not the whole list
+        if (DEVICE_ADMIN.any { text.contains(it) }) return true         // our device-admin managed page (by text)
         if (DETAIL_WORDS.any { text.contains(it) }) return true         // Force stop / Uninstall / Deactivate / …
-        if (text.contains(RESTRICTED)) return true                      // the "restricted setting" dialog
-        if (text.contains(DESC_PHRASE)) return true                     // our accessibility-service detail page
+        if (RESTRICTED.any { text.contains(it) }) return true           // the "restricted setting" dialog
+        if (text.contains(DESC_PHRASE)) return true                     // our accessibility-service page (its description)
         return false
     }
 

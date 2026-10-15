@@ -488,8 +488,10 @@ class MainActivity : Activity() {
      * the admin page isn't a site on the list. True if it was one.
      */
     private fun openAdminLink(url: String): Boolean {
-        if (!url.startsWith(Config.PAGES_BASE, ignoreCase = true)) return false
-        val u = Uri.parse(url)
+        val u = runCatching { Uri.parse(url) }.getOrNull() ?: return false
+        // Any admin-email link (…/admin.html#confirm=/#invite=/#reset=) opens in the app's own admin screen, even if
+        // the address itself isn't on this phone's lists — so "Yes, it's me" always works here.
+        if (u.scheme != "https" && u.scheme != "http") return false
         if (u.path?.endsWith("/admin.html") != true) return false
         val part = u.fragment?.takeIf { Regex("(confirm|invite|reset)=[A-Za-z0-9_.-]+").matches(it) } ?: return false
         AppLog.i("Admin", "Opening an admin email's link (${part.substringBefore('=')})")
@@ -1653,7 +1655,10 @@ class MainActivity : Activity() {
                 when {
                     release != null && Updater.isNewer(release) -> {
                         availableUpdate = release
-                        showBanner(if (updateAskedByAdmin) "Please update: version ${release.versionName} is ready. Tap to update."
+                        // A manual check (Settings → App update) goes straight to downloading and installing, so the
+                        // only thing left to tap is Android's own install button.
+                        if (manual) startUpdate(release)
+                        else showBanner(if (updateAskedByAdmin) "Please update: version ${release.versionName} is ready. Tap to update."
                             else "Version ${release.versionName} is available. Tap to update.")
                     }
                     result.isFailure && manual ->
@@ -3926,7 +3931,8 @@ class MainActivity : Activity() {
             Triple(R.drawable.ic_d_clock, "My activity" to "Time on each site, for you only") { showMyActivity() },
             Triple(R.drawable.ic_d_globe, "Phone's browser" to (if (isPhonesBrowser()) "This is the phone's browser: links from other apps open here"
                 else "Make it the phone's browser, so links from other apps open here")) { becomePhonesBrowser() },
-            Triple(R.drawable.ic_d_shield, "Block other browsers" to otherBrowsersStatus()) { showOtherBrowsers() }))
+            Triple(R.drawable.ic_d_shield, "Block other browsers" to otherBrowsersStatus()) { showOtherBrowsers() },
+            Triple(R.drawable.ic_d_pin, "Lock with a PIN" to ("Set a PIN to lock this app" + if (UserLock.isSet(this)) " · On" else "")) { UserLock.manage(this) { showThisPhone() } }))
     }
 
     // ---------- Other browsers: turning the protection on, on this phone (supervised setup) ----------
@@ -4228,17 +4234,17 @@ class MainActivity : Activity() {
                                 LinearLayout.LayoutParams(0, -2, 1f))
                             addView(Ui.text(this@MainActivity, MyActivity.fmt(ms), 14f, Ui.MUTED))
                         })
-                        // A bar: this site's time against the most.
-                        val track = android.widget.FrameLayout(this@MainActivity)
-                        track.background = Ui.rounded(Ui.CHIP_OFF, Ui.dp(this@MainActivity, 4).toFloat())
-                        val bar = View(this@MainActivity)
-                        bar.background = Ui.rounded(Ui.ACCENT, Ui.dp(this@MainActivity, 4).toFloat())
-                        track.addView(bar, android.widget.FrameLayout.LayoutParams(0, -1))
-                        track.post {
-                            val lp = bar.layoutParams
-                            lp.width = maxOf(Ui.dp(this@MainActivity, 6), (track.width.toLong() * ms / top).toInt())
-                            bar.layoutParams = lp
+                        // A bar: this site's time against the most, as weights so it's exactly proportional (no
+                        // measure-time guesswork). The filled part is this site's time; the rest is the remainder.
+                        val track = LinearLayout(this@MainActivity).apply {
+                            orientation = LinearLayout.HORIZONTAL
+                            background = Ui.rounded(Ui.CHIP_OFF, Ui.dp(this@MainActivity, 4).toFloat())
+                            clipToOutline = true
                         }
+                        track.addView(View(this@MainActivity).apply { background = Ui.rounded(Ui.ACCENT, Ui.dp(this@MainActivity, 4).toFloat()) },
+                            LinearLayout.LayoutParams(0, -1, maxOf(1f, ms.toFloat())))
+                        val rest = (top - ms).toFloat()
+                        if (rest > 0f) track.addView(View(this@MainActivity), LinearLayout.LayoutParams(0, -1, rest))
                         addView(track, LinearLayout.LayoutParams(-1, Ui.dp(this@MainActivity, 7)).apply { topMargin = Ui.dp(this@MainActivity, 6) })
                     })
                 }
@@ -4469,14 +4475,7 @@ class MainActivity : Activity() {
             val wasPhoneColours = Ui.usePhoneColours(this@MainActivity)
             val (colourRow, colourSwitch) = Ui.switchRow(this@MainActivity, "Use my phone's colours", "Matches your wallpaper", wasPhoneColours)
             if (Ui.phoneColoursAvailable) add(colourRow)
-            // The person's own PIN to open the browser (optional, kept on this phone, nothing to do with the admin).
-            fun lockText() = "Lock with a PIN · " + (if (UserLock.isSet(this@MainActivity)) "On" else "Off")
-            add(Ui.text(this@MainActivity, lockText(), 15f, Ui.INK, "bold").apply {
-                background = Ui.rounded(Ui.CARD, Ui.dp(this@MainActivity, 14).toFloat(), Ui.LINE, Ui.dp(this@MainActivity, 1))
-                val pd = Ui.dp(this@MainActivity, 14); setPadding(pd, pd, pd, pd)
-                minHeight = Ui.dp(this@MainActivity, 52); gravity = android.view.Gravity.CENTER_VERTICAL
-                setOnClickListener { UserLock.manage(this@MainActivity) { text = lockText() } }
-            })
+            // (The optional PIN to lock the app has moved to Phone protection → "Lock with a PIN".)
             button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
             button("Done", Ui.Kind.PRIMARY) {
                 it.dismiss()
