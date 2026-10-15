@@ -245,6 +245,10 @@ class MainActivity : Activity() {
         UserAlerts.appVisible = true
         AppLog.i("App", "Opened")
         runCatching { GuardService.dismissCover() }   // our app is in front: no cover needed
+        if (UserLock.isSet(this) && !UserLock.unlocked) {   // the person's own PIN (if they set one): lock on open
+            web.visibility = View.INVISIBLE
+            UserLock.promptUnlock(this) { web.visibility = View.VISIBLE }
+        }
         InstallReceiver.showConfirm = { confirm -> runCatching { startActivity(confirm) }.onFailure { AppLog.e("Update", "Couldn't show the installer", it) } }
         installWaitingUpdate()
         if (Device.name(this) != null) askNotificationsOnce()   // (phones set up before this was asked: once, now)
@@ -260,6 +264,11 @@ class MainActivity : Activity() {
         if (Config.LOCK_TASK) runCatching { startLockTask() }.logged("App", "Pinning the app")
         main.removeCallbacks(tempTask)
         main.postDelayed(tempTask, tempTick)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        UserLock.unlocked = false            // sent to the background: ask for the person's PIN again next time
     }
 
     override fun onPause() {
@@ -4449,6 +4458,14 @@ class MainActivity : Activity() {
             val wasPhoneColours = Ui.usePhoneColours(this@MainActivity)
             val (colourRow, colourSwitch) = Ui.switchRow(this@MainActivity, "Use my phone's colours", "Matches your wallpaper", wasPhoneColours)
             if (Ui.phoneColoursAvailable) add(colourRow)
+            // The person's own PIN to open the browser (optional, kept on this phone, nothing to do with the admin).
+            fun lockText() = "Lock with a PIN · " + (if (UserLock.isSet(this@MainActivity)) "On" else "Off")
+            add(Ui.text(this@MainActivity, lockText(), 15f, Ui.INK, "bold").apply {
+                background = Ui.rounded(Ui.CARD, Ui.dp(this@MainActivity, 14).toFloat(), Ui.LINE, Ui.dp(this@MainActivity, 1))
+                val pd = Ui.dp(this@MainActivity, 14); setPadding(pd, pd, pd, pd)
+                minHeight = Ui.dp(this@MainActivity, 52); gravity = android.view.Gravity.CENTER_VERTICAL
+                setOnClickListener { UserLock.manage(this@MainActivity) { text = lockText() } }
+            })
             button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
             button("Done", Ui.Kind.PRIMARY) {
                 it.dismiss()
