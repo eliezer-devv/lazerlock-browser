@@ -118,10 +118,13 @@ object Requests {
 
         val page = if (scope == Scope.PAGE) pageUrl?.let { Whitelist.pageKey(it) } else null
         val subject = page ?: domain
-        val what = if (page != null) "just this page" else "the whole site"
+        val one = item != null                                   // just one photo or video, not the whole page
+        val oneWord = if (mediaKind.contains("photos")) "photo" else "video"
+        val what = if (one) "just this one $oneWord" else if (page != null) "just this page" else "the whole site"
         val kind = if (page != null) "page" else "site"
         val mw = mediaWords(mediaKind)
         val headline = when {
+            one -> "Open just this one $oneWord"
             media == Media.ON -> "Turn $mw back on for $what"
             action == Action.ALLOW && media == Media.OFF -> "Open $what, without $mw"
             action == Action.BLOCK && media == Media.OFF -> "Block only the $mw on $what"

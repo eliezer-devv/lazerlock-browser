@@ -1602,6 +1602,8 @@ let lastScreenKey = '';
 function go(tab) { S.tab = tab; S.sub = null; render(); }
 function open(sub) { S.sub = sub; render(); }
 function back() { S.sub = null; render(); }
+// After answering a request from its detail screen, go back to the requests list instead of the "already answered" card.
+function backOrRender() { if (S.sub && S.sub.name === 'request') back(); else render(); }
 const screenTitle = (title, sub) => h('div', { class: 'title' }, h('h1', null, title), sub ? h('p', null, sub) : null);
 const backLink = (label, onclick = back) => h('button', { type: 'button', class: 'back', onclick }, icon('back', 20, 2), label);
 function render() {
@@ -2502,7 +2504,7 @@ function requestCard(issue) {
       S.requests = S.requests.filter(i => i.number !== issue.number);
       const where = approving ? targets.filter(t => t.box.checked).map(t => t.label) : [];
       S.answered.unshift({ title, label: `${label}${where.length ? ', in ' + where.join(', ') : ''}` });
-      render();
+      backOrRender();
       say(`${label}. GitHub does it within a minute, and ${phone} is told a few minutes after.`);
     } catch (e) {
       actions.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -2609,8 +2611,7 @@ function answeredDetailsScreen() {
       isSet || req.action === 'block' ? null : kv(req.type === 'timer' ? 'Asked for' : 'How long', asked ? `${fmtMin(asked)}${req.timeMode === 'use' ? ', time on the site only' : ', from when it\'s approved'}` : 'Always'),
       kv('Note', req.note ? `“${req.note}”` : null),
       kv('Answered', `${answeredBy(a)}, ${whenText(a.at)}`),
-      kv('Reason', a.reason || null),
-      kv('Phone told', a.message ? `“${a.message}”` : null),
+      kv('Reason', a.reason ? `“${a.reason}”` : (a.message ? `“${a.message}”` : null)),
       kv('Before that', (x.earlier || []).length ? x.earlier.map(e => `${e.verdict === 'denied' ? 'Denied' : 'Approved'} ${answeredBy(e).replace(/^On/, 'on')}, ${whenText(e.at)}`).join('\n') : null))];
   const mayAnswer = isSet ? (canDo('manage') || fullAdmin()) : canDo('requests');
   if (mayAnswer && req.type !== 'register') {
@@ -2664,7 +2665,7 @@ function browserRequestCard(issue, req) {
       S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
       S.requests = S.requests.filter(i => i.number !== issue.number);
       S.answered.unshift({ title: `A new browser: ${label}`, label: `${labelTxt} for ${phone}` });
-      render();
+      backOrRender();
       say(`${labelTxt}. GitHub does it within a minute, and ${phone} is told a few minutes after.`);
     } catch (e) { actions.querySelectorAll('button').forEach(b => b.disabled = false); say(e.message === 'NO_ISSUES' ? NO_ISSUES_MSG : e.message, true); }
   };
@@ -2701,7 +2702,7 @@ function timerRequestCard(issue, req) {
       S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
       S.requests = S.requests.filter(i => i.number !== issue.number);
       S.answered.unshift({ title, label: `${label} for ${phone}` });
-      render();
+      backOrRender();
       say(`${label}. GitHub does it within a minute, and ${phone} is told a few minutes after.`);
     } catch (e) { actions.querySelectorAll('button').forEach(b => b.disabled = false); say(e.message === 'NO_ISSUES' ? NO_ISSUES_MSG : e.message, true); }
   };
@@ -2818,7 +2819,7 @@ function settingRequestCard(issue, req) {
       S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
       S.requests = S.requests.filter(i => i.number !== issue.number);
       S.answered.unshift({ title, label: `${label} for ${phone}` });
-      render();
+      backOrRender();
       say(`${label}. GitHub does it within a minute, and ${phone} is told a few minutes after.`);
     } catch (e) {
       actions.querySelectorAll('button').forEach(b => b.disabled = false);
@@ -3125,10 +3126,11 @@ function siteMediaCompact(d, isNew) {
   };
   ta.addEventListener('change', saveBlk);
   return h('div', { class: 'stack', style: 'gap:8px' },
-    h('div', { class: 'mrow' }, h('div', { class: 'top' },
-      h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Photos, videos and sound'),
-        h('span', { class: 's' }, uniform === 'mixed' ? 'Set differently per part — open “Set each” below' : 'Tap “Set each” to split them')),
-      obSeg('Photos, videos and sound', uniform === 'mixed' ? '' : uniform, setAll,
+    // Label and note on their own lines (full width), the segment below — so the text isn't squeezed next to the buttons.
+    h('div', { class: 'mrow' },
+      h('b', null, 'Photos, videos and sound'),
+      h('span', { class: 's' }, uniform === 'mixed' ? 'Set differently per part — open “Set each” below' : 'Tap “Set each” to split them'),
+      h('div', { style: 'margin-top:4px' }, obSeg('Photos, videos and sound', uniform === 'mixed' ? '' : uniform, setAll,
         { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMediaAll' }))),
     h('details', { class: 'more' }, h('summary', null, 'Set each & add always-blocked pages'),
       h('div', { style: 'margin-top:10px' }, siteMedia(d)),
@@ -3152,8 +3154,12 @@ function siteMedia(d) {
     h('span', { class: 'flabel', style: 'margin-top:4px' }, 'Photos, videos and sound on this site'),
     h('div', { class: 'mrows' }, MKINDS.map(([k, t]) => {
       const K = capFirst(k), v = d['no' + K] ? 'blocked' : d['on' + K] ? 'open' : 'default';
-      return h('div', { class: 'mrow' }, h('div', { class: 'top' }, h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, t), h('span', { class: 's' }, DESC[k])),
-        obSeg(t, v, nv => { d['no' + K] = nv === 'blocked'; d['on' + K] = nv === 'open'; render(); }, { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMedia_' + k })),
+      // Short label beside the buttons; the longer description sits on its own full-width line below (so it doesn't
+      // get squeezed into a tall, narrow column next to the three-wide segment).
+      return h('div', { class: 'mrow' },
+        h('div', { class: 'top' }, h('b', null, t),
+          obSeg(t, v, nv => { d['no' + K] = nv === 'blocked'; d['on' + K] = nv === 'open'; render(); }, { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMedia_' + k })),
+        h('span', { class: 's' }, DESC[k]),
         h('span', { class: 's', 'data-sub': k }, sub(k, v)));
     })),
     h('div', { class: 'explain' },
@@ -3342,7 +3348,7 @@ function importScreen() {
     } catch (e) { say(e.message, true); }
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites'),
-    screenTitle('Import from a spreadsheet', `Into ${listLabel(S.current)}`),
+    screenTitle('Import or download a spreadsheet', `Into ${listLabel(S.current)}`),
     h('p', { class: 'hint' }, 'Paste cells from Excel or Google Sheets, or choose a file. Columns: domain, name, home page, tile opens, subdomains, only these pages, no photos or videos. Only the domain is needed.'),
     ta, h('div', { class: 'field' }, h('label', { for: 'bulkFile' }, 'Or choose a file (.csv, .xlsx)'), file),
     h('div', { class: 'group' }, mode('merge'), mode('replace')),
@@ -3370,7 +3376,7 @@ function listSettingsScreen() {
       } }))) : null,
     // Import, and the list-wide overviews (each site's own are in its settings).
     h('div', { class: 'group' },
-      settingsRow('table', 'Import from a spreadsheet', null, () => open({ name: 'import' }), 'openImport'),
+      settingsRow('table', 'Import or download a spreadsheet', null, () => open({ name: 'import' }), 'openImport'),
       settingsRow('photooff', 'Pages without photos, videos or sound (all sites)', new Set([...L.noPhotoPages, ...L.noVideoPages, ...L.noSoundPages]).size,
         () => open({ name: 'nomedia' }), 'openNoMedia'),
       settingsRow('link', 'Embedded content allowed (all sites)', Object.values((L.extra && L.extra.embeds) || {}).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0),
@@ -4035,13 +4041,6 @@ function settingsScreen() {
       h('button', { type: 'button', class: 'row', id: 'openApprovalPin', onclick: () => open({ name: 'approvalpin', scope: 'all' }) }, h('span', { class: 'ic' }, icon('shield', 20)),
         h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'PIN for all phones'),
           h('span', { class: 'dom' }, D.approvalPin ? 'Set: type it on a phone to approve a request there' : 'Not set')),
-        h('span', { class: 'chev' }, icon('chev', 18))))),
-    !isOwner() ? null : section('Notifications', h('div', { class: 'group' },
-      h('a', { class: 'row', id: 'ghEmails', href: 'https://github.com/settings/notifications', target: '_blank', rel: 'noopener' },
-        h('span', { class: 'ic' }, icon('bell', 20)),
-        h('span', { class: 'grow' }, h('span', { class: 't' }, 'Turn off GitHub emails'),
-          h('span', { class: 's' }, 'Opens GitHub\'s notification settings: under "Participating", untick Email. ' +
-            'Turn on phone notifications first (Phones → your phone → Admin phone), so you\'re never without either.')),
         h('span', { class: 'chev' }, icon('chev', 18))))),
     accountSection(section),
     INAPP && !ADMINAPP ? h('button', { type: 'button', class: 'btn s wide', onclick: () => $('closeBtn').click() }, 'Close admin and go back to the browser') : null);

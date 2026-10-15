@@ -4,7 +4,9 @@ import android.app.Activity
 import android.app.Dialog
 import android.content.Context
 import android.content.res.ColorStateList
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
@@ -287,40 +289,36 @@ object Ui {
         }
 
     /** A white row with a title, an optional line under it, and a switch. Returns the row and its switch. */
-    fun switchRow(ctx: Context, title: String, sub: String? = null, checked: Boolean = false): Pair<LinearLayout, Switch> {
-        val sw = Switch(ctx).apply {
-            isChecked = checked
-            val states = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
-            // Drawn by the app, so it's always clear. On: a solid green track with a big white knob. Off: an outlined
-            // track (a clear dark outline) with a smaller dark knob, so it stands out even on a white card.
-            val on = intArrayOf(android.R.attr.state_checked)
-            // Sized so the ball always stays inside the track: the track is exactly two balls wide (48dp), so Android
-            // never widens the switch past the track, and the ball moves half the track's width.
-            trackDrawable = android.graphics.drawable.StateListDrawable().apply {
-                // On: outlined too (a deeper shade of the accent; lighter in dark mode), so it stands out even
-                // when the accent is pale (e.g. with the phone's own colours).
-                addState(on, GradientDrawable().apply {
-                    setColor(ACCENT); setStroke(dp(ctx, 2), outlineOf(ACCENT)); cornerRadius = dp(ctx, 14).toFloat(); setSize(dp(ctx, 48), dp(ctx, 28))
-                })
-                addState(intArrayOf(), GradientDrawable().apply {
-                    setColor(SEG); setStroke(dp(ctx, 2), MUTED); cornerRadius = dp(ctx, 14).toFloat(); setSize(dp(ctx, 48), dp(ctx, 28))
-                })
-            }
-            thumbDrawable = android.graphics.drawable.StateListDrawable().apply {
-                // On: a white 20dp ball in a 24×28 slot (2dp from the track's end).
-                addState(on, android.graphics.drawable.InsetDrawable(GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL; setColor(Color.WHITE); setStroke(dp(ctx, 1), outlineOf(ACCENT)); setSize(dp(ctx, 20), dp(ctx, 20))
-                }, dp(ctx, 2), dp(ctx, 4), dp(ctx, 2), dp(ctx, 4)))
-                // Off: a smaller dark 14dp ball, the outline's colour.
-                addState(intArrayOf(), android.graphics.drawable.InsetDrawable(GradientDrawable().apply {
-                    shape = GradientDrawable.OVAL; setColor(MUTED); setSize(dp(ctx, 14), dp(ctx, 14))
-                }, dp(ctx, 5), dp(ctx, 7), dp(ctx, 5), dp(ctx, 7)))
-            }
-            trackTintList = null
-            thumbTintList = null
-            switchMinWidth = dp(ctx, 48)
-            showText = false
+    /**
+     * The one toggle used everywhere, drawn by the app so it always looks right (Android's own Switch rendered the
+     * custom track/thumb inconsistently). It matches the admin page's switch exactly: off is a pale track with a
+     * dark outline and a small dark knob; on is a solid accent track with a big white knob. It's still a [Switch],
+     * so callers keep isChecked / setOnCheckedChangeListener.
+     */
+    class Toggle(ctx: Context) : Switch(ctx) {
+        private val w = dp(ctx, 46); private val h = dp(ctx, 28)
+        private val stroke = dp(ctx, 2).toFloat()
+        private val offR = dp(ctx, 8).toFloat(); private val onR = dp(ctx, 11).toFloat()
+        private val offCx = dp(ctx, 12).toFloat(); private val onCx = (w - dp(ctx, 14)).toFloat()
+        private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
+        init { showText = false; setPadding(0, 0, 0, 0); background = null; trackDrawable = null; thumbDrawable = null; switchMinWidth = 0 }
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) { setMeasuredDimension(w, h) }
+        override fun setChecked(checked: Boolean) { super.setChecked(checked); invalidate() }
+        override fun onDraw(canvas: Canvas) {
+            val r = h / 2f
+            fill.style = Paint.Style.FILL; fill.color = if (isChecked) ACCENT else SEG
+            canvas.drawRoundRect(0f, 0f, w.toFloat(), h.toFloat(), r, r, fill)
+            fill.style = Paint.Style.STROKE; fill.strokeWidth = stroke
+            fill.color = if (isChecked) outlineOf(ACCENT) else MUTED
+            canvas.drawRoundRect(stroke / 2, stroke / 2, w - stroke / 2, h - stroke / 2, r, r, fill)
+            fill.style = Paint.Style.FILL
+            if (isChecked) { fill.color = Color.WHITE; canvas.drawCircle(onCx, h / 2f, onR, fill) }
+            else { fill.color = MUTED; canvas.drawCircle(offCx, h / 2f, offR, fill) }
         }
+    }
+
+    fun switchRow(ctx: Context, title: String, sub: String? = null, checked: Boolean = false): Pair<LinearLayout, Switch> {
+        val sw: Switch = Toggle(ctx).apply { isChecked = checked }
         val row = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL

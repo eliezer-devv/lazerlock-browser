@@ -812,6 +812,7 @@ class MainActivity : Activity() {
 
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 topUrl = url
+                soundNoteFor = null; hideSoundNote()   // a new page (or refresh): the sound note can show again
                 pageLang = null; langCheckedFor = null; hideTranslateBar()     // (a new page: its language is checked again)
                 if (!HomePage.isHome(url)) showLoading(8)          // at once: something is happening
                 if (!HomePage.isHome(url) && url?.startsWith("http") == true) {
@@ -2391,7 +2392,8 @@ class MainActivity : Activity() {
                 }
             } else {
                 d.add(Ui.label(this, "Block"))
-                val c = Ui.Chips(this, kindLabels, kindIcons, setOf(0, 1, 2), tinyBar)
+                // "Only some of it": nothing is picked to start with — the owner chooses what to block.
+                val c = Ui.Chips(this, kindLabels, kindIcons, emptySet(), tinyBar)
                 c.view.visibility = View.GONE
                 chips = c
                 d.add(Ui.Segmented(this, listOf("Completely", "Only some of it"), 0, narrow) {
@@ -2713,8 +2715,8 @@ class MainActivity : Activity() {
     private var soundNote: View? = null
 
     /**
-     * "Sound is blocked on this site, so the video plays muted", with "Ask for sound": a small card at the bottom, once
-     * per page, gone after 8 seconds.
+     * "Sound is blocked on this site, so the video plays muted", with "Ask for sound": a small card at the bottom. It
+     * stays until dismissed (the ✕), and comes back on each page load (soundNoteFor is cleared when a page starts).
      */
     private fun showSoundNote() {
         val here = web.url ?: return
@@ -2752,7 +2754,7 @@ class MainActivity : Activity() {
             setMargins(dp(12), 0, dp(12), dp(88))
         })
         soundNote = card
-        main.postDelayed({ if (soundNote === card) hideSoundNote() }, 8_000)
+        // Stays until it's dismissed (the ✕), rather than disappearing on its own.
     }
     private fun hideSoundNote() {
         soundNote?.let { (it.parent as? ViewGroup)?.removeView(it) }
@@ -4522,7 +4524,8 @@ class MainActivity : Activity() {
         runCatching { timerTick(cur, countTime) }.onFailure { AppLog.e("Timers", "Checking the timers", it) }
         // "My activity" (on this phone only): time on each site while it's on screen.
         if (countTime) runCatching {
-            val site = if (SearchPage.isSearch(cur)) "Search" else if (HomePage.isOwn(cur)) null
+            // Search and the app's own pages aren't counted in My activity (only real sites).
+            val site = if (SearchPage.isSearch(cur) || HomePage.isOwn(cur)) null
                 else Uri.parse(cur).host?.lowercase()?.removePrefix("www.")
             if (site != null) MyActivity.add(applicationContext, site, tempTick)
         }.onFailure { AppLog.w("Activity", "Couldn't count the time: ${it.message}") }
