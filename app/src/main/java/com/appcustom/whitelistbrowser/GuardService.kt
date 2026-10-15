@@ -182,7 +182,40 @@ class GuardService : AccessibilityService() {
     }
 
     private fun diag(cls: String, s: Scan) {
-        if (cls != lastDiagCls) { lastDiagCls = cls; AppLog.i("CoverDiag", "settings cls=$cls | us=${s.us} | txt=${s.text.take(150)}") }
+        if (cls != lastDiagCls) {
+            lastDiagCls = cls
+            AppLog.i("CoverDiag", "settings cls=$cls | us=${s.us} | txt=${s.text.take(150)}")
+            // Deeper, one-shot probe for a language-INDEPENDENT handle on list screens whose event-class is the
+            // generic SubSettings. Logs each window's root class + title, every distinct node class, and any non-empty
+            // view resource-id. If the device-admin LIST carries a specific class/id anywhere in its tree, it shows up
+            // here; if it doesn't (all generic + empty ids), that confirms text is the only handle for it.
+            runCatching { probe() }.logged("CoverDiag", "Probing the settings screen")
+        }
+    }
+
+    /** One-shot deep diagnostic (see diag). Never used for detection — only written to the log so a screen that has no
+     *  unique event-class can be inspected for a specific root class, window title, child class, or resource-id. */
+    private fun probe() {
+        val classes = LinkedHashSet<String>()
+        val ids = LinkedHashSet<String>()
+        val roots = StringBuilder()
+        val wins = runCatching { windows }.getOrNull()
+        val rootsList = if (!wins.isNullOrEmpty()) wins.mapNotNull { w -> w.root?.let { it to w.title?.toString() } }
+            else listOfNotNull(rootInActiveWindow?.let { it to null })
+        for ((root, title) in rootsList) {
+            if (root.packageName?.toString() == packageName) continue
+            roots.append('[').append(root.className ?: "?").append(title?.let { " \"$it\"" } ?: "").append("] ")
+            val q = ArrayDeque<AccessibilityNodeInfo>(); q.add(root)
+            var seen = 0
+            while (q.isNotEmpty() && seen < 1500 && classes.size < 60) {
+                val n = q.removeFirst(); seen++
+                n.className?.toString()?.let { classes.add(it) }
+                n.viewIdResourceName?.let { if (it.isNotBlank()) ids.add(it) }
+                for (i in 0 until n.childCount) n.getChild(i)?.let { q.add(it) }
+            }
+        }
+        AppLog.i("CoverDiag", "  probe roots=${roots.trim()} | ids=${if (ids.isEmpty()) "(none)" else ids.joinToString(",").take(400)}")
+        AppLog.i("CoverDiag", "  probe classes=${classes.joinToString(",").take(700)}")
     }
 
     private fun blockedTitle(pkg: String): String {
