@@ -4606,6 +4606,49 @@ class MainActivity : Activity() {
                 it.dismiss()
                 sendWaiting(registerFirst = true) // registers now (or as soon as it's online)
                 askNotificationsOnce()            // then, once: notifications (answers to requests)
+                if (email.isNotEmpty()) main.postDelayed({ showVerifyEmail(email) }, 400)   // confirm the owner's email
+            }
+        }.show()
+    }
+
+    /**
+     * After setup, confirm the owner's email: we email a code to that address, and they type it here. Sending the
+     * code marks the email confirmed on the admin side. It's not a gate — "Skip for now" lets the phone be used.
+     */
+    private fun showVerifyEmail(email: String) {
+        val codeField = Ui.field(this, "6-digit code", type = android.text.InputType.TYPE_CLASS_NUMBER)
+        Ui.AppDialog(this, sheet = true).apply {
+            title("Confirm your email", "We emailed a code to $email", R.drawable.ic_d_inbox)
+            add(Ui.text(this@MainActivity, "Enter the code from that email to confirm this address. It can take a minute to arrive.", 14.5f, Ui.MUTED))
+            add(Ui.label(this@MainActivity, "Code"))
+            add(codeField, 6)
+            button("Confirm", Ui.Kind.PRIMARY) {
+                val code = codeField.text.toString().trim()
+                if (!Regex("^\\d{4,8}$").matches(code)) { codeField.error = "Enter the code we emailed"; return@button }
+                Requests.sendEmailCode(this@MainActivity, code); sendWaiting()
+                it.dismiss(); toast("Thanks — we'll confirm your email.")
+            }
+            button("Resend", Ui.Kind.SECONDARY) { Requests.resendEmailCode(this@MainActivity); sendWaiting(); toast("Sent again — check the email.") }
+            button("Change email", Ui.Kind.GHOST) { it.dismiss(); changeEmail() }
+            button("Skip for now", Ui.Kind.GHOST) { it.dismiss() }
+        }.show()
+    }
+
+    /** Change the owner's email and send a fresh code to the new address. */
+    private fun changeEmail() {
+        val field = Ui.field(this, "e.g. parent@email.com", type = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS)
+        Device.email(this)?.let { field.setText(it) }
+        Ui.AppDialog(this, sheet = true).apply {
+            title("Change email", "We'll email a new code to confirm it.", R.drawable.ic_d_inbox)
+            add(Ui.label(this@MainActivity, "Email"))
+            add(field, 6)
+            button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
+            button("Send code", Ui.Kind.PRIMARY) {
+                val e = field.text.toString().trim()
+                if (!android.util.Patterns.EMAIL_ADDRESS.matcher(e).matches()) { field.error = "That doesn't look like an email"; return@button }
+                Device.setEmail(this@MainActivity, e)
+                Requests.resendEmailCode(this@MainActivity, e); sendWaiting()
+                it.dismiss(); showVerifyEmail(e)
             }
         }.show()
     }

@@ -3699,7 +3699,7 @@ function phoneScreen() {
   const first = h('input', { class: 'inp', id: 'pFirst', value: d.first || '', placeholder: 'e.g. Emma', readonly: !M, oninput: e => { d.first = e.target.value; setName(); } });
   const last = h('input', { class: 'inp', id: 'pLast', value: d.last || '', placeholder: 'e.g. Smith', readonly: !M, oninput: e => { d.last = e.target.value; setName(); } });
   // The owner's email, typed at setup on the phone. Editable by the main admin; kept in devices.json.
-  const email = h('input', { class: 'inp', id: 'pEmail', type: 'email', value: d.email || '', placeholder: 'e.g. parent@email.com', readonly: !M, oninput: e => { const v = e.target.value.trim(); if (v) d.email = v; else delete d.email; markDevices(); } });
+  const email = h('input', { class: 'inp', id: 'pEmail', type: 'email', value: d.email || '', placeholder: 'e.g. parent@email.com', readonly: !M, oninput: e => { const v = e.target.value.trim(); if (v !== (d.email || '')) delete d.emailConfirmed; if (v) d.email = v; else delete d.email; markDevices(); render(); } });
   const lists = h('div', { class: 'chips', style: 'gap:8px' }, S.lists.map(l => {
     const on = (d.lists || []).includes(l);
     return h('button', { type: 'button', class: 'lc pick', 'aria-pressed': String(on), disabled: !!d.blocked || !E, onclick: () => {
@@ -3746,7 +3746,9 @@ function phoneScreen() {
     h('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:10px' },
       h('div', { class: 'field' }, h('label', { for: 'pFirst' }, 'First name'), first),
       h('div', { class: 'field' }, h('label', { for: 'pLast' }, 'Last name'), last)),
-    h('div', { class: 'field' }, h('label', { for: 'pEmail' }, 'Owner\'s email'), email),
+    h('div', { class: 'field' }, h('label', { for: 'pEmail' }, 'Owner\'s email'), email,
+      d.email ? h('p', { class: 'hint', style: `margin:0;${d.emailConfirmed ? 'color:var(--accent-text)' : ''}` },
+        d.emailConfirmed ? '✓ Confirmed by the owner.' : 'Not confirmed yet — the owner enters the emailed code on the phone.') : null),
     // My requests PIN locked (5 wrong PINs): a yellow banner at the top, with Unlock.
     locked ? h('div', { class: 'warn', id: 'pinLockedBanner', style: 'display:flex;align-items:center;gap:10px;flex-wrap:wrap' },
       h('span', { style: 'flex:1;min-width:12rem' }, `My requests PIN is locked (5 wrong PINs), until ${new Date(d.pinLockedUntil).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.`),

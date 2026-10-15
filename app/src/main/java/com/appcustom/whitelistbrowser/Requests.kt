@@ -182,6 +182,27 @@ object Requests {
         return Outbox.add(ctx, "issue", payload, summary = summary, request = JSONObject(marker.toString()).put("sentKey", key))
     }
 
+    /** The owner typed the code we emailed them: send it so the admin side can mark this phone's email confirmed. */
+    fun sendEmailCode(ctx: Context, code: String) {
+        if (!isSetUp()) return
+        val marker = JSONObject().put("type", "confirmemail").put("id", Device.id(ctx)).put("device", Device.id(ctx)).put("code", code.trim())
+        Outbox.add(ctx, "issue", JSONObject()
+            .put("title", "Confirm email")
+            .put("body", "🔒 Confirming a phone's email.\n\n${Seal.hiddenPart(marker)}")
+            .put("labels", JSONArray().put("new phone")))
+    }
+
+    /** "Resend" (or "Change email"): ask the admin side to email a fresh code — to [newEmail] if the address changed. */
+    fun resendEmailCode(ctx: Context, newEmail: String? = null) {
+        if (!isSetUp()) return
+        val marker = JSONObject().put("type", "resendemail").put("id", Device.id(ctx)).put("device", Device.id(ctx))
+            .apply { (newEmail ?: Device.email(ctx))?.let { put("email", it) } }
+        Outbox.add(ctx, "issue", JSONObject()
+            .put("title", "Resend email code")
+            .put("body", "🔒 Resend a phone's email code.\n\n${Seal.hiddenPart(marker)}")
+            .put("labels", JSONArray().put("new phone")))
+    }
+
     /** Sends a saved request and returns its issue number. Called by [Outbox.flush]. */
     fun deliverIssue(payload: JSONObject): Int = createIssue(payload)
 
