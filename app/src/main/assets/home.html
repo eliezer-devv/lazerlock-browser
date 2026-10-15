@@ -83,7 +83,7 @@
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 48px; }
   .search input::placeholder { color: var(--muted); }
   .search:focus-within { border-color: var(--accent); }
-  .search .go { flex: none; width: 44px; height: 44px; border-radius: 15px; border: 0; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .search .go { flex: none; width: 46px; height: 46px; border-radius: 999px; border: 0; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
   .search .go svg { color: #fff; }
   .search[hidden] { display: none; }
   /* Folders: small versions of the first four tiles; drop a tile on another to make one. */
@@ -114,7 +114,6 @@
     <h1 id="timerfulltitle"></h1><p id="timerfulltext"></p><a id="timerfullask" href="#">Ask for time</a>
   </div>
   <form class="search" id="search" action="/search/" method="get" role="search" hidden>
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
     <input type="search" name="q" placeholder="Search" aria-label="Search" autocomplete="off" enterkeyhint="search">
     <button class="go" type="submit" aria-label="Search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button>
   </form>

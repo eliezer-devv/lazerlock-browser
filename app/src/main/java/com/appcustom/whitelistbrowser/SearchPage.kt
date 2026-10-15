@@ -36,7 +36,6 @@ object SearchPage {
         val s = Whitelist.state
         val body = StringBuilder()
         body.append("<form class=\"search\" action=\"/search/\" method=\"get\" role=\"search\">")
-            .append(ICON_SEARCH)
             .append("<input type=\"search\" name=\"q\" value=\"${esc(q)}\" placeholder=\"Search\" aria-label=\"Search\" autocomplete=\"off\" enterkeyhint=\"search\"")
             .append(if (q.isEmpty()) " autofocus" else "").append(">")
             .append("<button class=\"go\" type=\"submit\" aria-label=\"Search\">").append(ICON_SEARCH).append("</button></form>")
@@ -45,7 +44,9 @@ object SearchPage {
             !Whitelist.searchOn() -> body.append("<p class=\"note\">Search isn't turned on for this phone. You can ask for it: ⋮ → Ask for search.</p>")
             q.isEmpty() -> body.append("<p class=\"note\">Type what you're looking for.</p>")
             else -> try {
-                // One page at a time, with numbered page links at the foot (no more cumulative "More results").
+                // One page at a time, with numbered page links at the foot. The highest page we've found (n) is
+                // carried in the address so the numbers don't vanish when you step back to an earlier page, and we
+                // peek one page ahead so "›" and the count only show a next page when there really is one.
                 val got = Discovery.searchPages(q, pages)
                 val shown = ArrayList<String>()
                 for (r in got) {
@@ -54,17 +55,28 @@ object SearchPage {
                     if (s.searchApprovedOnly && !opens) continue
                     shown += result(r, opens, null)
                 }
+                val carried = (uri.getQueryParameter("n")?.toIntOrNull() ?: 0).coerceIn(0, 9)
+                val nextHas = when {
+                    pages < carried -> true                                       // already found a later page before
+                    pages < 9 && got.isNotEmpty() ->                              // at the frontier: peek one ahead
+                        runCatching { Discovery.searchPages(q, pages + 1).isNotEmpty() }.getOrDefault(false)
+                    else -> false
+                }
+                val knownMax = maxOf(carried, pages, if (nextHas) pages + 1 else pages)
                 if (shown.isEmpty()) body.append("<p class=\"note\">${if (pages == 0) "No results. Try other words." else "No more results."}</p>")
-                else shown.forEach { body.append(it) }
-                val hasNext = got.isNotEmpty() && pages < 9
-                if (pages > 0 || hasNext) {
+                else {
+                    val lastKnown = !nextHas && pages >= knownMax                  // nothing beyond this one
+                    body.append("<p class=\"pageline\">Page ${pages + 1} of ${knownMax + 1}${if (lastKnown) "" else "+"}</p>")
+                    shown.forEach { body.append(it) }
+                }
+                if (pages > 0 || knownMax > 0) {
                     body.append("<nav class=\"pager\" aria-label=\"Pages\">")
-                    if (pages > 0) body.append(pageLink(q, pages - 1, "‹", false))
-                    for (i in 0..pages) body.append(pageLink(q, i, (i + 1).toString(), i == pages))
-                    if (hasNext) body.append(pageLink(q, pages + 1, "›", false))
+                    if (pages > 0) body.append(pageLink(q, pages - 1, knownMax, "‹", false))
+                    for (i in 0..knownMax) body.append(pageLink(q, i, knownMax, (i + 1).toString(), i == pages))
+                    if (pages < knownMax) body.append(pageLink(q, pages + 1, knownMax, "›", false))
                     body.append("</nav>")
                 }
-                AppLog.i("Search", "Searched (${shown.size} results shown, page ${pages + 1})")
+                AppLog.i("Search", "Searched (${shown.size} results shown, page ${pages + 1} of ${knownMax + 1})")
             } catch (e: Discovery.Challenge) {
                 body.append("<div class=\"note\"><p>DuckDuckGo wants to check that a person is searching (there have been many searches).</p>")
                     .append("<a class=\"btn\" href=\"wlb://search-check?u=${esc(URLEncoder.encode(e.url, "UTF-8"))}\">Answer the check</a></div>")
@@ -92,9 +104,10 @@ object SearchPage {
             "<span class=\"tag ${if (opens) "ok" else "ask"}\">${if (opens) "Opens on this phone" else "Ask to open this page"}</span></article>"
     }
 
-    /** A numbered page link (or the ‹ / › arrows) for the search results foot. */
-    private fun pageLink(q: String, p: Int, label: String, current: Boolean): String {
-        val href = "/search/?q=${esc(URLEncoder.encode(q, "UTF-8"))}" + if (p > 0) "&amp;p=$p" else ""
+    /** A numbered page link (or the ‹ / › arrows) for the search results foot. [known] is carried as n= so the page
+     * numbers we've already found stay visible when you step back to an earlier page. */
+    private fun pageLink(q: String, p: Int, known: Int, label: String, current: Boolean): String {
+        val href = "/search/?q=${esc(URLEncoder.encode(q, "UTF-8"))}" + (if (p > 0) "&amp;p=$p" else "") + (if (known > 0) "&amp;n=$known" else "")
         return "<a class=\"pg${if (current) " on" else ""}\"${if (current) " aria-current=\"page\"" else ""} href=\"$href\">$label</a>"
     }
 
@@ -117,9 +130,10 @@ object SearchPage {
   .search > svg { flex: none; color: var(--muted); }
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 44px; }
   .search:focus-within { border-color: var(--accent); }
-  .search .go { flex: none; width: 44px; height: 44px; border-radius: 15px; border: 0; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .search .go { flex: none; width: 46px; height: 46px; border-radius: 999px; border: 0; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
   .search .go svg { color: #fff; }
-  .pager { display: flex; justify-content: center; align-items: center; gap: .4rem; margin: .5rem 0 .2rem; }
+  .pageline { text-align: center; color: var(--muted); font-size: .82rem; font-weight: 600; margin: .1rem 0 .3rem; }
+  .pager { display: flex; justify-content: center; align-items: center; gap: .4rem; margin: .5rem 0 .2rem; flex-wrap: wrap; }
   .pager .pg { min-width: 40px; height: 40px; padding: 0 .55rem; border-radius: 11px; border: 1px solid var(--edge); background: var(--tile); color: var(--muted); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
   .pager .pg.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   .r { background: var(--tile); border: 1px solid var(--edge); border-radius: 14px; padding: .75rem .9rem; display: flex; flex-direction: column; gap: .3rem; scroll-margin-top: .8rem; }

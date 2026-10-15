@@ -16,7 +16,7 @@ import android.widget.TextView
 /**
  * The screen cover: a plain full-screen panel over a blocked app, or over one of THIS app's own Settings pages
  * where the protection could be switched off (its App info, its accessibility detail, the device-admin page). The
- * panel names this browser, says who manages it, and its Back button sends the phone Home.
+ * panel names this browser, says who manages it, and its Back button sends the phone back one screen (GLOBAL_ACTION_BACK).
  *
  * ── How this was meant to work first (before any real-phone logs) ───────────────────────────────────────────────
  * The first design was deliberately device-agnostic: find THIS app's own name in the live accessibility tree and
@@ -262,7 +262,8 @@ class GuardService : AccessibilityService() {
                 val h = (resources.displayMetrics.density * 50).toInt(); val padx = (resources.displayMetrics.density * 26).toInt()
                 minHeight = h; setPadding(padx, 0, padx, 0)
                 background = Ui.rounded(Color.parseColor("#1F5F55"), resources.displayMetrics.density * 25)
-                setOnClickListener { hideAll(); performGlobalAction(GLOBAL_ACTION_HOME) }
+                // Back goes back one screen (the previous page), like the phone's own Back — not all the way Home.
+                setOnClickListener { hideAll(); performGlobalAction(GLOBAL_ACTION_BACK) }
             })
         }
         val type = if (Build.VERSION.SDK_INT >= 22) WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
