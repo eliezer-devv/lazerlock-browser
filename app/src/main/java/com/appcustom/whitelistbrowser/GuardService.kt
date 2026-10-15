@@ -133,11 +133,12 @@ class GuardService : AccessibilityService() {
         lastContentCheck = android.os.SystemClock.uptimeMillis()
         val s = scanSettings()
         diag(cls, s)
-        if (s.ourCover) return                                // the active window is our own cover → leave it up
+        if (s.ourCover) return                                // only our own cover is up → leave it
         if (isGuarded(cls, s.text, s.us)) { showSettingCover(); return }
-        // Not ours. Whether it read blank (still drawing) or settled, start the cancellable hide; the re-checks
-        // below cancel it the moment the screen turns out to be one of ours.
-        if (coveringFor == "setting") scheduleHide()
+        // Not ours. Only start the cancellable hide on a real, SETTLED read — a blank read just means the screen is
+        // still drawing (or a sibling window came back empty), which must never take the cover down. The re-checks
+        // below cancel the hide the moment the screen turns out to be one of ours.
+        if (s.text.isNotBlank() && coveringFor == "setting") scheduleHide()
         scheduleGuardChecks(cls)
     }
 
@@ -195,23 +196,43 @@ class GuardService : AccessibilityService() {
 
     private class Scan(val text: String, val us: Boolean, val ourCover: Boolean)
 
-    /** All the visible text of the active window, lowercased (bounded). If the active window is our OWN cover, say
-     *  so (ourCover) rather than mistaking the cover's words for a settings screen. Only to recognise our own
-     *  protection screens; never read or kept beyond this check. */
+    /** The visible text of ALL on-screen windows at once (our own cover excluded), lowercased and bounded. Reading
+     *  every window rather than just the "active" one is what stops the flicker: on this phone a screen like the
+     *  device-admin page is split across two windows and the active one bounces between them, one of which reads
+     *  empty — aggregating them means the full text is always seen. `ourCover` is true only when nothing but our own
+     *  cover is up. Only to recognise our own protection screens; never read or kept beyond this check. */
     private fun scanSettings(): Scan {
-        val root = rootInActiveWindow ?: return Scan("", false, false)
-        if (root.packageName?.toString() == packageName) return Scan("", false, true)
         val sb = StringBuilder()
+        var sawOther = false
+        var sawOwn = false
+        val wins = runCatching { windows }.getOrNull()
+        if (!wins.isNullOrEmpty()) {
+            for (w in wins) {
+                val root = w.root ?: continue
+                if (root.packageName?.toString() == packageName) { sawOwn = true; continue }
+                sawOther = true
+                collect(root, sb)
+                if (sb.length >= 8000) break
+            }
+        } else {
+            val root = rootInActiveWindow ?: return Scan("", false, false)
+            if (root.packageName?.toString() == packageName) return Scan("", false, true)
+            sawOther = true
+            collect(root, sb)
+        }
+        val text = sb.toString().lowercase()
+        return Scan(text, text.contains(ourName) || text.contains(ourPkgLower), sawOwn && !sawOther)
+    }
+
+    private fun collect(root: AccessibilityNodeInfo, sb: StringBuilder) {
         val q = ArrayDeque<AccessibilityNodeInfo>(); q.add(root)
         var seen = 0
-        while (q.isNotEmpty() && seen < 1200 && sb.length < 8000) {
+        while (q.isNotEmpty() && seen < 1500 && sb.length < 8000) {
             val n = q.removeFirst(); seen++
             n.text?.let { if (it.isNotBlank()) sb.append(it).append(' ') }
             n.contentDescription?.let { if (it.isNotBlank()) sb.append(it).append(' ') }
             for (i in 0 until n.childCount) n.getChild(i)?.let { q.add(it) }
         }
-        val text = sb.toString().lowercase()
-        return Scan(text, text.contains(ourName) || text.contains(ourPkgLower), false)
     }
 
     // ---- cover management (one full-screen panel; steady, never rebuilt while it's up for the same reason) ----
