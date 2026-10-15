@@ -2376,7 +2376,11 @@ function requestsScreen() {
   const sub = reqs === null ? 'Checking for requests…' : waiting ? `${plural(waiting, 'request')} waiting for you` : 'Nothing waiting for you';
   const kids = [screenTitle('Requests', sub)];
   if (S.inboxError) kids.push(h('div', { class: 'card' }, h('p', { class: 'warn' }, S.inboxError)));
-  if (reqs && reqs.length) kids.push(...reqs.map(requestCard));
+  // Waiting requests: each a compact row (like an answered one) — tap to open its details and answer.
+  if (reqs && reqs.length) {
+    kids.push(h('h2', { class: 'sec' }, 'Waiting'));
+    kids.push(h('div', { class: 'group' }, reqs.map(waitingRow)));
+  }
   else if (reqs && !S.inboxError) kids.push(h('div', { class: 'empty' }, h('b', null, 'All caught up'), 'New requests from phones appear here.'));
   if (S.newPhones.length) {
     kids.push(h('h2', { class: 'sec' }, S.newPhones.length === 1 ? 'New phone' : 'New phones'));
@@ -2410,6 +2414,18 @@ function requestsScreen() {
   return h('main', { class: 'stack' }, kids);
 }
 const possessive = n => /^the /.test(n) ? `${n}'s` : `${n}'${/s$/i.test(n) ? '' : 's'}`;
+// A waiting request, as a compact row: tap it to open the details and answer there.
+function waitingRow(issue) {
+  const req = marker(issue.body);
+  const { title } = describe(req);
+  const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
+  return h('button', { type: 'button', class: 'row tap', 'data-n': issue.number, onclick: () => open({ name: 'request', number: issue.number }) },
+    h('span', { class: 'ic', style: 'color:var(--accent)' }, icon('clock', 20, 2.2)),
+    h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, title),
+      h('span', { class: 'dom' }, `${phone} · ${ago(issue.created_at)}`)),
+    chip('Waiting', 'amber'),
+    icon('chev', 16));
+}
 function requestCard(issue) {
   const req = marker(issue.body);
   if (req.type === 'mediaDefault' || req.type === 'search') return settingRequestCard(issue, req);
@@ -2584,7 +2600,7 @@ function answeredDetailsScreen() {
   const kids = [backLink('Requests'), screenTitle(title, `Request #${x.number} · ${status}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || x.phone} (${x.phone})` : x.phone),
-      x.asked ? kv('Asked', whenText(x.asked)) : null,
+      x.asked ? kv('Date asked', whenText(x.asked)) : null,
       noSite ? null : kv('What', req.action === 'block' ? (req.media === 'off' ? `Block only the ${mediaWords(req.mediaKind)}` : 'Block it')
         : req.media === 'on' ? (req.item ? 'One photo or video' : `Turn ${mediaWords(req.mediaKind)} back on`)
         : Array.isArray(req.frames) && req.frames.length ? 'Embedded content' : 'Open it'),
@@ -2592,12 +2608,10 @@ function answeredDetailsScreen() {
       kv('One item', req.item || null),
       isSet || req.action === 'block' ? null : kv(req.type === 'timer' ? 'Asked for' : 'How long', asked ? `${fmtMin(asked)}${req.timeMode === 'use' ? ', time on the site only' : ', from when it\'s approved'}` : 'Always'),
       kv('Note', req.note ? `“${req.note}”` : null),
-      kv('Answered', `${status === 'Approval undone' ? 'Undone' : status} ${answeredBy(a).replace(/^On/, 'on')}, ${whenText(a.at)}`),
+      kv('Answered', `${answeredBy(a)}, ${whenText(a.at)}`),
       kv('Reason', a.reason || null),
-      kv('It changed', !denied && changed.length ? changed.join('\n') : null),
       kv('Phone told', a.message ? `“${a.message}”` : null),
-      kv('Before that', (x.earlier || []).length ? x.earlier.map(e => `${e.verdict === 'denied' ? 'Denied' : 'Approved'} ${answeredBy(e).replace(/^On/, 'on')}, ${whenText(e.at)}`).join('\n') : null),
-      kv('History', (x.log || []).length ? x.log.map(e => `${new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${String(e.text).replace(/\*\*/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\n+/g, ' ').slice(0, 300)}`).join('\n') : null))];
+      kv('Before that', (x.earlier || []).length ? x.earlier.map(e => `${e.verdict === 'denied' ? 'Denied' : 'Approved'} ${answeredBy(e).replace(/^On/, 'on')}, ${whenText(e.at)}`).join('\n') : null))];
   const mayAnswer = isSet ? (canDo('manage') || fullAdmin()) : canDo('requests');
   if (mayAnswer && req.type !== 'register') {
     if (!denied && a.undoable) {
@@ -2751,7 +2765,7 @@ function requestDetailsScreen() {
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
-      kv('Asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
+      kv('Date asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
       kv('Note', field(issue.body, 'Note') ? `“${field(issue.body, 'Note')}”` : null),
       kv('History', (issue._log || []).length ? issue._log.map(e => `${new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: ${String(e.text).replace(/\*\*/g, '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\n+/g, ' ').slice(0, 300)}`).join('\n') : null)),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
@@ -2760,7 +2774,7 @@ function requestDetailsScreen() {
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
-      kv('Asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
+      kv('Date asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
       kv('What', req.action === 'block' ? (req.media === 'off' ? `Block only the ${mediaWords(req.mediaKind)}` : 'Block it')
         : req.media === 'on' ? (req.item ? 'One photo or video' : `Turn ${mediaWords(req.mediaKind)} back on`)
         : Array.isArray(req.frames) && req.frames.length ? 'Embedded content' : 'Open it'),
@@ -3728,9 +3742,10 @@ function phoneScreen() {
       locked ? null
         : h('button', { type: 'button', class: 'btn s sm', id: 'pinUnlockAny', onclick: () => unlockPin(id) }, 'Unlock PIN approvals on this phone'),
       locked ? null : h('p', { class: 'hint', style: 'margin:0' }, 'If the phone says PIN approval is locked, this unlocks it (it picks it up within a few minutes).')),
-    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Ads'), ads),
-    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Filters'), ...filterRows,
-      h('p', { class: 'hint', style: 'margin:0' }, 'Usual follows Settings → Filters.')),
+    h('details', { class: 'more' }, h('summary', null, 'Ads & content filters'),
+      h('div', { class: 'field', style: 'margin-top:8px' }, h('span', { class: 'flabel' }, 'Ads'), ads),
+      h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Filters'), ...filterRows,
+        h('p', { class: 'hint', style: 'margin:0' }, 'Usual follows Settings → Filters.'))),
     h('label', { class: 'tg', for: 'pAdmin' }, h('span', { class: 'grow' }, h('span', { class: 't' }, 'Admin phone'),
         h('span', { class: 's' }, 'Gets phone notifications about new requests, logs and crashes (it can switch them off in its Settings)')),
       h('input', { type: 'checkbox', class: 'sw', id: 'pAdmin', checked: d.admin === true, onchange: e => {
@@ -3762,15 +3777,14 @@ function phoneSeenPart(id, d, M) {
 function phoneMediaAndSearch(d, M) {
   const fname = firstName(d), who = possessive(fname);
   const sw = (id, on, change, disabled) => h('input', { type: 'checkbox', class: 'sw', id, checked: on, disabled, onchange: e => change(e.target.checked) });
-  return h('div', { class: 'stack', style: 'gap:12px' },
-    h('div', { class: 'stack', style: 'gap:8px' },
-      h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound: this phone\'s default'),
-        h('span', { class: 'hint', style: 'margin:0' }, 'On every site this phone opens, unless that site is set to Open or Blocked on its own.')),
-      defaultRows(k => defBlocks(d, k) ? 'blocked' : 'open', (k, v) => { setDefault(d, k, v); markDevices(); render(); }, !M, 'pMedia_'),
-      h('div', { class: 'warn', style: 'margin:0' }, `Changing this changes every site on ${who} phone that's on Default, straight away. Sites set to Open or Blocked stay as they are.`)),
-    h('div', { class: 'stack', style: 'gap:8px' },
+  return h('div', { class: 'stack', style: 'gap:10px' },
+    h('div', { class: 'stack', style: 'gap:6px' },
+      h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound'),
+        h('span', { class: 'hint', style: 'margin:0' }, `The default on every site, unless a site is set to Open or Blocked on its own. Changing it changes every site on ${who} phone that's on Default, straight away.`)),
+      defaultRows(k => defBlocks(d, k) ? 'blocked' : 'open', (k, v) => { setDefault(d, k, v); markDevices(); render(); }, !M, 'pMedia_')),
+    h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Text search'),
-        h('span', { class: 'hint', style: 'margin:0' }, 'A search box on this phone. Results are words only (no pictures, videos or sound), safe search on, and nothing the filters block. Opening a result follows this phone\'s lists as usual.')),
+        h('span', { class: 'hint', style: 'margin:0' }, 'A search box, words only (no pictures, video or sound), safe search on, nothing the filters block. Opening a result follows this phone\'s lists.')),
       h('div', { class: 'mrows' },
         h('div', { class: 'mrow' }, h('div', { class: 'top' }, h('b', null, 'Text search'),
           obSeg('Text search', d.search === true ? 'open' : 'blocked', v => { if (v === 'open') d.search = true; else { delete d.search; delete d.searchApprovedOnly; } markDevices(); render(); },
@@ -4153,7 +4167,7 @@ function browsersScreen() {
   })();
   const name = firstName(d);
   const setMode = v => { const pr = ensureProtect(d); pr.mode = v; markDevices(); render(); };
-  const appRow = a => {
+  const appRow = (a, added) => {
     const dec = appDecision(d, a);
     return h('div', { class: 'row', style: 'align-items:center;gap:10px' },
       h('span', { class: 'av', style: 'background:var(--chipoff);color:var(--ink2)' }, (a.label || '?')[0].toUpperCase()),
@@ -4161,7 +4175,11 @@ function browsersScreen() {
         h('span', { class: 'dom mono', style: 'font-size:11px' }, a.pkg)),
       h('div', { class: 'seg', role: 'group', 'aria-label': `${a.label}: allow or block`, style: 'flex:none;width:9.5rem' },
         [['allow', 'Allow'], ['block', 'Block']].map(([v, t]) => h('button', { type: 'button', class: v === 'block' ? 'strict' : '', 'aria-pressed': String(dec === v),
-          disabled: !M, onclick: () => { const pr = ensureProtect(d); pr.apps[a.pkg] = v; markDevices(); render(); } }, t))));
+          disabled: !M, onclick: () => {
+            const pr = ensureProtect(d);
+            // An app you added yourself drops off this list once you set it to Allow; real browsers stay listed.
+            if (added && v === 'allow') delete pr.apps[a.pkg]; else pr.apps[a.pkg] = v;
+            markDevices(); render(); } }, t))));
   };
   // Add an app the phone didn't flag as a browser (one with its own web view).
   const addApp = async () => {
@@ -4205,9 +4223,10 @@ function browsersScreen() {
       M ? h('div', { style: 'display:flex;gap:8px;margin-top:8px' },
         h('button', { type: 'button', class: 'btn s sm', onclick: addApp }, icon('plus', 15, 2.4), 'Add an app')) : null),
     // Apps you added (not browsers): their own list, same style, each with Allow / Block.
-    (addedList.length || M) ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Apps you added'),
-      addedList.length ? h('div', { class: 'group' }, addedList.map(appRow))
-        : h('p', { class: 'hint', style: 'margin:0' }, 'None yet. Use Add an app above to block an app that isn\'t a web browser (a game with its own web window, say).')) : null,
+    (addedList.length || M) ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Apps you added to block'),
+      addedList.length ? h('div', { class: 'group' }, addedList.map(a => appRow(a, true)))
+        : h('p', { class: 'hint', style: 'margin:0' }, 'None yet. Use Add an app above to block an app that isn\'t a web browser (a game with its own web window, say).'),
+      addedList.length ? h('p', { class: 'hint', style: 'margin:0' }, 'Set one to Allow and it drops off this list. Only phone-detected browsers stay.') : null) : null,
     M ? sw('Block new browsers straight away', 'A newly installed browser is blocked at once; you\'re asked, and can allow it.', p.blockNew !== false, v => { ensureProtect(d).blockNew = v; }) : null,
     h('p', { class: 'hint' }, 'This protection is visible on the phone: a blocked app shows a plain screen saying the browser is managed, and who by. You can switch it all off here at any time.'));
 }
