@@ -3305,10 +3305,6 @@ function importScreen() {
 // ---------- list settings ----------
 function listSettingsScreen() {
   const L = S.L;
-  const home = h('input', { class: 'inp', id: 'lHome', value: L.homepage, placeholder: 'Empty = the built-in home page', autocapitalize: 'off', spellcheck: 'false',
-    oninput: e => { L.homepage = e.target.value; markList(); } });
-  const val = h('span', null, `${L.refreshMinutes} min`);
-  const step = d => { L.refreshMinutes = Math.max(1, Math.min(1440, L.refreshMinutes + d)); val.textContent = `${L.refreshMinutes} min`; markList(); };
   const users = phonesUsing(S.current);
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites'),
     screenTitle(S.current === 'public' ? listLabel(S.current) : `${listLabel(S.current)} list`,
@@ -3321,10 +3317,6 @@ function listSettingsScreen() {
         if (on) set.add(S.current); else set.delete(S.current);
         S.D.publicLists = [...set]; markDevices();
       } }))) : null,
-    h('div', { class: 'field' }, h('label', { for: 'lHome' }, 'Start page'), home, h('p', { class: 'hint', style: 'margin:0' }, 'The page the app opens on. Leave empty for the home page with tiles.')),
-    h('div', { class: 'group' }, h('div', { class: 'tg', style: 'cursor:default' }, h('span', { class: 'grow' }, h('span', { class: 't' }, 'Phones check for changes every'),
-      h('span', { class: 's' }, 'Lower is quicker, but uses a little more data')),
-      h('div', { class: 'stepper' }, h('button', { type: 'button', 'aria-label': 'Fewer minutes', onclick: () => step(-1) }, '−'), val, h('button', { type: 'button', 'aria-label': 'More minutes', onclick: () => step(1) }, '+')))),
     // Import, and the list-wide overviews (each site's own are in its settings).
     h('div', { class: 'group' },
       settingsRow('table', 'Import from a spreadsheet', null, () => open({ name: 'import' }), 'openImport'),
@@ -4132,7 +4124,7 @@ function phoneBrowsers(id, d, M) {
   return h('div', { class: 'field', id: 'pBrowsers' },
     h('button', { type: 'button', class: 'row tap', style: 'width:100%;text-align:left', onclick: () => open({ name: 'browsers', id }) },
       h('span', { class: 'ic' }, icon('globe', 20)),
-      h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, 'Only this browser'),
+      h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, 'Block other browsers'),
         h('span', { class: 'dom' }, browsersSummary(id, d))),
       icon('chev', 16)));
 }
@@ -4182,7 +4174,7 @@ function browsersScreen() {
     h('input', { type: 'checkbox', class: 'sw', checked: on, disabled: !!disabled, onchange: e => { change(e.target.checked); markDevices(); render(); } }));
   const isOwner = seenProtect(id) && seenProtect(id).owner;
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(d.name || id, () => open({ name: 'phone', id })),
-    screenTitle('Only this browser', `Keep this the only way ${name} can open websites`),
+    screenTitle('Block other browsers', `Keep this the only way ${name} can open websites`),
     // What's set up on the phone now.
     h('div', { class: 'card', style: 'gap:8px' },
       h('div', { style: 'display:flex;align-items:center;gap:8px' }, h('b', { style: 'flex:1' }, 'Protection on the phone'),

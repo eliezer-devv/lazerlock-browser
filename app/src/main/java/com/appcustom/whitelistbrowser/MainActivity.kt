@@ -3919,7 +3919,7 @@ class MainActivity : Activity() {
             Triple(R.drawable.ic_d_clock, "My activity" to "Time on each site, for you only") { showMyActivity() },
             Triple(R.drawable.ic_d_globe, "Phone's browser" to (if (isPhonesBrowser()) "This is the phone's browser: links from other apps open here"
                 else "Make it the phone's browser, so links from other apps open here")) { becomePhonesBrowser() },
-            Triple(R.drawable.ic_d_shield, "Only this browser" to otherBrowsersStatus()) { showOtherBrowsers() }))
+            Triple(R.drawable.ic_d_shield, "Block other browsers" to otherBrowsersStatus()) { showOtherBrowsers() }))
     }
 
     // ---------- Other browsers: turning the protection on, on this phone (supervised setup) ----------
@@ -3945,7 +3945,7 @@ class MainActivity : Activity() {
             minHeight = Ui.dp(this@MainActivity, 36); gravity = android.view.Gravity.CENTER_VERTICAL
             setOnClickListener { d.dismiss(); showThisPhone() }
         }, 0)
-        d.title("Only this browser")
+        d.title("Block other browsers")
         d.add(Ui.text(this, "Keep this the only way to the web on this phone: other browsers are covered or switched off, and the app is kept from being removed. Set up here; what's blocked is chosen on the admin page. Always visible, and switchable from the admin page.", 14f, Ui.MUTED), 6)
         if (owner) {
             d.add(Ui.box(this, "This phone is a device owner. Blocked apps are switched off, this app can't be uninstalled, and the clock is kept honest. To undo it, use the admin page.", "teal"), 8)
