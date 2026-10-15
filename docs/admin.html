@@ -3125,26 +3125,31 @@ function tempScreen() {
   const host = h('div', { 'data-sync': '' });
   const picker = makePicker(host, sub.minutes || 30, m => { sub.minutes = m; len.textContent = `How long: ${fmtMin(m)}`; });
   host._picker = picker;
+  if (sub.what === 'media' && !sub.mediaSel) sub.mediaSel = ['photos', 'videos', 'sound'];
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'What to open' },
-    [['site', 'Whole site'], ['page', 'One page'], ['media', 'Photos/videos']].map(([v, t]) => {
-      const on = v === 'media' ? MEDIA_T.includes(sub.what) : sub.what === v;
-      return h('button', { type: 'button', 'aria-pressed': String(on), onclick: () => { if (!(v === 'media' && on)) { sub.what = v; render(); } } }, t);
-    }));
-  // Photos and videos back on for a while: which of them.
-  const seg2 = MEDIA_T.includes(sub.what) ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Which' },
-    [['photos', 'Photos'], ['videos', 'Videos'], ['sound', 'Sound'], ['media', 'All']].map(([v, t]) =>
-      h('button', { type: 'button', 'aria-pressed': String(sub.what === v), onclick: () => { sub.what = v; render(); } }, t))) : null;
+    [['site', 'Whole site'], ['page', 'One page'], ['media', 'Photos/videos/sound']].map(([v, t]) =>
+      h('button', { type: 'button', 'aria-pressed': String(sub.what === v), onclick: () => { if (sub.what !== v) { sub.what = v; if (v === 'media' && !sub.mediaSel) sub.mediaSel = ['photos', 'videos', 'sound']; render(); } } }, t)));
+  // Photos, videos and sound: pick any (more than one is fine) — no "All".
+  const toggleMedia = v => { const s = new Set(sub.mediaSel || []); if (s.has(v)) s.delete(v); else s.add(v); sub.mediaSel = [...s]; render(); };
+  const seg2 = sub.what === 'media' ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Which' },
+    [['photos', 'Photos'], ['videos', 'Videos'], ['sound', 'Sound']].map(([v, t]) =>
+      h('button', { type: 'button', 'aria-pressed': String((sub.mediaSel || []).includes(v)), onclick: () => toggleMedia(v) }, t))) : null;
   const radio = (v, t, s) => h('label', { class: 'radio' }, h('input', { type: 'radio', name: 'tMode', value: v, checked: sub.mode === v, onchange: () => { sub.mode = v; } }),
     h('span', null, h('b', { style: 'font-weight:600' }, t), h('span', { class: 'small muted', style: 'display:block' }, s)));
   const add = () => {
     const raw = (sub.entry || '').trim();
-    const entry = sub.what === 'page' || (MEDIA_T.includes(sub.what) && hasPath(raw)) ? pageKey(raw) : normalize(raw);
+    const isMedia = sub.what === 'media';
+    const entry = sub.what === 'page' || (isMedia && hasPath(raw)) ? pageKey(raw) : normalize(raw);
     if (!entry) return say(sub.what === 'page' ? 'Type the page address, e.g. youtube.com/watch?v=abc' : 'Type a website address.', true);
     if (sub.what === 'page' && !hasPath(raw)) return say('For One page, type the full page address.', true);
+    const kinds = isMedia ? (sub.mediaSel || []) : [sub.what];
+    if (isMedia && !kinds.length) return say('Pick at least one of photos, videos or sound.', true);
     const minutes = picker.get();
     if (!minutes) return say('Choose how long on the wheels.', true);
-    S.L.temporary = S.L.temporary.filter(t => !(t.what === sub.what && t.entry === entry));
-    S.L.temporary.push({ id: 't' + Date.now().toString(36), what: sub.what, entry, mode: sub.mode, minutes, from: new Date().toISOString() });
+    kinds.forEach(k => {
+      S.L.temporary = S.L.temporary.filter(t => !(t.what === k && t.entry === entry));
+      S.L.temporary.push({ id: 't' + Date.now().toString(36) + k, what: k, entry, mode: sub.mode, minutes, from: new Date().toISOString() });
+    });
     markList(); back();
     say(`${entry}: ${fmtMin(minutes)}${sub.mode === 'use' ? ' of use' : ''}. Tap Save to apply it.`);
   };
