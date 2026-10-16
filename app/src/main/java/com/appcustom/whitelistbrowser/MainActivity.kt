@@ -3979,13 +3979,9 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(sw)
             setOnClickListener {
-                if (!on) {
-                    // If whoever manages this phone has set protection to off from their end, the phone can't override
-                    // that — it's their call to turn it back on. Say so instead of flashing and doing nothing.
-                    if (Whitelist.state.protect?.off == true) {
-                        this@MainActivity.toast("Protection was switched off by whoever manages this phone. Ask them to turn it back on from their end.")
-                    } else { Protection.setWanted(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }
-                } else { d.dismiss(); confirmTurnOffProtection() }
+                // Turning protection ON is always free — including right after a turn-off. Turning it OFF is a request to the admin.
+                if (!on) { Protection.setWanted(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }
+                else { d.dismiss(); confirmTurnOffProtection() }
             }
         }, 8)
 
@@ -4030,7 +4026,8 @@ class MainActivity : Activity() {
                 // On is free; off goes to the admin as a request (same as the master switch), whether it was turned on
                 // here or from the dashboard.
                 setOnClickListener {
-                    if (listsOn) confirmTurnOffCoverLists()
+                    // Close the Settings sheet first, so the confirmation/request isn't hidden behind it (same as the master switch).
+                    if (listsOn) { d.dismiss(); confirmTurnOffCoverLists() }
                     else { Protection.setCoverListsLocal(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }
                 }
             }, 8)
