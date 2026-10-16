@@ -3979,8 +3979,13 @@ class MainActivity : Activity() {
             }, LinearLayout.LayoutParams(0, -2, 1f))
             addView(sw)
             setOnClickListener {
-                if (!on) { Protection.setWanted(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }
-                else { d.dismiss(); confirmTurnOffProtection() }
+                if (!on) {
+                    // If whoever manages this phone has set protection to off from their end, the phone can't override
+                    // that — it's their call to turn it back on. Say so instead of flashing and doing nothing.
+                    if (Whitelist.state.protect?.off == true) {
+                        this@MainActivity.toast("Protection was switched off by whoever manages this phone. Ask them to turn it back on from their end.")
+                    } else { Protection.setWanted(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }
+                } else { d.dismiss(); confirmTurnOffProtection() }
             }
         }, 8)
 

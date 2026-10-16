@@ -66,12 +66,14 @@ object BrowserGuard {
      */
     fun effective(ctx: Context): Protect? {
         val admin = protect
-        // The admin is imposing a mode (cover/owner), or has specific apps blocked: use the admin's settings as-is.
-        if (admin != null && (admin.mode != "off" || admin.apps.isNotEmpty())) return admin
-        // Otherwise (no admin block, or the admin's mode is "off"): the phone's own switch decides. Raising protection
-        // is free, so the local switch (or a local device owner) turns it on. The accessibility service merely RUNNING
-        // is NOT used as "on" — it's a means, not the intention, and it stays granted after an approved turn-off; keying
-        // on it would re-enable protection the admin just switched off. (wantLocal has cleared itself via offAt.)
+        // The admin deliberately switched protection off — that wins; the phone can't override it locally.
+        if (admin != null && admin.off) return admin
+        // The admin is imposing a mode from the dashboard: use the admin's settings as-is.
+        if (admin != null && (admin.mode == "cover" || admin.mode == "owner")) return admin
+        // Otherwise (admin set nothing, or left mode at the "off" default without a deliberate turn-off): the phone's
+        // own switch decides. Raising protection is free, so the local switch (or a local device owner) turns it on,
+        // carrying any apps/overlay the admin did set. The accessibility service merely RUNNING is NOT used as "on" —
+        // it's a means, not the intention.
         val localOwner = runCatching { DeviceOwner.isOwner(ctx) }.getOrDefault(false)
         val wantLocal = runCatching { Protection.wantLocal(ctx) }.getOrDefault(false)
         if (localOwner || wantLocal) return Protect(

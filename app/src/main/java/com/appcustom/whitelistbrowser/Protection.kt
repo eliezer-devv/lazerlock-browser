@@ -23,27 +23,37 @@ import android.provider.Settings
 object Protection {
     private const val PREFS = "protection"
     private const val WANT = "want"
-    private const val OFF_SEEN = "offProcessed"        // the admin turn-off (its timestamp) we've already applied
-    private const val OFF_CLEANED = "offCleaned"       // the turn-off we've already handed permissions back for
+    private const val HANDED_BACK = "handedBack"       // we've already handed Android permissions back for the current "off" spell
     private const val LISTS_OFF_SEEN = "listsOffProcessed"
     private const val SLIP = "slipAlerted"   // we've already sent the owner a "protection slipped" alert for this lapse
     private const val WAS_ACTIVE = "wasActive" // protection has been fully in place at least once (so a drop is a real lapse, not first-time setup)
 
     /**
-     * The phone's own intent to be protected (the local switch). Turning it ON here is always free. It's turned OFF
-     * only when the admin approves a turn-off request — which arrives as a new protect.offAt timestamp, applied ONCE
-     * (so the phone can freely turn protection on again afterwards, like any raise). Otherwise a plain pref read, with
-     * no call back into BrowserGuard, so it's safe to use from effective().
+     * The phone's own switch — a plain pref. It only gets to decide when the admin hasn't imposed a mode from the
+     * dashboard (see [intended]/[BrowserGuard.effective]). Just a pref read, with no call back into BrowserGuard, so
+     * it's safe to use from effective().
      */
-    fun wantLocal(ctx: Context): Boolean {
-        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val offAt = runCatching { Whitelist.state.protect?.offAt ?: 0L }.getOrDefault(0L)
-        if (offAt > 0L && p.getLong(OFF_SEEN, 0L) != offAt) p.edit().putBoolean(WANT, false).putLong(OFF_SEEN, offAt).apply()
-        return p.getBoolean(WANT, false)
-    }
+    fun wantLocal(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(WANT, false)
 
-    /** Protection is meant to be on: the phone's own switch, or the admin imposing a mode from the dashboard. */
-    fun intended(ctx: Context): Boolean = wantLocal(ctx) || BrowserGuard.on(ctx)
+    /**
+     * Whether protection is meant to be on. The admin's dashboard setting is authoritative: a mode of cover/owner means
+     * on; "off" means off — and clears the phone's local switch too, so the phone shows off and won't spring back on if
+     * the admin later clears the setting. Only when the admin has set nothing at all does the phone's own switch decide
+     * (raising protection on the phone is free, with no dashboard step needed).
+     */
+    fun intended(ctx: Context): Boolean {
+        val admin = runCatching { Whitelist.state.protect }.getOrNull()
+        if (admin != null) {
+            if (admin.off) {   // the admin deliberately switched protection off (dashboard "Off", or an approved turn-off request)
+                val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                if (p.getBoolean(WANT, false)) p.edit().putBoolean(WANT, false).apply()
+                return false
+            }
+            if (admin.mode == "cover" || admin.mode == "owner") return true   // the admin is imposing a mode
+        }
+        return wantLocal(ctx)   // not configured by the admin: the phone's own switch decides (raising is free)
+    }
 
     fun setWanted(ctx: Context, want: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(WANT, want).apply()
@@ -57,11 +67,16 @@ object Protection {
      * Safe to call often; does a little work, so call it off the main thread.
      */
     fun applyTurnOff(ctx: Context) {
-        val offAt = runCatching { Whitelist.state.protect?.offAt ?: 0L }.getOrDefault(0L)
-        if (offAt <= 0L) return
+        val admin = runCatching { Whitelist.state.protect }.getOrNull()
+        val adminOff = admin != null && admin.off   // the admin deliberately turned protection off (dashboard radio, or an approved turn-off request)
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (p.getLong(OFF_CLEANED, 0L) == offAt) return
-        p.edit().putLong(OFF_CLEANED, offAt).apply()
+        if (!adminOff) {
+            // Protection is on (or not configured): re-arm, so the next turn-off hands permissions back again.
+            if (p.getBoolean(HANDED_BACK, false)) p.edit().putBoolean(HANDED_BACK, false).apply()
+            return
+        }
+        if (p.getBoolean(HANDED_BACK, false)) return   // already handed back for this off-spell
+        p.edit().putBoolean(HANDED_BACK, true).apply()
         runCatching { DeviceOwner.removeAdmin(ctx) }.logged("Protection", "Handing device admin back on turn-off")
         runCatching { GuardService.turnOffSelf() }.logged("Protection", "Handing the screen cover back on turn-off")
         AppLog.i("Protection", "Protection turned off by the admin — handed accessibility & device admin back")

@@ -4347,7 +4347,7 @@ function browsersScreen() {
     return out.sort((a, b) => (a.label || a.pkg).localeCompare(b.label || b.pkg));
   })();
   const name = firstName(d);
-  const setMode = v => { const pr = ensureProtect(d); pr.mode = v; if (v !== 'off') delete pr.off; markDevices(); render(); };
+  const setMode = v => { const pr = ensureProtect(d); pr.mode = v; if (v === 'off') { pr.off = true; pr.offAt = Date.now(); } else { delete pr.off; delete pr.offAt; } markDevices(); render(); };
   const appRow = (a, added) => {
     const dec = appDecision(d, a);
     return h('div', { class: 'row', style: 'align-items:center;gap:10px' },
