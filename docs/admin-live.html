@@ -216,6 +216,22 @@
   .inp { width: 100%; max-width: 100%; min-width: 0; min-height: 48px; padding: 0 14px; border: 1px solid var(--field); border-radius: 12px; background: #fff; font-size: 16px; }
   textarea.inp { min-height: 150px; padding: 12px 14px; font-family: var(--mono); font-size: 14px; line-height: 1.6; resize: vertical; }
   .inp.bad { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
+  /* The on-screen PIN keypad, matching the phone app's PIN screen (⌫ bottom-left, → bottom-right). */
+  .pinpad { display: flex; flex-direction: column; align-items: center; gap: 14px; margin: 10px 0 4px; }
+  .pingrid { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  .pinrow { display: flex; gap: 14px; }
+  .pinkey { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 23px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
+  .pinkey:active { background: var(--accent-soft); }
+  .pinkey.go { background: var(--accent); color: #fff; border-color: var(--accent); }
+  /* On the phone, the keypad shows its own dots and the text field is hidden (so it isn't a field + keypad mix). */
+  .pindisplay { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .pinfield { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 12px; }
+  .pinfield.active { background: var(--accent-soft); }
+  .pinflabel { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .pindots { display: flex; gap: 9px; min-height: 15px; align-items: center; }
+  .pindot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--field); box-sizing: border-box; }
+  .pindot.on { background: var(--accent); border-color: var(--accent); }
+  .pinhidden { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .inrow { display: flex; gap: 8px; }
   .inrow .inp { flex: 1 1 auto; min-width: 0; }
 
@@ -1115,9 +1131,15 @@ async function signedOutHere(why) {
   await forgetDevice();
   S.connected = false; S.sub = null; ME = null;
   QUEUE.ops = []; QUEUE.failed = null; OVER.clear();
+  // Tell the app so this phone stops acting as an admin phone (notifications etc.) the moment it's signed out.
+  if (INAPP && window.WLBAdmin && WLBAdmin.adminSignedOut) try { WLBAdmin.adminSignedOut(); } catch {}
   render();
   if (why) say(why, true);
 }
+// Reopened from the background (called by the app): re-ask the PIN/fingerprint if one is set, by reloading the gate.
+// Re-lock when the app is reopened — WITHOUT reloading the page, so after unlocking you return to the same screen
+// you were on (S.sub is kept). Showing the unlock screen just needs connected=false + locked=true.
+window.wlRelock = () => { try { if ((getPin() || getBio()) && !S.locked) { S.connected = false; S.locked = true; render(); } } catch {} };
 const NO_ISSUES_MSG = 'Couldn\'t answer it.';
 const listPathOf = name => name === 'public' ? 'docs/whitelist.json' : `docs/lists/${name}.json`;
 
@@ -1260,6 +1282,8 @@ async function loadAll(sha, opts) {
   await loadDevices();
   await openList(S.lists.includes(S.current) ? S.current : 'public');
   S.connected = true;
+  // Signed in on this phone: it may act as an admin phone again (clears the signed-out flag the app keeps).
+  if (INAPP && window.WLBAdmin && WLBAdmin.adminSignedIn) try { WLBAdmin.adminSignedIn(); } catch {}
   if (!canDo('requests') && S.tab === 'requests') S.tab = canDo('edit') ? 'sites' : seesPhones() ? 'phones' : 'settings';
   loadInbox();   // in the background; the Requests tab fills in when it arrives
   return true;
@@ -1886,6 +1910,48 @@ async function bioSetup() {
   } catch { return false; }
 }
 
+// An on-screen numeric keypad matching the phone app's PIN screen, driving the page's PIN inputs by id (so each
+// screen's existing validation keeps working). The inputs become read-only (the keypad is the only way to type);
+// tapping a field makes it the active one. ⌫ is bottom-left, → (the primary action) bottom-right.
+// On the phone (INAPP) this IS the whole PIN entry: it creates the hidden PIN input(s), shows its own dots, and the
+// keypad types into them — so the caller does NOT render a visible field. In a browser it's not used (the caller
+// renders a normal field + button). `fields` is an id string or {id, label}; many fields for enter-then-confirm.
+function pinKeypad(fields, onEnter) {
+  const list = (Array.isArray(fields) ? fields : [fields]).map(f => typeof f === 'string' ? { id: f } : f);
+  let activeId = list[0].id;
+  const rows = {};
+  const renderDots = () => list.forEach(f => {
+    const inp = $(f.id), row = rows[f.id]; if (!row) return;
+    const n = inp ? inp.value.length : 0;
+    row.replaceChildren();
+    const count = Math.max(4, n);   // at least four dots (the minimum), filling as you type and growing past four
+    for (let i = 0; i < count; i++) { const d = document.createElement('span'); d.className = 'pindot' + (i < n ? ' on' : ''); row.appendChild(d); }
+    if (row.parentNode) row.parentNode.classList.toggle('active', f.id === activeId && list.length > 1);
+  });
+  setTimeout(renderDots, 0);
+  const type = v => {
+    const f = $(activeId) || $(list[0].id); if (!f) return;
+    const max = Number(f.getAttribute('maxlength')) || 8;
+    if (v === 'del') f.value = f.value.slice(0, -1); else if (f.value.length < max) f.value += v;
+    f.dispatchEvent(new Event('input', { bubbles: true })); renderDots();
+  };
+  const key = (label, cls, fn) => h('button', { type: 'button', class: 'pinkey' + (cls ? ' ' + cls : ''), tabindex: '-1',
+    'aria-label': label === '⌫' ? 'Delete' : label === '→' ? 'Enter' : label, onclick: fn }, label);
+  const display = h('div', { class: 'pindisplay' }, list.map(f => {
+    const inp = h('input', { type: 'password', id: f.id, inputmode: 'numeric', maxlength: '8', autocomplete: 'off', readonly: true, class: 'pinhidden' });
+    const row = h('div', { class: 'pindots' }); rows[f.id] = row;
+    return h('div', { class: 'pinfield', onclick: () => { activeId = f.id; renderDots(); } },
+      f.label ? h('div', { class: 'pinflabel' }, f.label) : null, row, inp);
+  }));
+  const note = h('div', { class: 'pinflabel', style: 'opacity:.8' }, 'At least 4 digits');
+  const grid = h('div', { class: 'pingrid' }, [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['⌫', '0', '→']].map(r =>
+    h('div', { class: 'pinrow' }, r.map(k =>
+      k === '⌫' ? key('⌫', '', () => type('del'))
+        : k === '→' ? key('→', 'go', () => onEnter && onEnter())
+          : key(k, '', () => type(k))))));
+  return h('div', { class: 'pinpad' }, display, note, grid);
+}
+
 // Locking the admin on this device: offered after signing in (in the app, one of them is needed), and in Your account.
 function pinScreen() {
   const first = S.sub && S.sub.first, had = !!getPin(), bio = !!getBio();
@@ -1923,7 +1989,8 @@ function pinScreen() {
       : had ? 'The old PIN stops working straight away.' : 'You unlock it each time you open the admin here.'),
     bioBtn,
     bioBtn ? h('p', { class: 'hint', style: 'margin:0;text-align:center' }, 'or a PIN') : null,
-    field('pinNew', had ? 'New PIN' : 'PIN'), field('pinAgain', 'The same PIN again'), saveBtn,
+    INAPP ? pinKeypad([{ id: 'pinNew', label: had ? 'New PIN' : 'PIN' }, { id: 'pinAgain', label: 'Repeat PIN' }], () => saveBtn.onclick())
+          : [field('pinNew', had ? 'New PIN' : 'PIN'), field('pinAgain', 'The same PIN again'), saveBtn],
     skip, never ? h('label', { class: 'check', for: 'noLock' }, never, 'Don\'t ask again on this device') : null,
     had && !INAPP ? h('button', { type: 'button', class: 'btn d', id: 'pinRemove', onclick: () => { localStorage.removeItem(PIN_KEY); done('PIN removed from this device.'); } }, 'Remove the PIN') : null,
     h('p', { class: 'hint' }, `After 5 wrong PINs, this ${where} is signed out, and needs your email and password again.`));
@@ -1939,9 +2006,10 @@ function unlockScreen() {
     S.starting = false; render();
   };
   const tryIt = async () => {
-    go1.disabled = true;
-    if (!(await pinOk(pin.value))) {
-      go1.disabled = false; pin.value = '';
+    const uPin = $('uPin') || pin;   // on the phone the keypad owns the input; read it by id
+    if (go1) go1.disabled = true;
+    if (!(await pinOk(uPin.value))) {
+      if (go1) go1.disabled = false; uPin.value = '';
       const now = getPin();
       if (!now) { say('Too many wrong PINs, so this device was signed out. Sign in again with your email and password.', true); S.locked = false; render(); }
       else { const n = 5 - now.tries; say(`Wrong PIN. ${n} ${n === 1 ? 'try' : 'tries'} left.`, true); }
@@ -1959,7 +2027,9 @@ function unlockScreen() {
   setTimeout(() => { if (B && INAPP && !S.bioAsked) { S.bioAsked = true; bioBtn.click(); } else if (pin) pin.focus(); }, 80);
   return h('main', { class: 'stack' }, screenTitle('Admin', B && !P ? 'Unlock with your fingerprint' : B ? 'Your fingerprint or PIN' : 'Type your PIN'),
     bioBtn,
-    P ? h('div', { class: 'field' }, h('label', { for: 'uPin' }, 'Your PIN'), pin) : null, go1,
+    P && !INAPP ? h('div', { class: 'field' }, h('label', { for: 'uPin' }, 'Your PIN'), pin) : null,
+    P && INAPP ? pinKeypad([{ id: 'uPin', label: 'Your PIN' }], tryIt) : null,     // phone: keypad; browser: plain field + button
+    INAPP ? null : go1,
     h('button', { type: 'button', class: 'btn d', onclick: async () => {
       if (!(await uiConfirm('Sign in with your password instead?', 'This device is signed out, then you sign in again with your email and password.', 'Sign out', { icon: 'warn' }))) return;
       command({ op: 'signout' }).catch(e => console.log(`(carried on, line 1952) ${e && e.message}`)); await sleep(300); localStorage.removeItem(PIN_KEY); localStorage.removeItem(BIO_KEY); S.locked = false; await signedOutHere(); } },
@@ -2076,8 +2146,9 @@ function myPinSection() {
     h('div', { class: 'card', style: 'gap:8px' },
       h('p', { style: 'margin:0' }, `Type it in My requests on ${where} to approve or deny a request right there. It works only on the phones you look after.`),
       h('p', { class: 'hint', style: 'margin:0' }, set ? `Set${typeof set === 'string' ? ' · last changed ' + new Date(set).toLocaleDateString([], { day: 'numeric', month: 'short' }) : ''}.` : 'Not set yet.'),
-      pinIn('myPin', set ? 'New PIN' : 'Your PIN'), pinIn('myPin2', 'The same PIN again'),
-      h('div', { class: 'acts' }, go, set ? remove : null),
+      INAPP ? pinKeypad([{ id: 'myPin', label: set ? 'New PIN' : 'Your PIN' }, { id: 'myPin2', label: 'Repeat PIN' }], () => go.onclick())
+            : [pinIn('myPin', set ? 'New PIN' : 'Your PIN'), pinIn('myPin2', 'The same PIN again')],
+      h('div', { class: 'acts' }, INAPP ? null : go, set ? remove : null),
       h('p', { class: 'hint', style: 'margin:0' }, 'It has to be different from every other admin\'s. It only approves requests: it doesn\'t open this admin page. After 5 wrong tries on a phone, PIN approvals lock on it.'))];
 }
 // Your notifications: on this phone (in the app), by email, and about what (only what you can see).
@@ -2275,7 +2346,8 @@ function approvalPinScreen() {
     h('p', { class: 'hint' }, 'When you\'re with someone who wants a site, you can type this PIN on their phone to approve their request there and then, ' +
       'instead of answering it here. It only approves requests: it doesn\'t open this admin page, and it can\'t open sites on the adult, gambling or malware lists (only you can, with Approve anyway). A 6-digit PIN is best. ' +
     'Helper admins allowed to approve on the phone have their own PINs, which work only on their phones.'),
-    field('apNew', 'New PIN'), field('apAgain', 'The same PIN again'), saveBtn,
+    INAPP ? pinKeypad([{ id: 'apNew', label: 'New PIN' }, { id: 'apAgain', label: 'Repeat PIN' }], () => saveBtn.onclick())
+          : [field('apNew', 'New PIN'), field('apAgain', 'The same PIN again'), saveBtn],
     had ? h('button', { type: 'button', class: 'btn d', id: 'apRemove', onclick: remove }, 'Remove this PIN') : null,
     h('p', { class: 'hint' }, 'After 5 wrong PINs on a phone, PIN approvals lock on it for 24 hours (unlock it under Phones). Only a scrambled version of the PIN is stored.'));
 }
@@ -2355,11 +2427,16 @@ function setDefault(d, k, v) {
   if (Object.keys(md).length) d.mediaDefault = md; else delete d.mediaDefault;
 }
 function describe(req) {
+  if (!req || typeof req !== 'object') return { title: 'A request from a phone', page: null };
   if (req.type === 'browser') return { title: `A new browser: ${req.label || req.pkg || 'an app'}`, page: null };
   if (req.type === 'timer') { const tn = (timerDefs()[req.timer] || {}).name || req.timerName || 'a timer', m = Number(req.minutes) || 30;
     return { title: req.ask === 'more' ? `${fmtMin(m)} more of ${tn} today` : `${fmtMin(m)} off ${tn}`, page: null }; }
   if (req.type === 'mediaDefault') return { title: 'Change this phone\'s default', page: null };
   if (req.type === 'search') return { title: req.off === true ? 'Turn off search' : req.wasOn === true ? 'Change search' : 'Turn on search', page: null };
+  if (req.type === 'unprotect') return { title: 'Turn off phone protection', page: null };
+  if (req.type === 'uncoverlists') return { title: 'Turn off the stronger lists cover', page: null };
+  // A site request needs a domain/action; without one (e.g. a record still loading), don't guess "Open ?".
+  if (!req.domain && !req.action && req.media === undefined && !(Array.isArray(req.frames) && req.frames.length)) return { title: 'A request from a phone', page: null };
   const site = req.domain || '?';
   if (Array.isArray(req.frames) && req.frames.length) return { title: `Embedded content on ${site}`, page: null };
   const page = req.scope === 'page' && req.url ? pageKey(req.url) : null;
@@ -2433,6 +2510,7 @@ function requestCard(issue) {
   if (req.type === 'mediaDefault' || req.type === 'search') return settingRequestCard(issue, req);
   if (req.type === 'timer') return timerRequestCard(issue, req);
   if (req.type === 'browser') return browserRequestCard(issue, req);
+  if (req.type === 'unprotect' || req.type === 'uncoverlists') return protectRequestCard(issue, req);
   const { title, page } = describe(req);
   const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
   const note = field(issue.body, 'Note');
@@ -2684,6 +2762,39 @@ function browserRequestCard(issue, req) {
   return card;
 }
 
+// A phone asking to turn protection (or the stronger lists cover) off: clear wording, and the reply is relevant —
+// Approving turns it off; Keep it on is the safe default (shown as the primary button).
+function protectRequestCard(issue, req) {
+  const lists = req.type === 'uncoverlists';
+  const title = lists ? 'Turn off the stronger lists cover' : 'Turn off phone protection';
+  const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
+  const card = h('article', { class: 'card', 'data-n': issue.number });
+  const actions = h('div', { class: 'acts' });
+  const send = async (text, labelTxt) => {
+    actions.querySelectorAll('button').forEach(b => b.disabled = true);
+    try {
+      await reply(issue.number, text, issue._again);
+      S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
+      S.requests = (S.requests || []).filter(i => i.number !== issue.number);
+      S.answered.unshift({ title, label: `${labelTxt} for ${phone}` });
+      backOrRender();
+      say(`${labelTxt}. ${phone} picks it up within a few minutes.`);
+    } catch (e) { actions.querySelectorAll('button').forEach(b => b.disabled = false); say(e.message === 'NO_ISSUES' ? NO_ISSUES_MSG : e.message, true); }
+  };
+  actions.append(
+    h('button', { type: 'button', class: 'btn p grow', onclick: () => send('deny keep it on', 'Kept on') }, 'Keep it on'),
+    h('button', { type: 'button', class: 'btn dline', onclick: () => send('approve', lists ? 'Stronger cover turned off' : 'Protection turned off') }, lists ? 'Turn the cover off' : 'Turn protection off'));
+  card.append(...[
+    h('div', { class: 'who' }, h('span', null, h('span', { class: 'av' }, phone[0].toUpperCase()), h('b', null, phone), h('span', { class: 'muted small' }, '· ' + ago(issue.created_at))),
+      chip('Protection', 'amber', 'shield')),
+    h('h3', null, title),
+    h('p', { class: 'hint', style: 'margin:0' }, lists
+      ? `${phone} asked to stop covering the whole Accessibility and Device admin lists. The app's own screens stay covered either way. Approving turns the stronger cover off.`
+      : `${phone} asked to switch off all protection — blocking other browsers, the uninstall lock and the screen cover. Approving turns it all off; "Keep it on" leaves everything as it is.`),
+    actions].filter(Boolean));
+  return card;
+}
+
 function timerRequestCard(issue, req) {
   const { title } = describe(req);
   const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
@@ -2762,11 +2873,13 @@ function requestDetailsScreen() {
   const hops = Array.isArray(req.hops) ? req.hops : [];
   const hopText = hops.map(x => typeof x === 'string' ? x : `${x.url} (${x.scope === 'site' ? 'whole site' : 'this page'}${x.tile ? ', with a tile' : ', no tile'})`);
   const when = new Date(issue.created_at);
-  if (req.type === 'mediaDefault' || req.type === 'search') return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Requests'),
+  // Requests that aren't about a site (a setting, protection, …): a simple details card, then the (relevant) answer card.
+  if (req.type === 'mediaDefault' || req.type === 'search' || req.type === 'unprotect' || req.type === 'uncoverlists') return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Requests'),
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
       kv('Date asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
+      kv('Asking to', req.type === 'unprotect' ? 'Turn off all phone protection' : req.type === 'uncoverlists' ? 'Turn off the stronger lists cover' : null),
       kv('Note', field(issue.body, 'Note') ? `“${field(issue.body, 'Note')}”` : null),
       null),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
@@ -3542,6 +3655,7 @@ function phonesScreen() {
     const away = daysAway(id), seen = seenText(id), v = (seenOf(id) || {}).v;
     const tags = [d.blocked ? chip('Blocked', 'red', 'ban') : null, !d.name ? chip('Needs a name', 'amber') : null,
       clockNotes(id).length ? chip('Clock', 'amber', 'clock') : null,
+      protectionLapsed(id) ? chip('Protection', 'amber') : null,
       d.pinLockedUntil && Date.parse(d.pinLockedUntil) > Date.now() ? chip('Locked PIN', 'amber') : null,
       off.length ? chip(`${cap(off.join(', '))} off`, 'amber') : null].filter(Boolean);
     const lists = (d.blocked ? 'Blocked: no lists' : (d.lists || []).length
@@ -3809,11 +3923,17 @@ function phoneSeenPart(id, d, M) {
   const asked = Number(d.updateRequested) > x.at;
   const ask = async () => { d.updateRequested = Date.now(); markDevices(); await saveAll(); say('Asked. The phone offers the update next time the app is open.'); render(); };
   const notes = clockNotes(id);
+  const sp = seenProtect(id);
+  const lapsed = protectionLapsed(id);
   return h('div', { class: 'stack', style: 'gap:6px' },
     h('div', { class: 'card kvs', style: 'padding:6px 14px' },
       h('div', { class: 'kv' }, h('span', { class: 'k' }, 'Last used'), h('span', { class: 'v' }, `${seenText(id)} (${new Date(x.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })})`)),
       x.v ? h('div', { class: 'kv' }, h('span', { class: 'k' }, 'App'), h('span', { class: 'v' }, `${x.v}${olderApp(id) ? ` (newest: ${S.seen.latest})` : ' (up to date)'}`)) : null),
     olderApp(id) && M ? h('button', { type: 'button', class: 'btn s sm', id: 'pAskUpdate', disabled: asked, onclick: ask }, asked ? 'Asked it to update' : 'Ask it to update') : null,
+    // Protection lapsed: Android dropped a means (the cover, uninstall lock or battery) while the phone is meant to
+    // be protected. Shown like the clock warning, with what's missing, so it's noticed remotely.
+    lapsed ? h('p', { class: 'warn', id: 'pProtect', style: 'margin:0' },
+      `Protection needs attention on this phone: ${(Array.isArray(sp.missing) && sp.missing.length ? sp.missing.join(', ') : 'a protection is off')}. Ask whoever has the phone to reopen Whitelist Browser → ⋮ → Settings → Protection & controls → Phone protection and tap the part that's off.`) : null,
     notes.length ? h('p', { class: 'warn', id: 'pClock', style: 'margin:0' }, notes.join(' ')) : null);
 }
 // A phone's default for photos, videos and sound, and its text search. Changed by those who manage the phone.
@@ -3988,6 +4108,7 @@ function accountSection(section) {
   return section('Admin page', h('div', { class: 'group' },
     row('shield', 'Your account', ME ? `${ME.email}${getPin() || getBio() ? ` · locked on this ${INAPP ? 'phone' : 'device'}` : ''}` : '', () => open({ name: 'account' }), 'openAccount'),
     isOwner() ? row('phone', 'Admins', 'Add admins for some phones, and choose what they can do', () => { S.admins = null; open({ name: 'admins' }); }, 'openAdmins') : null,
+    ADMINAPP ? row('download', 'App update', `${(() => { try { return 'Version ' + (WLBAdmin.appVersion ? WLBAdmin.appVersion() : '?') + ' · '; } catch { return ''; } })()}Check for a new version`, () => { try { WLBAdmin.updateApp(); } catch {} }, 'adminAppUpdate') : null,
     INAPP ? null : h('a', { class: 'row', href: status, target: '_blank', rel: 'noopener' }, h('span', { class: 'ic' }, icon('ext', 20)),
       h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Open the status page')))));
 }
@@ -4155,10 +4276,34 @@ function protectState(id) {
   const s = seenProtect(id);
   if (!s) return null;
   if (s.owner) return { label: 'Device owner', tone: 'teal' };
+  // Newer app: one master status (active / partial / off) with the list of lapsed means.
+  const health = s.health || (s.intended !== undefined
+    ? (s.intended ? ((s.cover && s.admin && s.battery) ? 'active' : 'partial') : 'off') : null);
+  if (health) {
+    if (health === 'active') return { label: 'Protected', tone: 'teal' };
+    if (health === 'partial') {
+      const m = Array.isArray(s.missing) && s.missing.length ? ' · ' + s.missing.join(', ') : '';
+      return { label: 'Action needed' + m, tone: 'amber' };
+    }
+    return { label: 'Off', tone: 'amber' };
+  }
+  // Older app (no master status reported): describe the means it did report.
   if (s.admin && s.cover) return { label: 'Screen cover + uninstall protection', tone: 'teal' };
   if (s.cover) return { label: 'Screen cover', tone: 'teal' };
   if (s.admin) return { label: 'Uninstall protection only', tone: 'amber' };
   return { label: 'Not set up on the phone yet', tone: 'amber' };
+}
+// True when the phone is meant to be protected but a means has lapsed (for the alert banner).
+function protectionLapsed(id) {
+  const s = seenProtect(id);
+  return !!(s && !s.owner && (s.health === 'partial'
+    || (s.health === undefined && s.intended === true && !(s.cover && s.admin && s.battery))));
+}
+// The per-means breakdown the phone reports (newer app, non-owner), to mirror the phone's own checklist on the dashboard.
+function protectMeans(id) {
+  const s = seenProtect(id);
+  if (!s || s.owner || s.intended === undefined) return null;
+  return [['Screen cover', s.cover === true], ['Can’t be uninstalled', s.admin === true], ['Always running (battery)', s.battery === true]];
 }
 // How an app stands: explicit allow/block, or (a found browser) blocked by "block new".
 function appDecision(d, app) {
@@ -4202,7 +4347,7 @@ function browsersScreen() {
     return out.sort((a, b) => (a.label || a.pkg).localeCompare(b.label || b.pkg));
   })();
   const name = firstName(d);
-  const setMode = v => { const pr = ensureProtect(d); pr.mode = v; markDevices(); render(); };
+  const setMode = v => { const pr = ensureProtect(d); pr.mode = v; if (v === 'off') { pr.off = true; pr.offAt = Date.now(); } else { delete pr.off; delete pr.offAt; } markDevices(); render(); };
   const appRow = (a, added) => {
     const dec = appDecision(d, a);
     return h('div', { class: 'row', style: 'align-items:center;gap:10px' },
@@ -4238,17 +4383,32 @@ function browsersScreen() {
     h('div', { class: 'card', style: 'gap:8px' },
       h('div', { style: 'display:flex;align-items:center;gap:8px' }, h('b', { style: 'flex:1' }, 'Protection on the phone'),
         st ? h('span', { class: `chip ${st.tone}`, style: 'flex:none' }, st.label) : h('span', { class: 'chip', style: 'flex:none' }, 'No report yet')),
-      h('p', { class: 'hint', style: 'margin:0' }, 'Set up on the phone (or a computer, for device owner). The steps are on the phone under ⋮ → Settings → This phone → Other browsers.')),
+      // What you've asked for (your setting), separate from what the phone has actually granted.
+      p.mode && p.mode !== 'off' ? h('div', { class: 'ro', style: 'margin-top:2px' },
+        h('span', { class: 'grow' }, h('span', { class: 't' }, 'Mode you\'ve chosen'), h('span', { class: 's' }, p.mode === 'owner' ? 'Device owner' : 'Screen cover')),
+        h('span', { class: 'chip', style: 'flex:none' }, 'Saved')) : null,
+      // The per-means breakdown — what the phone has actually granted (the same four its own Protection screen shows).
+      (() => { const rows = protectMeans(id); return rows ? h('div', { class: 'group', style: 'margin-top:2px' }, [h('div', { class: 'small muted', style: 'margin:2px 0' }, 'On the phone now:'), ...rows.map(([t, on]) =>
+        h('div', { class: 'ro' }, h('span', { class: 'grow' }, h('span', { class: 't' }, t)),
+          h('span', { class: `chip ${on ? 'teal' : 'amber'}`, style: 'flex:none' }, on ? '✓ On' : 'Off')))]) : null; })(),
+      (!protectMeans(id) && p.mode && p.mode !== 'off' && !(seenProtect(id) && seenProtect(id).owner)) ?
+        h('p', { class: 'hint', style: 'margin:0' }, 'Waiting for the phone to report which permissions it has — open the app on the phone once it\'s online, and grant the steps it shows.') : null,
+      protectionLapsed(id) ? h('p', { class: 'warn', style: 'margin:0' }, `Protection has lapsed on the phone${Array.isArray(seenProtect(id).missing) && seenProtect(id).missing.length ? ': ' + seenProtect(id).missing.join(', ') : ''}. Whoever has the phone was alerted to put it back.`) : null,
+      seenProtect(id) && seenProtect(id).coverLists ? h('p', { class: 'hint', style: 'margin:0;color:var(--accent-text)' }, '✓ Also covering the whole Accessibility & Device admin lists.') : null,
+      h('p', { class: 'hint', style: 'margin:0' }, 'Turned on from the phone (one switch under ⋮ → Settings → Protection & controls → Phone protection), or set up with a computer for device owner. Raising protection is free; turning it off sends you a request to approve.')),
     // How to keep it in place: which mode the admin wants.
     M ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Keep the managed browser in place'),
       h('div', { class: 'group' }, [
         ['owner', 'Device owner', 'Strongest: blocked apps are switched off, the app can\'t be uninstalled, the clock is kept honest. Needs the one-time computer setup.'],
         ['cover', 'Screen cover', 'A blocked app is covered the moment it opens; uninstall needs a step that\'s covered. Set up on the phone, no computer.'],
         ['off', 'Off', 'Other browsers are found and listed, but nothing is blocked.'],
-      ].map(([v, t, s]) => h('label', { class: 'radio' },
-        h('input', { type: 'radio', name: 'pmode', value: v, checked: (p.mode || 'off') === v, onchange: () => setMode(v) }),
-        h('span', { class: 'grow' }, h('b', null, t), h('span', { class: 'small muted', style: 'display:block' }, s))))),
+      ].map(([v, t, s]) => { const dis = v === 'owner' && !isOwner;   // device owner can only be chosen once the phone is actually set up as one
+        return h('label', { class: 'radio', style: dis ? 'opacity:.55' : '' },
+          h('input', { type: 'radio', name: 'pmode', value: v, checked: (p.mode || 'off') === v, disabled: dis, onchange: () => setMode(v) }),
+          h('span', { class: 'grow' }, h('b', null, t), h('span', { class: 'small muted', style: 'display:block' },
+            dis ? 'Set this phone up as a device owner first (the one-time step with a computer); then you can choose this.' : s))); })),
       p.mode === 'cover' ? sw('Screen cover', 'Turn the cover off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { ensureProtect(d).overlay = v; }) : null,
+      p.mode === 'cover' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = ensureProtect(d); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null,
       p.mode === 'owner' && !isOwner ? h('p', { class: 'warn', style: 'margin:0' }, 'This phone isn\'t a device owner yet. Follow the one-time setup, with a computer, first.') : null,
       p.mode === 'owner' ? sw('Keep the clock honest', 'Keeps automatic date and time on, so timers can\'t be dodged.', p.lockClock !== false, v => { ensureProtect(d).lockClock = v; }) : null,
       p.mode === 'owner' ? sw('New apps need your OK', 'Nothing new can be installed without you (device owner only).', p.blockInstalls === true, v => { ensureProtect(d).blockInstalls = v; }) : null) : null,
