@@ -33,15 +33,13 @@ object PinScreen {
         fun dp(v: Int) = Ui.dp(activity, v)
         val sb = StringBuilder()
         val dots = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
-        // One filled dot per digit typed, plus a single hollow "caret" dot to show more can be typed — so the screen
-        // never implies a fixed length (PINs here can be 4–12, and different PINs have different lengths).
+        // At least four dots (the minimum PIN), filling as you type and growing past four for a longer PIN. A small
+        // note under them says four is the minimum, so the steady four doesn't look like a fixed length.
         fun renderDots() {
             dots.removeAllViews()
-            val filled = sb.length
-            val caret = filled < 12
-            val n = if (filled == 0) 1 else filled + if (caret) 1 else 0
+            val n = maxOf(4, sb.length)
             for (i in 0 until n) dots.addView(View(activity).apply {
-                background = Ui.rounded(if (i < filled) Ui.ACCENT else Ui.OUTLINE, dp(7).toFloat())
+                background = Ui.rounded(if (i < sb.length) Ui.ACCENT else Ui.OUTLINE, dp(7).toFloat())
             }, LinearLayout.LayoutParams(dp(13), dp(13)).apply { marginStart = dp(7); marginEnd = dp(7) })
         }
         val err = Ui.text(activity, "", 13.5f, Ui.RED_INK, "bold").apply { gravity = Gravity.CENTER; visibility = View.INVISIBLE }
@@ -97,7 +95,9 @@ object PinScreen {
                 LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(12) })
             if (sub.isNotEmpty()) addView(Ui.text(activity, sub, 13.5f, Ui.MUTED).apply { gravity = Gravity.CENTER },
                 LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
-            addView(dots, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(20); bottomMargin = dp(6) })
+            addView(dots, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(20); bottomMargin = dp(4) })
+            addView(Ui.text(activity, "At least 4 digits", 12f, Ui.MUTED).apply { gravity = Gravity.CENTER },
+                LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(6) })
             addView(err, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(6) })
             // ⌫ (undo) sits bottom-left, → (enter) bottom-right as the primary action — no separate OK button below.
             val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "→")

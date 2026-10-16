@@ -1922,9 +1922,9 @@ function pinKeypad(fields, onEnter) {
   const rows = {};
   const renderDots = () => list.forEach(f => {
     const inp = $(f.id), row = rows[f.id]; if (!row) return;
-    const n = inp ? inp.value.length : 0, max = inp ? (Number(inp.getAttribute('maxlength')) || 8) : 8;
+    const n = inp ? inp.value.length : 0;
     row.replaceChildren();
-    const count = n === 0 ? 1 : n + (n < max ? 1 : 0);   // one dot per digit, plus a hollow caret (never a fixed length)
+    const count = Math.max(4, n);   // at least four dots (the minimum), filling as you type and growing past four
     for (let i = 0; i < count; i++) { const d = document.createElement('span'); d.className = 'pindot' + (i < n ? ' on' : ''); row.appendChild(d); }
     if (row.parentNode) row.parentNode.classList.toggle('active', f.id === activeId && list.length > 1);
   });
@@ -1943,12 +1943,13 @@ function pinKeypad(fields, onEnter) {
     return h('div', { class: 'pinfield', onclick: () => { activeId = f.id; renderDots(); } },
       f.label ? h('div', { class: 'pinflabel' }, f.label) : null, row, inp);
   }));
+  const note = h('div', { class: 'pinflabel', style: 'opacity:.8' }, 'At least 4 digits');
   const grid = h('div', { class: 'pingrid' }, [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['⌫', '0', '→']].map(r =>
     h('div', { class: 'pinrow' }, r.map(k =>
       k === '⌫' ? key('⌫', '', () => type('del'))
         : k === '→' ? key('→', 'go', () => onEnter && onEnter())
           : key(k, '', () => type(k))))));
-  return h('div', { class: 'pinpad' }, display, grid);
+  return h('div', { class: 'pinpad' }, display, note, grid);
 }
 
 // Locking the admin on this device: offered after signing in (in the app, one of them is needed), and in Your account.
@@ -2426,6 +2427,7 @@ function setDefault(d, k, v) {
   if (Object.keys(md).length) d.mediaDefault = md; else delete d.mediaDefault;
 }
 function describe(req) {
+  if (!req || typeof req !== 'object') return { title: 'A request from a phone', page: null };
   if (req.type === 'browser') return { title: `A new browser: ${req.label || req.pkg || 'an app'}`, page: null };
   if (req.type === 'timer') { const tn = (timerDefs()[req.timer] || {}).name || req.timerName || 'a timer', m = Number(req.minutes) || 30;
     return { title: req.ask === 'more' ? `${fmtMin(m)} more of ${tn} today` : `${fmtMin(m)} off ${tn}`, page: null }; }
@@ -2433,6 +2435,8 @@ function describe(req) {
   if (req.type === 'search') return { title: req.off === true ? 'Turn off search' : req.wasOn === true ? 'Change search' : 'Turn on search', page: null };
   if (req.type === 'unprotect') return { title: 'Turn off phone protection', page: null };
   if (req.type === 'uncoverlists') return { title: 'Turn off the stronger lists cover', page: null };
+  // A site request needs a domain/action; without one (e.g. a record still loading), don't guess "Open ?".
+  if (!req.domain && !req.action && req.media === undefined && !(Array.isArray(req.frames) && req.frames.length)) return { title: 'A request from a phone', page: null };
   const site = req.domain || '?';
   if (Array.isArray(req.frames) && req.frames.length) return { title: `Embedded content on ${site}`, page: null };
   const page = req.scope === 'page' && req.url ? pageKey(req.url) : null;

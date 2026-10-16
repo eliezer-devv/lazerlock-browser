@@ -240,6 +240,10 @@ class MainActivity : Activity() {
         updateUi()
     }
 
+    /** Set when the Phone-protection screen sends the person to an Android settings screen to grant a permission, so we
+     *  reopen that screen when they come back (instead of making them dig back into Settings each time). */
+    @Volatile private var reopenProtection = false
+
     override fun onResume() {
         super.onResume()
         isResumedNow = true
@@ -266,6 +270,9 @@ class MainActivity : Activity() {
         if (Config.LOCK_TASK) runCatching { startLockTask() }.logged("App", "Pinning the app")
         main.removeCallbacks(tempTask)
         main.postDelayed(tempTask, tempTick)
+        // Came back from granting a protection permission in Android settings: reopen the Phone-protection screen so
+        // the person can carry straight on with the next step.
+        if (reopenProtection) { reopenProtection = false; main.postDelayed({ if (!isDestroyed && isResumedNow) runCatching { showOtherBrowsers() } }, 350) }
     }
 
     override fun onStop() {
@@ -3988,15 +3995,15 @@ class MainActivity : Activity() {
             val cover = Protection.coverOn(this)
             // 1. Uninstall protection (device admin) — first, while the cover isn't on yet.
             d.add(meansRow("1. Can't be uninstalled", "Android won't remove the app until this is switched off.", admin,
-                if (!admin) "Turn it on" to { d.dismiss(); runCatching { startActivity(DeviceOwner.addAdminIntent(this)) }.logged("Browsers", "Opening device admin") } else null))
-            // 2. Unrestricted battery (the keep-alive — stops Android sleeping the app and dropping the cover).
-            d.add(meansRow("2. Always running", "Stops the phone sleeping the app to save battery.", battery,
-                if (!battery) "Allow" to { Protection.batteryIntent(this)?.let { bi -> d.dismiss(); runCatching { startActivity(bi) }.logged("Browsers", "Asking for unrestricted battery") } } else null))
-            // 3. Screen cover (accessibility) — LAST.
-            d.add(meansRow("3. Screen cover", "Covers a blocked app the moment it opens. Turn this on LAST — once it's on it covers the Settings screens used for steps 1 and 2.", cover,
-                if (!cover) "Turn it on" to { d.dismiss(); openSettingsScreen(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "Find Whitelist Browser and turn it on. If it's greyed out, use \"Allow restricted settings\" first (⋮, top right).") } else null))
-            if (!cover && (!admin || !battery)) d.add(Ui.box(this, "Do steps 1 and 2 first. Once the screen cover is on it covers Settings, so grant device admin and battery before turning it on.", "warn"), 6)
-            else if (!cover) d.add(Ui.box(this, "If the Accessibility switch is greyed out (Android 13+): Settings → Apps → Whitelist Browser → ⋮ → Allow restricted settings, then turn the cover on.", "warn"), 6)
+                if (!admin) "Turn it on" to { reopenProtection = true; d.dismiss(); runCatching { startActivity(DeviceOwner.addAdminIntent(this)) }.logged("Browsers", "Opening device admin") } else null))
+            // 2. Unrestricted battery — locked until step 1 is done.
+            d.add(meansRow("2. Always running", if (admin) "Stops the phone sleeping the app to save battery." else "Do step 1 first.", battery,
+                if (!battery) "Allow" to { Protection.batteryIntent(this)?.let { bi -> reopenProtection = true; d.dismiss(); runCatching { startActivity(bi) }.logged("Browsers", "Asking for unrestricted battery") } } else null, enabled = admin))
+            // 3. Screen cover (accessibility) — LAST, locked until steps 1 and 2 are done (once it's on it covers the
+            // Settings screens used for those steps, so it must go on last).
+            d.add(meansRow("3. Screen cover", if (admin && battery) "Covers a blocked app the moment it opens. Do this one LAST." else "Do steps 1 and 2 first — once this is on it covers the Settings screens you'd need for them.", cover,
+                if (!cover) "Turn it on" to { reopenProtection = true; d.dismiss(); openSettingsScreen(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "Find Whitelist Browser and turn it on. If it's greyed out, use \"Allow restricted settings\" first (⋮, top right).") } else null, enabled = admin && battery))
+            if (!cover && admin && battery) d.add(Ui.box(this, "If the Accessibility switch is greyed out (Android 13+): Settings → Apps → Whitelist Browser → ⋮ → Allow restricted settings, then turn the cover on.", "warn"), 6)
             if (status == Protection.Status.PARTIAL) d.add(Ui.box(this, "Some protection has lapsed — tap the parts above to put it back. Whoever manages this phone has been told.", "warn"), 8)
 
             // Stronger, optional: cover the WHOLE Accessibility "Installed apps" list and the Device-admin apps list,
@@ -4004,7 +4011,6 @@ class MainActivity : Activity() {
             // master switch). If the admin set it from the dashboard it's locked on; if the admin turned it off, locked off.
             d.add(Ui.text(this, "MORE PROTECTION", 11.5f, Ui.MUTED, "bold").apply { setPadding(Ui.dp(this@MainActivity, 2), Ui.dp(this@MainActivity, 14), 0, 0) }, 0)
             val listsOn = Protection.coverListsWanted(this)   // show what's MEANT to be on (not whether the cover is live yet)
-            val listsLocked = Protection.coverListsLocked(this)
             val listSw = Ui.Toggle(this).apply { isChecked = listsOn; isClickable = false }
             d.add(LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
@@ -4013,16 +4019,14 @@ class MainActivity : Activity() {
                 addView(LinearLayout(this@MainActivity).apply {
                     orientation = LinearLayout.VERTICAL
                     addView(Ui.text(this@MainActivity, "Cover the whole Settings lists", 15f, Ui.INK, "bold"))
-                    addView(Ui.text(this@MainActivity, if (listsLocked) "Set from the admin page. Covers the full Accessibility and Device admin lists — not just this app's own screens."
-                        else "Also cover the full Accessibility and Device admin lists, not just this app's own screens. Turning it off needs the admin's approval. (Covers other apps on those lists too.)", 12.5f, Ui.MUTED))
+                    addView(Ui.text(this@MainActivity, "Also cover the full Accessibility and Device admin lists, not just this app's own screens. Turning it off needs the admin's approval. (Covers other apps on those lists too.)", 12.5f, Ui.MUTED))
                 }, LinearLayout.LayoutParams(0, -2, 1f))
                 addView(listSw)
+                // On is free; off goes to the admin as a request (same as the master switch), whether it was turned on
+                // here or from the dashboard.
                 setOnClickListener {
-                    when {
-                        listsLocked -> toast("This is set from the admin page.")
-                        listsOn -> confirmTurnOffCoverLists()                               // turning off: needs the admin
-                        else -> { Protection.setCoverListsLocal(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }  // turning on: free
-                    }
+                    if (listsOn) confirmTurnOffCoverLists()
+                    else { Protection.setCoverListsLocal(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }
                 }
             }, 8)
         }
@@ -4045,20 +4049,23 @@ class MainActivity : Activity() {
     }
 
     /** One means-of-protection row: title, what it does, whether it's in place, and (if not) a button to grant it. */
-    private fun meansRow(title: String, sub: String, on: Boolean, action: Pair<String, () -> Unit>?): View {
+    /** One protection step. [enabled] false greys it out and hides its button (an earlier step isn't done yet). */
+    private fun meansRow(title: String, sub: String, on: Boolean, action: Pair<String, () -> Unit>?, enabled: Boolean = true): View {
+        val showAction = action != null && enabled
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val pad = Ui.dp(this@MainActivity, 14)
             setPadding(pad, Ui.dp(this@MainActivity, 12), pad, Ui.dp(this@MainActivity, 12))
             background = Ui.rounded(Ui.CARD, Ui.dp(this@MainActivity, 14).toFloat(), Ui.LINE, Ui.dp(this@MainActivity, 1))
+            if (!enabled) alpha = 0.5f
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
                 addView(Ui.text(this@MainActivity, title, 15.5f, Ui.INK, "bold"), LinearLayout.LayoutParams(0, -2, 1f))
-                addView(Ui.text(this@MainActivity, if (on) "✓ On" else "Off", 13.5f, if (on) Ui.ACCENT_TEXT else Ui.DANGER, "bold"))
+                addView(Ui.text(this@MainActivity, if (on) "✓ On" else if (!enabled) "Locked" else "Off", 13.5f, if (on) Ui.ACCENT_TEXT else Ui.MUTED, "bold"))
             })
-            addView(Ui.text(this@MainActivity, sub, 12.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(this@MainActivity, 4), 0, if (action != null) Ui.dp(this@MainActivity, 8) else 0) })
-            if (action != null) addView(android.widget.Button(this@MainActivity).apply {
-                text = action.first; isAllCaps = false
+            addView(Ui.text(this@MainActivity, sub, 12.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(this@MainActivity, 4), 0, if (showAction) Ui.dp(this@MainActivity, 8) else 0) })
+            if (showAction) addView(android.widget.Button(this@MainActivity).apply {
+                text = action!!.first; isAllCaps = false
                 setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
                 setTextColor(Ui.ACCENT_TEXT)
                 minHeight = Ui.dp(this@MainActivity, 42); minimumHeight = Ui.dp(this@MainActivity, 42)
