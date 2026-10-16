@@ -43,6 +43,7 @@ object Updater {
     fun fetchLatest(): Release? {
         val repo = repo() ?: throw IOException("Set GITHUB_USERNAME in Config.kt")
         val test = appCtx?.let { testVersions(it) } ?: false
+        AppLog.i("Update", "Checking $repo for an update (test=$test, this app=${if (BuildConfig.ADMIN_APP) "admin" else "browser"}, code=${BuildConfig.VERSION_CODE})")
         // The newest release holds both apps, each under its own name: each app takes only its own file
         // (whitelist-browser.apk or whitelist-admin.apk), so neither can ever pick up the other.
         if (test) runCatching { newestOf(repo) }.onFailure { AppLog.w("Update", "Couldn't look for test versions: ${it.message}") }.getOrNull()?.let { return it }
@@ -64,8 +65,10 @@ object Updater {
         try {
             if (conn.responseCode != 200) throw IOException("GitHub returned ${conn.responseCode}")
             val list = org.json.JSONArray(conn.inputStream.bufferedReader().use { it.readText() })
-            return (0 until list.length()).map { list.getJSONObject(it) }.filter { !it.optBoolean("draft") }
-                .mapNotNull { runCatching { releaseFrom(it) }.getOrNull() }.maxByOrNull { it.versionCode }
+            val releases = (0 until list.length()).map { list.getJSONObject(it) }.filter { !it.optBoolean("draft") }
+            AppLog.i("Update", "Test channel: ${releases.size} releases — ${releases.joinToString(", ") { it.optString("tag_name") + (if (it.optBoolean("prerelease")) " (test)" else "") }}")
+            return releases.mapNotNull { runCatching { releaseFrom(it) }.getOrNull() }.maxByOrNull { it.versionCode }
+                .also { AppLog.i("Update", if (it != null) "Newest build for this app: ${it.versionName} (code ${it.versionCode})" else "No release in the list has this app's APK") }
         } finally {
             conn.disconnect()
         }
@@ -81,7 +84,11 @@ object Updater {
             val want = if (BuildConfig.ADMIN_APP) listOf("whitelist-for-admins.apk", "whitelist-admin.apk") else listOf("whitelist-browser.apk")
             val assets = o.getJSONArray("assets")
             val all = (0 until assets.length()).map { assets.getJSONObject(it) }.filter { it.getString("name").endsWith(".apk") }
-            val apk = want.firstNotNullOfOrNull { w -> all.firstOrNull { it.getString("name") == w } } ?: return null   // only its own file, never the other app
+            val apk = want.firstNotNullOfOrNull { w -> all.firstOrNull { it.getString("name") == w } }
+            if (apk == null) {   // the release doesn't carry this app's own file (e.g. the admin APK was left out of it)
+                AppLog.i("Update", "Release $label has APKs [${all.joinToString(", ") { it.getString("name") }}] — none is ${want.first()} for this app")
+                return null
+            }
             return Release(code, version, apk.getString("browser_download_url"))
         }
     }
