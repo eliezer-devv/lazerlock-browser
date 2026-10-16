@@ -3916,7 +3916,7 @@ class MainActivity : Activity() {
         val name = Device.name(this) ?: "Not registered yet"
         menuSheet("Settings", null, null, listOf(
             Triple(R.drawable.ic_d_theme, "Appearance" to look) { showAppearance() },
-            Triple(R.drawable.ic_d_user, "Phone protection" to "Photos, videos and sound · Search · My activity · Phone's browser") { showThisPhone() },
+            Triple(R.drawable.ic_d_user, "Protection & controls" to "Phone protection · Photos, videos and sound · Search · My activity") { showThisPhone() },
             Triple(R.drawable.ic_d_cookie, "Cookies and cache" to "Sign out of sites, free up space") { showCookiesAndCache() },
             Triple(R.drawable.ic_d_update, "App update" to "Version ${BuildConfig.VERSION_NAME}. Check for a new one") { checkForUpdate(manual = true) },
             Triple(R.drawable.ic_d_user, "About this phone" to "$name · ${Device.id(this)}") { showAbout() }))
@@ -3924,68 +3924,130 @@ class MainActivity : Activity() {
 
     /** Settings → This phone: its default for photos, videos and sound, search, my activity, and being the phone's browser. */
     private fun showThisPhone() {
-        menuSheet("Phone protection", "Settings", { showSettings() }, listOf(
+        menuSheet("Protection & controls", "Settings", { showSettings() }, listOf(
             Triple(R.drawable.ic_d_photo, "Photos, videos and sound" to ("This phone's default: " + Whitelist.MEDIA_KINDS.joinToString(", ") { k ->
                 "$k ${if (Whitelist.defaultBlocks(k)) "blocked" else "open"}" })) { showPhoneDefault() },
             Triple(R.drawable.ic_d_search, "Search" to searchNow()) { showSearchSettings() },
             Triple(R.drawable.ic_d_clock, "My activity" to "Time on each site, for you only") { showMyActivity() },
             Triple(R.drawable.ic_d_globe, "Phone's browser" to (if (isPhonesBrowser()) "This is the phone's browser: links from other apps open here"
                 else "Make it the phone's browser, so links from other apps open here")) { becomePhonesBrowser() },
-            Triple(R.drawable.ic_d_shield, "Block other browsers" to otherBrowsersStatus()) { showOtherBrowsers() },
+            Triple(R.drawable.ic_d_shield, "Phone protection" to otherBrowsersStatus()) { showOtherBrowsers() },
             Triple(R.drawable.ic_d_pin, "Lock with a PIN" to ("Set a PIN to lock this app" + if (UserLock.isSet(this)) " · On" else "")) { UserLock.manage(this) { showThisPhone() } }))
     }
 
     // ---------- Other browsers: turning the protection on, on this phone (supervised setup) ----------
 
-    private fun otherBrowsersStatus(): String = when {
-        DeviceOwner.isOwner(this) -> "Device owner: blocked apps are off"
-        GuardService.running && DeviceOwner.isAdminActive(this) -> "Screen cover and uninstall protection are on"
-        GuardService.running -> "Screen cover is on"
-        DeviceOwner.isAdminActive(this) -> "Uninstall protection is on"
-        else -> "Not set up"
+    private fun otherBrowsersStatus(): String = when (Protection.status(this)) {
+        Protection.Status.ACTIVE -> if (Protection.owner(this)) "On · device owner" else "On · protected"
+        Protection.Status.PARTIAL -> "Action needed: " + Protection.missing(this).joinToString(", ")
+        Protection.Status.OFF -> "Off"
     }
 
     /**
-     * The on-phone setup for keeping this managed browser in place. Shown plainly to whoever uses the phone — nothing
-     * here is hidden. Each button opens Android's own switch; what's blocked is decided on the admin page.
+     * The on-phone protection screen: one master switch. Turning it on is free and walks through Android's own
+     * screens to grant each means; turning it off needs the admin's approval (sent as a request). A status line and
+     * a checklist show what's actually in place, so a means Android quietly dropped is visible, never silent.
+     * Always shown plainly — nothing here is hidden; the admin can switch the whole thing off at any time.
      */
     private fun showOtherBrowsers() {
-        val owner = DeviceOwner.isOwner(this)
-        val admin = DeviceOwner.isAdminActive(this)
-        val cover = GuardService.running
+        val owner = Protection.owner(this)
+        val status = Protection.status(this)
+        val on = status != Protection.Status.OFF
         val d = Ui.AppDialog(this, sheet = true)
-        d.add(Ui.text(this, "‹ Phone protection", 15f, Ui.ACCENT_TEXT, "bold").apply {
-            minHeight = Ui.dp(this@MainActivity, 36); gravity = android.view.Gravity.CENTER_VERTICAL
-            setOnClickListener { d.dismiss(); showThisPhone() }
-        }, 0)
-        d.title("Block other browsers")
-        d.add(Ui.text(this, "Keep this the only way to the web on this phone: other browsers are covered or switched off, and the app is kept from being removed. Set up here; what's blocked is chosen on the admin page. Always visible, and switchable from the admin page.", 14f, Ui.MUTED), 6)
+        backRow(d, "Protection & controls") { showThisPhone() }
+        d.title("Phone protection")
+        d.add(Ui.text(this, "Keep this the only way to the web on this phone: other browsers are blocked, the app can't be removed, and Android is kept from pausing it. What's blocked is chosen on the admin page, which can also switch this off.", 14f, Ui.MUTED), 6)
+
+        // The one master switch. Turning it on guides the setup; turning it off is a request to the admin.
+        val sw = Ui.Toggle(this).apply { isChecked = on; isClickable = false }
+        d.add(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+            background = Ui.rounded(Ui.CARD, Ui.dp(this@MainActivity, 14).toFloat(), Ui.LINE, Ui.dp(this@MainActivity, 1))
+            setPadding(Ui.dp(this@MainActivity, 14), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 12))
+            addView(LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(Ui.text(this@MainActivity, "Protection", 16f, Ui.INK, "bold"))
+                addView(statusPill(status))
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(sw)
+            setOnClickListener {
+                if (!on) { Protection.setWanted(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }
+                else { d.dismiss(); confirmTurnOffProtection() }
+            }
+        }, 8)
+
         if (owner) {
-            d.add(Ui.box(this, "This phone is a device owner. Blocked apps are switched off, this app can't be uninstalled, and the clock is kept honest. To undo it, use the admin page.", "teal"), 8)
-        } else {
-            // Screen cover (accessibility) — this is the overlay that covers blocked apps.
-            d.add(statusRow("Screen cover (the overlay)", if (cover) "On" else "Off",
-                "Covers a blocked app the moment it opens, and the settings that could switch this off. This is the overlay — without it on, nothing is covered.", cover,
-                extra = if (!cover) "Allow restricted settings" to {
-                    // Android 13+ blocks turning on accessibility for a sideloaded app until this is allowed first.
-                    d.dismiss(); openAppInfo("If the Accessibility switch is greyed out: tap ⋮ (top right) → Allow restricted settings, then turn the cover on.")
-                } else null) {
-                d.dismiss(); openSettingsScreen(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "Find Whitelist Browser and turn it on. If it's greyed out, use \"Allow restricted settings\" first.")
-            })
-            if (!cover) d.add(Ui.box(this, "On some phones (Android 13+) the Accessibility switch is greyed out until you allow it: Settings → Apps → Whitelist Browser → ⋮ (top right) → Allow restricted settings. The \"Allow restricted settings\" button above opens that page.", "amber"), 6)
-            // Uninstall protection (device admin).
-            d.add(statusRow("Uninstall protection", if (admin) "On" else "Off",
-                "Android won't uninstall the app until this is switched off, and that screen is covered.", admin, extra = null) {
-                if (admin) { toast("To turn this off, use the admin page, or Settings → Security → Device admin apps."); return@statusRow }
-                d.dismiss(); runCatching { startActivity(DeviceOwner.addAdminIntent(this)) }.logged("Browsers", "Opening device admin")
-            })
-            d.add(Ui.text(this, "Strongest of all is device owner (blocked apps switched off, no uninstall at all), set up once from a computer — see the admin page.", 12.5f, Ui.MUTED), 8)
+            d.add(Ui.box(this, "This phone is a device owner — the strongest protection. Blocked apps are switched off, this app can't be uninstalled, and the clock is kept honest. To undo it, use the admin page.", "info"), 8)
+        } else if (on) {
+            d.add(Ui.text(this, "WHAT'S IN PLACE", 11.5f, Ui.MUTED, "bold").apply { setPadding(Ui.dp(this@MainActivity, 2), Ui.dp(this@MainActivity, 14), 0, 0) }, 0)
+            // 1. Screen cover (accessibility).
+            val cover = Protection.coverOn(this)
+            d.add(meansRow("Screen cover", "Covers a blocked app the moment it opens, and the settings that could switch this off.", cover,
+                if (!cover) "Turn it on" to { d.dismiss(); openSettingsScreen(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "Find Whitelist Browser and turn it on. If it's greyed out, use \"Allow restricted settings\" first (⋮, top right).") } else null))
+            if (!cover) d.add(Ui.box(this, "If the Accessibility switch is greyed out (Android 13+): Settings → Apps → Whitelist Browser → ⋮ → Allow restricted settings, then turn the cover on.", "warn"), 6)
+            // 2. Uninstall protection (device admin).
+            val admin = Protection.adminOn(this)
+            d.add(meansRow("Can't be uninstalled", "Android won't remove the app until this is switched off, and that screen is covered.", admin,
+                if (!admin) "Turn it on" to { d.dismiss(); runCatching { startActivity(DeviceOwner.addAdminIntent(this)) }.logged("Browsers", "Opening device admin") } else null))
+            // 3. Unrestricted battery (the keep-alive — stops Android dropping the cover).
+            val battery = Protection.batteryUnrestricted(this)
+            d.add(meansRow("Always running", "Stops the phone sleeping the app to save battery, which would drop the cover.", battery,
+                if (!battery) "Allow" to { Protection.batteryIntent(this)?.let { bi -> d.dismiss(); runCatching { startActivity(bi) }.logged("Browsers", "Asking for unrestricted battery") } } else null))
+            // 4. Don't pause when unused (auto-revoke), Android 11+.
+            if (Build.VERSION.SDK_INT >= 30) {
+                val keep = Protection.autoRevokeExempt(this)
+                d.add(meansRow("Don't pause when unused", "Keeps Android from removing the app's permissions if it isn't opened for a while.", keep,
+                    if (!keep) "Fix" to { d.dismiss(); openAppInfo("Turn off \"Pause app activity if unused\" (it may be under ⋮ or \"App battery usage\").") } else null))
+            }
+            if (status == Protection.Status.PARTIAL) d.add(Ui.box(this, "Some protection has lapsed — tap the parts above to put it back. Whoever manages this phone has been told.", "warn"), 8)
+
+            // Stronger, optional: cover the WHOLE Accessibility "Installed apps" list and the Device-admin apps list,
+            // not just this app's own pages. Turning it on is free; turning it off needs the admin's approval (like the
+            // master switch). If the admin set it from the dashboard it's locked on; if the admin turned it off, locked off.
+            d.add(Ui.text(this, "MORE PROTECTION", 11.5f, Ui.MUTED, "bold").apply { setPadding(Ui.dp(this@MainActivity, 2), Ui.dp(this@MainActivity, 14), 0, 0) }, 0)
+            val listsOn = BrowserGuard.coverLists(this)
+            val listsLocked = Protection.coverListsLocked(this)
+            val listSw = Ui.Toggle(this).apply { isChecked = listsOn; isClickable = false }
+            d.add(LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+                background = Ui.rounded(Ui.CARD, Ui.dp(this@MainActivity, 14).toFloat(), Ui.LINE, Ui.dp(this@MainActivity, 1))
+                setPadding(Ui.dp(this@MainActivity, 14), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 12))
+                addView(LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(Ui.text(this@MainActivity, "Cover the whole Settings lists", 15f, Ui.INK, "bold"))
+                    addView(Ui.text(this@MainActivity, if (listsLocked) "Set from the admin page. Covers the full Accessibility and Device admin lists — not just this app's own screens."
+                        else "Also cover the full Accessibility and Device admin lists, not just this app's own screens. Turning it off needs the admin's approval. (Covers other apps on those lists too.)", 12.5f, Ui.MUTED))
+                }, LinearLayout.LayoutParams(0, -2, 1f))
+                addView(listSw)
+                setOnClickListener {
+                    when {
+                        listsLocked -> toast("This is set from the admin page.")
+                        listsOn -> confirmTurnOffCoverLists()                               // turning off: needs the admin
+                        else -> { Protection.setCoverListsLocal(this@MainActivity, true); d.dismiss(); showOtherBrowsers() }  // turning on: free
+                    }
+                }
+            }, 8)
         }
         d.button("Done", Ui.Kind.PRIMARY) { it.dismiss() }
         d.show()
     }
 
-    private fun statusRow(title: String, state: String, sub: String, on: Boolean, extra: Pair<String, () -> Unit>? = null, onTap: () -> Unit): View {
+    /** The small coloured status pill under the "Protection" title. */
+    private fun statusPill(status: Protection.Status): View {
+        val (label, ink, bg) = when (status) {
+            Protection.Status.ACTIVE -> Triple("● Active", Ui.ACCENT_TEXT, Ui.SOFT)
+            Protection.Status.PARTIAL -> Triple("● Action needed", Ui.AMBER_INK, Ui.AMBER_BG)
+            Protection.Status.OFF -> Triple("● Off", Ui.MUTED, Ui.SEG)
+        }
+        return Ui.text(this, label, 12.5f, ink, "bold").apply {
+            background = Ui.rounded(bg, Ui.dp(this@MainActivity, 999).toFloat())
+            val px = Ui.dp(this@MainActivity, 10); setPadding(px, Ui.dp(this@MainActivity, 4), px, Ui.dp(this@MainActivity, 4))
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { topMargin = Ui.dp(this@MainActivity, 5) }
+        }
+    }
+
+    /** One means-of-protection row: title, what it does, whether it's in place, and (if not) a button to grant it. */
+    private fun meansRow(title: String, sub: String, on: Boolean, action: Pair<String, () -> Unit>?): View {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             val pad = Ui.dp(this@MainActivity, 14)
@@ -3994,24 +4056,51 @@ class MainActivity : Activity() {
             addView(LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
                 addView(Ui.text(this@MainActivity, title, 15.5f, Ui.INK, "bold"), LinearLayout.LayoutParams(0, -2, 1f))
-                addView(Ui.text(this@MainActivity, state, 13.5f, if (on) Ui.ACCENT_TEXT else Ui.DANGER, "bold"))
+                addView(Ui.text(this@MainActivity, if (on) "✓ On" else "Off", 13.5f, if (on) Ui.ACCENT_TEXT else Ui.DANGER, "bold"))
             })
-            addView(Ui.text(this@MainActivity, sub, 12.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(this@MainActivity, 4), 0, Ui.dp(this@MainActivity, 8)) })
-            addView(LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.HORIZONTAL
-                fun actBtn(label: String, tap: () -> Unit) = android.widget.Button(this@MainActivity).apply {
-                    text = label; isAllCaps = false
-                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
-                    setTextColor(Ui.ACCENT_TEXT)
-                    minHeight = Ui.dp(this@MainActivity, 42); minimumHeight = Ui.dp(this@MainActivity, 42)
-                    background = Ui.rounded(0, 0f, Ui.OUTLINE, Ui.dp(this@MainActivity, 1))
-                    val px = Ui.dp(this@MainActivity, 16); setPadding(px, 0, px, 0)
-                    setOnClickListener { tap() }
-                }
-                addView(actBtn(if (on) "Change" else "Turn it on", onTap))
-                extra?.let { (label, tap) -> addView(actBtn(label, tap).apply { (layoutParams as? LinearLayout.LayoutParams ?: LinearLayout.LayoutParams(-2, -2)).also { lp -> lp.marginStart = Ui.dp(this@MainActivity, 8); layoutParams = lp } }) }
+            addView(Ui.text(this@MainActivity, sub, 12.5f, Ui.MUTED).apply { setPadding(0, Ui.dp(this@MainActivity, 4), 0, if (action != null) Ui.dp(this@MainActivity, 8) else 0) })
+            if (action != null) addView(android.widget.Button(this@MainActivity).apply {
+                text = action.first; isAllCaps = false
+                setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+                setTextColor(Ui.ACCENT_TEXT)
+                minHeight = Ui.dp(this@MainActivity, 42); minimumHeight = Ui.dp(this@MainActivity, 42)
+                background = Ui.rounded(0, 0f, Ui.OUTLINE, Ui.dp(this@MainActivity, 1))
+                val px = Ui.dp(this@MainActivity, 16); setPadding(px, 0, px, 0)
+                setOnClickListener { action.second() }
+                layoutParams = LinearLayout.LayoutParams(-2, -2)
             })
         }.also { it.layoutParams = LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@MainActivity, 8) } }
+    }
+
+    private fun confirmTurnOffProtection() {
+        if (!Requests.isSetUp()) {   // no admin to ask (not registered): just turn it off here
+            Protection.setWanted(this, false)
+            toast("Protection turned off.")
+            showOtherBrowsers(); return
+        }
+        val d = Ui.AppDialog(this, sheet = true)
+        backRow(d, "Phone protection") { showOtherBrowsers() }
+        d.title("Turn off protection?")
+        d.add(Ui.text(this, "This needs approval from whoever manages this phone. We'll send them a request — protection stays on until it's approved.", 14f, Ui.MUTED), 6)
+        d.button("Send request", Ui.Kind.PRIMARY) { it.dismiss(); sendPhoneRequest("unprotect", org.json.JSONObject(), "", "Turn off protection") }
+        d.button("Keep it on", Ui.Kind.GHOST) { it.dismiss(); showOtherBrowsers() }
+        d.show()
+    }
+
+    /** Turning off the stronger whole-lists cover: a request to the admin, like the master switch. */
+    private fun confirmTurnOffCoverLists() {
+        if (!Requests.isSetUp()) {
+            Protection.setCoverListsLocal(this, false)
+            toast("Turned off.")
+            showOtherBrowsers(); return
+        }
+        val d = Ui.AppDialog(this, sheet = true)
+        backRow(d, "Phone protection") { showOtherBrowsers() }
+        d.title("Turn off the stronger cover?")
+        d.add(Ui.text(this, "Covering the whole Settings lists is extra protection. Turning it off needs approval from whoever manages this phone. We'll send them a request — it stays on until it's approved.", 14f, Ui.MUTED), 6)
+        d.button("Send request", Ui.Kind.PRIMARY) { it.dismiss(); sendPhoneRequest("uncoverlists", org.json.JSONObject(), "", "Turn off the whole-lists cover") }
+        d.button("Keep it on", Ui.Kind.GHOST) { it.dismiss(); showOtherBrowsers() }
+        d.show()
     }
 
     private fun openSettingsScreen(action: String, hint: String) {
@@ -4204,7 +4293,7 @@ class MainActivity : Activity() {
     private fun showMyActivity(days: Int = 1) {
         runCatching { MyActivity.save(applicationContext) }.logged("Activity", "Saving")
         val d = Ui.AppDialog(this, sheet = true)
-        d.add(Ui.text(this, "‹ Phone protection", 15f, Ui.ACCENT_TEXT, "bold").apply {
+        d.add(Ui.text(this, "‹ Protection & controls", 15f, Ui.ACCENT_TEXT, "bold").apply {
             minHeight = Ui.dp(this@MainActivity, 36); gravity = android.view.Gravity.CENTER_VERTICAL
             setOnClickListener { d.dismiss(); showThisPhone() }
         }, 0)
@@ -4262,7 +4351,7 @@ class MainActivity : Activity() {
     /** ⋮ → Settings → This phone's default: view only. "Ask to change it" lets them choose, then sends a request. */
     private fun showPhoneDefault() {
         val d = Ui.AppDialog(this, sheet = true)
-        backRow(d, "Phone protection") { showThisPhone() }
+        backRow(d, "Protection & controls") { showThisPhone() }
         d.title("This phone's default")
         d.add(Ui.text(this, "Photos, videos and sound on every site, unless a site is set otherwise.", 14.5f, Ui.MUTED), 6)
         d.add(LinearLayout(this).apply {
@@ -4347,7 +4436,7 @@ class MainActivity : Activity() {
     private fun showSearchSettings() {
         if (!Whitelist.state.search) { showAskSearch(); return }
         val d = Ui.AppDialog(this, sheet = true)
-        backRow(d, "Phone protection") { showThisPhone() }
+        backRow(d, "Protection & controls") { showThisPhone() }
         d.title("Search")
         d.add(Ui.text(this, "The search box on this phone's home page.", 14.5f, Ui.MUTED), 6)
         d.add(Ui.box(this, if (Whitelist.state.searchApprovedOnly) "On. It shows only results this phone can already open."
@@ -4475,7 +4564,7 @@ class MainActivity : Activity() {
             val wasPhoneColours = Ui.usePhoneColours(this@MainActivity)
             val (colourRow, colourSwitch) = Ui.switchRow(this@MainActivity, "Use my phone's colours", "Matches your wallpaper", wasPhoneColours)
             if (Ui.phoneColoursAvailable) add(colourRow)
-            // (The optional PIN to lock the app has moved to Phone protection → "Lock with a PIN".)
+            // (The optional PIN to lock the app has moved to Protection & controls → "Lock with a PIN".)
             button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
             button("Done", Ui.Kind.PRIMARY) {
                 it.dismiss()

@@ -31,6 +31,7 @@ object BrowserGuard {
         val blockInstalls: Boolean,             // device owner: new apps need the admin's OK
         val lockClock: Boolean,                 // device owner: keep automatic date and time on
         val coverLists: Boolean,                // optional: cover the whole Accessibility & Device-admin LIST screens
+        val coverListsOff: Boolean,             // admin explicitly turned the whole-lists cover off (wins over a local turn-on)
         val apps: Map<String, String>           // package -> "allow" | "block"
     )
 
@@ -45,6 +46,7 @@ object BrowserGuard {
             blockInstalls = o.optBoolean("blockInstalls", false),
             lockClock = o.optBoolean("lockClock", true),
             coverLists = o.optBoolean("coverLists", false),
+            coverListsOff = o.optBoolean("coverListsOff", false),
             apps = apps)
     }
 
@@ -65,7 +67,7 @@ object BrowserGuard {
             mode = if (localOwner) "owner" else "cover",
             overlay = admin?.overlay ?: true, blockNew = admin?.blockNew ?: true,
             blockInstalls = admin?.blockInstalls ?: false, lockClock = admin?.lockClock ?: true,
-            coverLists = admin?.coverLists ?: false,
+            coverLists = admin?.coverLists ?: false, coverListsOff = admin?.coverListsOff ?: false,
             apps = admin?.apps ?: emptyMap())
         return admin
     }
@@ -74,8 +76,9 @@ object BrowserGuard {
     fun on(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" } ?: false
     /** The screen cover should run now (the admin hasn't switched it off). */
     fun coverOn(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" && it.overlay } ?: false
-    /** The stronger, optional cover (whole Accessibility & Device-admin list screens). Off unless the admin turned it on. */
-    fun coverLists(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" && it.overlay && it.coverLists } ?: false
+    /** The stronger, optional cover (whole Accessibility & Device-admin list screens): on when the admin set it OR the
+     *  phone turned on the local override, as long as core protection and the cover are on. */
+    fun coverLists(ctx: Context): Boolean = effective(ctx)?.let { it.mode != "off" && it.overlay && !it.coverListsOff && (it.coverLists || Protection.coverListsLocal(ctx)) } ?: false
 
     /** Our own package, and the Android pieces that must never be blocked. */
     private fun ownPackage(ctx: Context) = ctx.packageName
@@ -172,6 +175,7 @@ object BrowserGuard {
      * the main thread, every few minutes and when an app is installed or removed.
      */
     fun report(ctx: Context) {
+        runCatching { Protection.watchdog(ctx) }.logged(TAG, "Protection watchdog")   // alert the admin if protection slipped
         val found = browserApps(ctx)
         val pkgs = found.map { it.pkg }.toSet()
         val before = knownBrowserPkgs(ctx)
@@ -218,6 +222,14 @@ object BrowserGuard {
             .put("admin", DeviceOwner.isAdminActive(ctx))
             .put("cover", GuardService.running)
             .put("installBlock", protect?.blockInstalls == true && DeviceOwner.isOwner(ctx))
+            // The master-switch view: whether protection is meant to be on, and the extra "means" behind it, so the
+            // admin page can show Active / Action needed and which part lapsed.
+            .put("intended", Protection.intended(ctx))
+            .put("battery", Protection.batteryUnrestricted(ctx))
+            .put("autoRevoke", Protection.autoRevokeExempt(ctx))
+            .put("health", Protection.status(ctx).name.lowercase())
+            .put("coverLists", coverLists(ctx))   // the stronger whole-Settings-lists cover is actually in force
+            .apply { val m = Protection.missing(ctx); if (m.isNotEmpty()) put("missing", JSONArray(m)) }
         return apps to state
     }
 }

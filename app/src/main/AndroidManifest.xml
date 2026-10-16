@@ -19,6 +19,9 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
     <!-- The device admin that keeps the app from being uninstalled until it's switched off (and that screen is covered). -->
     <uses-permission android:name="android.permission.BIND_DEVICE_ADMIN" />
+    <!-- Supervised protection: ask to be exempt from battery optimisation, so Android/Samsung don't sleep the app and
+         drop the screen cover. Shows a one-tap system dialog; part of the visible, admin-controlled protection. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <!-- Websites can ask for these; the user is asked per site, then Android asks once. -->
     <uses-permission android:name="android.permission.CAMERA" />

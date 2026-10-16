@@ -33,11 +33,15 @@ object PinScreen {
         fun dp(v: Int) = Ui.dp(activity, v)
         val sb = StringBuilder()
         val dots = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }
+        // One filled dot per digit typed, plus a single hollow "caret" dot to show more can be typed — so the screen
+        // never implies a fixed length (PINs here can be 4–12, and different PINs have different lengths).
         fun renderDots() {
             dots.removeAllViews()
-            val n = maxOf(4, sb.length)
+            val filled = sb.length
+            val caret = filled < 12
+            val n = if (filled == 0) 1 else filled + if (caret) 1 else 0
             for (i in 0 until n) dots.addView(View(activity).apply {
-                background = Ui.rounded(if (i < sb.length) Ui.ACCENT else Ui.OUTLINE, dp(7).toFloat())
+                background = Ui.rounded(if (i < filled) Ui.ACCENT else Ui.OUTLINE, dp(7).toFloat())
             }, LinearLayout.LayoutParams(dp(13), dp(13)).apply { marginStart = dp(7); marginEnd = dp(7) })
         }
         val err = Ui.text(activity, "", 13.5f, Ui.RED_INK, "bold").apply { gravity = Gravity.CENTER; visibility = View.INVISIBLE }
@@ -74,6 +78,15 @@ object PinScreen {
             else { background = Ui.rounded(Ui.CARD, dp(25).toFloat(), Ui.OUTLINE, dp(1)); setTextColor(Ui.ACCENT_TEXT) }
             setOnClickListener { onTap() }
         }
+        // The two bottom-corner keys: ⌫ (undo, bottom-left) and → (enter, bottom-right, the primary action).
+        fun actionKey(label: String, primary: Boolean, onTap: () -> Unit): Button = Button(activity).apply {
+            text = label; isAllCaps = false; textSize = 22f
+            minWidth = 0; minHeight = 0; setPadding(0, 0, 0, 0); stateListAnimator = null
+            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            if (primary) { background = Ui.rounded(Ui.ACCENT, dp(33).toFloat()); setTextColor(Color.WHITE) }
+            else { background = Ui.rounded(Ui.CARD, dp(33).toFloat(), Ui.OUTLINE, dp(1)); setTextColor(Ui.INK) }
+            setOnClickListener { onTap() }
+        }
 
         val col = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
@@ -86,13 +99,18 @@ object PinScreen {
                 LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(4) })
             addView(dots, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(20); bottomMargin = dp(6) })
             addView(err, LinearLayout.LayoutParams(-2, -2).apply { bottomMargin = dp(6) })
-            val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫")
+            // ⌫ (undo) sits bottom-left, → (enter) bottom-right as the primary action — no separate OK button below.
+            val keys = listOf("1", "2", "3", "4", "5", "6", "7", "8", "9", "⌫", "0", "→")
             var row: LinearLayout? = null
             keys.forEachIndexed { i, k ->
                 if (i % 3 == 0) { row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER }; addView(row) }
-                row!!.addView(key(k), LinearLayout.LayoutParams(dp(66), dp(66)).apply { marginStart = dp(7); marginEnd = dp(7); topMargin = dp(7); bottomMargin = dp(7) })
+                val cell = when (k) {
+                    "⌫" -> actionKey("⌫", primary = false) { press("⌫") }.apply { contentDescription = "Delete" }
+                    "→" -> actionKey("→", primary = true) { onPin(sb.toString(), ctl) }.apply { contentDescription = okLabel }
+                    else -> key(k)
+                }
+                row!!.addView(cell, LinearLayout.LayoutParams(dp(66), dp(66)).apply { marginStart = dp(7); marginEnd = dp(7); topMargin = dp(7); bottomMargin = dp(7) })
             }
-            addView(pillButton(okLabel, true) { onPin(sb.toString(), ctl) }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(14) })
             if (biometric != null) addView(pillButton("Fingerprint", false) {
                 biometric { ok -> if (ok) { ctl.close(); onBiometricOk?.invoke() } }
             }, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(10) })

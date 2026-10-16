@@ -185,6 +185,22 @@ object Requests {
         return Outbox.add(ctx, "issue", payload, summary = summary, request = JSONObject(marker.toString()).put("sentKey", key))
     }
 
+    /**
+     * The phone noticed its protection slipped (a means dropped while it should be on): tell the admin side at once,
+     * so it emails the owner and shows up on admin phones. A notification, not a request to answer (the handler
+     * closes it). Deduped by [Protection.watchdog] so it goes once per lapse.
+     */
+    fun queueProtectionAlert(ctx: Context, missing: List<String>) {
+        if (!isSetUp()) return
+        val marker = JSONObject().put("type", "protectslip").put("device", Device.id(ctx)).put("model", Device.model())
+            .apply { Device.name(ctx)?.let { put("name", it) } }
+            .put("missing", JSONArray(missing.take(6)))
+        Outbox.add(ctx, "issue", JSONObject()
+            .put("title", "Protection slipped on a phone")
+            .put("body", "🔒 A phone's protection slipped. Details are on the admin page.\n\n${Seal.hiddenPart(marker)}")
+            .put("labels", JSONArray().put("site request")), summary = "Protection slipped")
+    }
+
     /** The owner typed the code we emailed them: send it so the admin side can mark this phone's email confirmed. */
     fun sendEmailCode(ctx: Context, code: String) {
         if (!isSetUp()) return
