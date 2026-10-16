@@ -63,6 +63,8 @@ class GuardService : AccessibilityService() {
             private set
         @Volatile private var instance: GuardService? = null
         fun dismissCover() { instance?.let { svc -> svc.main.post { svc.hideAll() } } }
+        /** Turn our own accessibility service off (handing the permission back) — used when protection is switched off. */
+        fun turnOffSelf() { instance?.let { svc -> svc.main.post { runCatching { svc.hideAll(); if (Build.VERSION.SDK_INT >= 24) svc.disableSelf() }.logged("Cover", "Turning the screen cover off") } } }
 
         // ── Languages ────────────────────────────────────────────────────────────────────────────────────────────
         // Language-INDEPENDENT (works whatever the phone's language is set to): our App info and Device-admin pages are

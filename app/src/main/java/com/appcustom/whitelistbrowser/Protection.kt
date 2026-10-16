@@ -24,6 +24,7 @@ object Protection {
     private const val PREFS = "protection"
     private const val WANT = "want"
     private const val OFF_SEEN = "offProcessed"        // the admin turn-off (its timestamp) we've already applied
+    private const val OFF_CLEANED = "offCleaned"       // the turn-off we've already handed permissions back for
     private const val LISTS_OFF_SEEN = "listsOffProcessed"
     private const val SLIP = "slipAlerted"   // we've already sent the owner a "protection slipped" alert for this lapse
     private const val WAS_ACTIVE = "wasActive" // protection has been fully in place at least once (so a drop is a real lapse, not first-time setup)
@@ -47,6 +48,23 @@ object Protection {
     fun setWanted(ctx: Context, want: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(WANT, want).apply()
         runCatching { Requests.checkInSoon(ctx) }       // tell the admin page its protection changed
+    }
+
+    /**
+     * When the admin approves a turn-off, also hand the Android permissions back: turn our own screen cover
+     * (accessibility) off and remove ourselves as device admin, so the phone returns to normal. Done once per
+     * turn-off. (The unrestricted-battery exemption can't be revoked by any app — it's left, which is harmless.)
+     * Safe to call often; does a little work, so call it off the main thread.
+     */
+    fun applyTurnOff(ctx: Context) {
+        val offAt = runCatching { Whitelist.state.protect?.offAt ?: 0L }.getOrDefault(0L)
+        if (offAt <= 0L) return
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (p.getLong(OFF_CLEANED, 0L) == offAt) return
+        p.edit().putLong(OFF_CLEANED, offAt).apply()
+        runCatching { DeviceOwner.removeAdmin(ctx) }.logged("Protection", "Handing device admin back on turn-off")
+        runCatching { GuardService.turnOffSelf() }.logged("Protection", "Handing the screen cover back on turn-off")
+        AppLog.i("Protection", "Protection turned off by the admin — handed accessibility & device admin back")
     }
 
     // ── the stronger, optional "cover the whole Settings lists" layer ────────────────────────────────────────────
@@ -119,6 +137,7 @@ object Protection {
      * protection is active (or off) once more. Safe to call often; does network, so call it off the main thread.
      */
     fun watchdog(ctx: Context) {
+        runCatching { applyTurnOff(ctx) }   // if the admin just turned protection off, hand the permissions back
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (!intended(ctx)) {                                  // off: forget it was ever active, re-arm the alert
             if (p.getBoolean(SLIP, false) || p.getBoolean(WAS_ACTIVE, false)) p.edit().putBoolean(SLIP, false).putBoolean(WAS_ACTIVE, false).apply()

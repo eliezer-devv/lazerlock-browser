@@ -27,6 +27,13 @@ object DeviceOwner {
     fun isAdminActive(ctx: Context): Boolean = runCatching { dpm(ctx).isAdminActive(component(ctx)) }.getOrDefault(false)
     fun isOwner(ctx: Context): Boolean = runCatching { dpm(ctx).isDeviceOwnerApp(ctx.packageName) }.getOrDefault(false)
 
+    /** Remove ourselves as device admin (so the app can be uninstalled again) — used when protection is switched off.
+     *  Only for the plain device-admin case; a device owner is undone from the admin page, not here. */
+    fun removeAdmin(ctx: Context) {
+        if (!isAdminActive(ctx) || isOwner(ctx)) return
+        runCatching { dpm(ctx).removeActiveAdmin(component(ctx)) }.logged(TAG, "Removing device admin on turn-off")
+    }
+
     /** The intent for the "Activate this device admin app?" screen (the no-computer uninstall protection). */
     fun addAdminIntent(ctx: Context): Intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN)
         .putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component(ctx))
