@@ -3953,6 +3953,7 @@ class MainActivity : Activity() {
         val owner = Protection.owner(this)
         val status = Protection.status(this)
         val on = status != Protection.Status.OFF
+        AppLog.i("Protection", "Phone-protection screen: status=$status want=${Protection.wantLocal(this)} on=${BrowserGuard.on(this)} cover=${Protection.coverOn(this)} admin=${Protection.adminOn(this)} battery=${Protection.batteryUnrestricted(this)} offAt=${runCatching { Whitelist.state.protect?.offAt }.getOrNull()}")
         val d = Ui.AppDialog(this, sheet = true)
         backRow(d, "Protection & controls") { showThisPhone() }
         d.title("Phone protection")
@@ -3980,19 +3981,22 @@ class MainActivity : Activity() {
             d.add(Ui.box(this, "This phone is a device owner — the strongest protection. Blocked apps are switched off, this app can't be uninstalled, and the clock is kept honest. To undo it, use the admin page.", "info"), 8)
         } else if (on) {
             d.add(Ui.text(this, "WHAT'S IN PLACE", 11.5f, Ui.MUTED, "bold").apply { setPadding(Ui.dp(this@MainActivity, 2), Ui.dp(this@MainActivity, 14), 0, 0) }, 0)
-            // 1. Screen cover (accessibility).
-            val cover = Protection.coverOn(this)
-            d.add(meansRow("Screen cover", "Covers a blocked app the moment it opens, and the settings that could switch this off.", cover,
-                if (!cover) "Turn it on" to { d.dismiss(); openSettingsScreen(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "Find Whitelist Browser and turn it on. If it's greyed out, use \"Allow restricted settings\" first (⋮, top right).") } else null))
-            if (!cover) d.add(Ui.box(this, "If the Accessibility switch is greyed out (Android 13+): Settings → Apps → Whitelist Browser → ⋮ → Allow restricted settings, then turn the cover on.", "warn"), 6)
-            // 2. Uninstall protection (device admin).
+            // Do these in order — the screen cover goes on LAST, because once it's on it covers the very Settings
+            // screens you use for the other two (you couldn't grant device admin with the overlay on top).
             val admin = Protection.adminOn(this)
-            d.add(meansRow("Can't be uninstalled", "Android won't remove the app until this is switched off, and that screen is covered.", admin,
-                if (!admin) "Turn it on" to { d.dismiss(); runCatching { startActivity(DeviceOwner.addAdminIntent(this)) }.logged("Browsers", "Opening device admin") } else null))
-            // 3. Unrestricted battery (the keep-alive — stops Android dropping the cover).
             val battery = Protection.batteryUnrestricted(this)
-            d.add(meansRow("Always running", "Stops the phone sleeping the app to save battery, which would drop the cover.", battery,
+            val cover = Protection.coverOn(this)
+            // 1. Uninstall protection (device admin) — first, while the cover isn't on yet.
+            d.add(meansRow("1. Can't be uninstalled", "Android won't remove the app until this is switched off.", admin,
+                if (!admin) "Turn it on" to { d.dismiss(); runCatching { startActivity(DeviceOwner.addAdminIntent(this)) }.logged("Browsers", "Opening device admin") } else null))
+            // 2. Unrestricted battery (the keep-alive — stops Android sleeping the app and dropping the cover).
+            d.add(meansRow("2. Always running", "Stops the phone sleeping the app to save battery.", battery,
                 if (!battery) "Allow" to { Protection.batteryIntent(this)?.let { bi -> d.dismiss(); runCatching { startActivity(bi) }.logged("Browsers", "Asking for unrestricted battery") } } else null))
+            // 3. Screen cover (accessibility) — LAST.
+            d.add(meansRow("3. Screen cover", "Covers a blocked app the moment it opens. Turn this on LAST — once it's on it covers the Settings screens used for steps 1 and 2.", cover,
+                if (!cover) "Turn it on" to { d.dismiss(); openSettingsScreen(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "Find Whitelist Browser and turn it on. If it's greyed out, use \"Allow restricted settings\" first (⋮, top right).") } else null))
+            if (!cover && (!admin || !battery)) d.add(Ui.box(this, "Do steps 1 and 2 first. Once the screen cover is on it covers Settings, so grant device admin and battery before turning it on.", "warn"), 6)
+            else if (!cover) d.add(Ui.box(this, "If the Accessibility switch is greyed out (Android 13+): Settings → Apps → Whitelist Browser → ⋮ → Allow restricted settings, then turn the cover on.", "warn"), 6)
             if (status == Protection.Status.PARTIAL) d.add(Ui.box(this, "Some protection has lapsed — tap the parts above to put it back. Whoever manages this phone has been told.", "warn"), 8)
 
             // Stronger, optional: cover the WHOLE Accessibility "Installed apps" list and the Device-admin apps list,

@@ -23,22 +23,26 @@ import android.provider.Settings
 object Protection {
     private const val PREFS = "protection"
     private const val WANT = "want"
+    private const val OFF_SEEN = "offProcessed"        // the admin turn-off (its timestamp) we've already applied
+    private const val LISTS_OFF_SEEN = "listsOffProcessed"
     private const val SLIP = "slipAlerted"   // we've already sent the owner a "protection slipped" alert for this lapse
     private const val WAS_ACTIVE = "wasActive" // protection has been fully in place at least once (so a drop is a real lapse, not first-time setup)
 
     /**
-     * The person (or admin) means this phone to be protected. True once turned on here, or once the admin set it.
-     * The admin switching it off (mode "off") wins over a local turn-on and clears the local flag — so approving a
-     * "turn off protection" request, which sets mode off, cleanly drops protection on the phone.
+     * The phone's own intent to be protected (the local switch). Turning it ON here is always free. It's turned OFF
+     * only when the admin approves a turn-off request — which arrives as a new protect.offAt timestamp, applied ONCE
+     * (so the phone can freely turn protection on again afterwards, like any raise). Otherwise a plain pref read, with
+     * no call back into BrowserGuard, so it's safe to use from effective().
      */
-    fun intended(ctx: Context): Boolean {
-        if (Whitelist.state.protect?.off == true) {          // admin explicitly turned it off (approved a turn-off): that wins
-            val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            if (p.getBoolean(WANT, false)) p.edit().putBoolean(WANT, false).apply()
-            return false
-        }
-        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(WANT, false) || BrowserGuard.on(ctx)
+    fun wantLocal(ctx: Context): Boolean {
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val offAt = runCatching { Whitelist.state.protect?.offAt ?: 0L }.getOrDefault(0L)
+        if (offAt > 0L && p.getLong(OFF_SEEN, 0L) != offAt) p.edit().putBoolean(WANT, false).putLong(OFF_SEEN, offAt).apply()
+        return p.getBoolean(WANT, false)
     }
+
+    /** Protection is meant to be on: the phone's own switch, or the admin imposing a mode from the dashboard. */
+    fun intended(ctx: Context): Boolean = wantLocal(ctx) || BrowserGuard.on(ctx)
 
     fun setWanted(ctx: Context, want: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(WANT, want).apply()
@@ -47,26 +51,21 @@ object Protection {
 
     // ── the stronger, optional "cover the whole Settings lists" layer ────────────────────────────────────────────
     // Covers the entire Accessibility "Installed apps" list and the Device-admin apps list (not just this app's own
-    // screens). The admin can set it from the dashboard — which wins and locks it on the phone — or it can be turned
-    // on here on the phone as a free local override.
+    // screens). Turned on freely on the phone or from the dashboard; turned off (on the phone) only via a request,
+    // whose approval arrives as a new coverListsOffAt timestamp and clears the local switch once.
     private const val COVER_LISTS = "coverListsLocal"
     fun coverListsLocal(ctx: Context): Boolean {
-        if (adminTurnedListsOff(ctx)) {                        // admin's off wins and clears a stale local turn-on
-            val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            if (p.getBoolean(COVER_LISTS, false)) p.edit().putBoolean(COVER_LISTS, false).apply()
-            return false
-        }
-        return ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(COVER_LISTS, false)
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val offAt = runCatching { Whitelist.state.protect?.coverListsOffAt ?: 0L }.getOrDefault(0L)
+        if (offAt > 0L && p.getLong(LISTS_OFF_SEEN, 0L) != offAt) p.edit().putBoolean(COVER_LISTS, false).putLong(LISTS_OFF_SEEN, offAt).apply()
+        return p.getBoolean(COVER_LISTS, false)
     }
     /** The admin set the whole-lists cover ON from the dashboard: it then can't be turned off on the phone. */
     fun coverListsForced(ctx: Context): Boolean = runCatching { Whitelist.state.protect?.coverLists == true }.getOrDefault(false)
-    /** Whether the whole-lists cover is MEANT to be on (admin set it, or turned on locally) — what the toggle shows,
-     *  independent of whether the screen cover happens to be running yet. */
+    /** Whether the whole-lists cover is MEANT to be on (admin set it, or turned on locally) — what the toggle shows. */
     fun coverListsWanted(ctx: Context): Boolean = coverListsForced(ctx) || coverListsLocal(ctx)
-    /** The admin explicitly turned it OFF (e.g. approved a turn-off request): the phone can't turn it back on. */
-    fun adminTurnedListsOff(ctx: Context): Boolean = runCatching { Whitelist.state.protect?.coverListsOff == true }.getOrDefault(false)
-    /** The toggle can't be changed on the phone (admin forced it on, or explicitly off). */
-    fun coverListsLocked(ctx: Context): Boolean = coverListsForced(ctx) || adminTurnedListsOff(ctx)
+    /** The toggle can't be changed on the phone (the admin forced it on from the dashboard). */
+    fun coverListsLocked(ctx: Context): Boolean = coverListsForced(ctx)
     fun setCoverListsLocal(ctx: Context, on: Boolean) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(COVER_LISTS, on).apply()
         runCatching { Requests.checkInSoon(ctx) }

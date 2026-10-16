@@ -217,11 +217,21 @@
   textarea.inp { min-height: 150px; padding: 12px 14px; font-family: var(--mono); font-size: 14px; line-height: 1.6; resize: vertical; }
   .inp.bad { border-color: var(--red); box-shadow: 0 0 0 1px var(--red); }
   /* The on-screen PIN keypad, matching the phone app's PIN screen (⌫ bottom-left, → bottom-right). */
-  .pinpad { display: flex; flex-direction: column; align-items: center; gap: 12px; margin: 10px 0 4px; }
+  .pinpad { display: flex; flex-direction: column; align-items: center; gap: 14px; margin: 10px 0 4px; }
+  .pingrid { display: flex; flex-direction: column; gap: 14px; align-items: center; }
   .pinrow { display: flex; gap: 14px; }
   .pinkey { width: 64px; height: 64px; border-radius: 50%; border: 1px solid var(--line); background: var(--card); color: var(--ink); font-size: 23px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; -webkit-tap-highlight-color: transparent; }
   .pinkey:active { background: var(--accent-soft); }
   .pinkey.go { background: var(--accent); color: #fff; border-color: var(--accent); }
+  /* On the phone, the keypad shows its own dots and the text field is hidden (so it isn't a field + keypad mix). */
+  .pindisplay { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+  .pinfield { display: flex; flex-direction: column; align-items: center; gap: 7px; padding: 8px 14px; border-radius: 12px; }
+  .pinfield.active { background: var(--accent-soft); }
+  .pinflabel { font-size: 13px; color: var(--muted); font-weight: 600; }
+  .pindots { display: flex; gap: 9px; min-height: 15px; align-items: center; }
+  .pindot { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--field); box-sizing: border-box; }
+  .pindot.on { background: var(--accent); border-color: var(--accent); }
+  .pinhidden { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   .inrow { display: flex; gap: 8px; }
   .inrow .inp { flex: 1 1 auto; min-width: 0; }
 
@@ -1903,27 +1913,42 @@ async function bioSetup() {
 // An on-screen numeric keypad matching the phone app's PIN screen, driving the page's PIN inputs by id (so each
 // screen's existing validation keeps working). The inputs become read-only (the keypad is the only way to type);
 // tapping a field makes it the active one. ⌫ is bottom-left, → (the primary action) bottom-right.
-function pinKeypad(ids, onEnter) {
-  const idList = Array.isArray(ids) ? ids : [ids];
-  let activeId = idList[0];
-  const onPhone = (typeof INAPP !== 'undefined' && !!INAPP);   // force the keypad on phones; let desktop keep typing too
-  const ready = () => idList.forEach(id => { const f = $(id); if (f && !f.dataset.pad) { f.dataset.pad = '1'; if (onPhone) f.readOnly = true;
-    f.addEventListener('focus', () => { activeId = id; }); f.addEventListener('click', () => { activeId = id; }); } });
-  setTimeout(ready, 0);
+// On the phone (INAPP) this IS the whole PIN entry: it creates the hidden PIN input(s), shows its own dots, and the
+// keypad types into them — so the caller does NOT render a visible field. In a browser it's not used (the caller
+// renders a normal field + button). `fields` is an id string or {id, label}; many fields for enter-then-confirm.
+function pinKeypad(fields, onEnter) {
+  const list = (Array.isArray(fields) ? fields : [fields]).map(f => typeof f === 'string' ? { id: f } : f);
+  let activeId = list[0].id;
+  const rows = {};
+  const renderDots = () => list.forEach(f => {
+    const inp = $(f.id), row = rows[f.id]; if (!row) return;
+    const n = inp ? inp.value.length : 0, max = inp ? (Number(inp.getAttribute('maxlength')) || 8) : 8;
+    row.replaceChildren();
+    const count = n === 0 ? 1 : n + (n < max ? 1 : 0);   // one dot per digit, plus a hollow caret (never a fixed length)
+    for (let i = 0; i < count; i++) { const d = document.createElement('span'); d.className = 'pindot' + (i < n ? ' on' : ''); row.appendChild(d); }
+    if (row.parentNode) row.parentNode.classList.toggle('active', f.id === activeId && list.length > 1);
+  });
+  setTimeout(renderDots, 0);
   const type = v => {
-    ready();
-    const f = $(activeId) || $(idList[0]); if (!f) return;
+    const f = $(activeId) || $(list[0].id); if (!f) return;
     const max = Number(f.getAttribute('maxlength')) || 8;
     if (v === 'del') f.value = f.value.slice(0, -1); else if (f.value.length < max) f.value += v;
-    f.dispatchEvent(new Event('input', { bubbles: true }));
+    f.dispatchEvent(new Event('input', { bubbles: true })); renderDots();
   };
   const key = (label, cls, fn) => h('button', { type: 'button', class: 'pinkey' + (cls ? ' ' + cls : ''), tabindex: '-1',
     'aria-label': label === '⌫' ? 'Delete' : label === '→' ? 'Enter' : label, onclick: fn }, label);
-  return h('div', { class: 'pinpad' }, [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['⌫', '0', '→']].map(r =>
+  const display = h('div', { class: 'pindisplay' }, list.map(f => {
+    const inp = h('input', { type: 'password', id: f.id, inputmode: 'numeric', maxlength: '8', autocomplete: 'off', readonly: true, class: 'pinhidden' });
+    const row = h('div', { class: 'pindots' }); rows[f.id] = row;
+    return h('div', { class: 'pinfield', onclick: () => { activeId = f.id; renderDots(); } },
+      f.label ? h('div', { class: 'pinflabel' }, f.label) : null, row, inp);
+  }));
+  const grid = h('div', { class: 'pingrid' }, [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['⌫', '0', '→']].map(r =>
     h('div', { class: 'pinrow' }, r.map(k =>
       k === '⌫' ? key('⌫', '', () => type('del'))
         : k === '→' ? key('→', 'go', () => onEnter && onEnter())
           : key(k, '', () => type(k))))));
+  return h('div', { class: 'pinpad' }, display, grid);
 }
 
 // Locking the admin on this device: offered after signing in (in the app, one of them is needed), and in Your account.
@@ -1963,9 +1988,8 @@ function pinScreen() {
       : had ? 'The old PIN stops working straight away.' : 'You unlock it each time you open the admin here.'),
     bioBtn,
     bioBtn ? h('p', { class: 'hint', style: 'margin:0;text-align:center' }, 'or a PIN') : null,
-    field('pinNew', had ? 'New PIN' : 'PIN'), field('pinAgain', 'The same PIN again'),
-    INAPP ? pinKeypad(['pinNew', 'pinAgain'], () => saveBtn.onclick()) : null,   // phone: keypad; browser: plain fields + button
-    INAPP ? null : saveBtn,
+    INAPP ? pinKeypad([{ id: 'pinNew', label: had ? 'New PIN' : 'PIN' }, { id: 'pinAgain', label: 'Repeat PIN' }], () => saveBtn.onclick())
+          : [field('pinNew', had ? 'New PIN' : 'PIN'), field('pinAgain', 'The same PIN again'), saveBtn],
     skip, never ? h('label', { class: 'check', for: 'noLock' }, never, 'Don\'t ask again on this device') : null,
     had && !INAPP ? h('button', { type: 'button', class: 'btn d', id: 'pinRemove', onclick: () => { localStorage.removeItem(PIN_KEY); done('PIN removed from this device.'); } }, 'Remove the PIN') : null,
     h('p', { class: 'hint' }, `After 5 wrong PINs, this ${where} is signed out, and needs your email and password again.`));
@@ -1981,9 +2005,10 @@ function unlockScreen() {
     S.starting = false; render();
   };
   const tryIt = async () => {
-    go1.disabled = true;
-    if (!(await pinOk(pin.value))) {
-      go1.disabled = false; pin.value = '';
+    const uPin = $('uPin') || pin;   // on the phone the keypad owns the input; read it by id
+    if (go1) go1.disabled = true;
+    if (!(await pinOk(uPin.value))) {
+      if (go1) go1.disabled = false; uPin.value = '';
       const now = getPin();
       if (!now) { say('Too many wrong PINs, so this device was signed out. Sign in again with your email and password.', true); S.locked = false; render(); }
       else { const n = 5 - now.tries; say(`Wrong PIN. ${n} ${n === 1 ? 'try' : 'tries'} left.`, true); }
@@ -2001,8 +2026,8 @@ function unlockScreen() {
   setTimeout(() => { if (B && INAPP && !S.bioAsked) { S.bioAsked = true; bioBtn.click(); } else if (pin) pin.focus(); }, 80);
   return h('main', { class: 'stack' }, screenTitle('Admin', B && !P ? 'Unlock with your fingerprint' : B ? 'Your fingerprint or PIN' : 'Type your PIN'),
     bioBtn,
-    P ? h('div', { class: 'field' }, h('label', { for: 'uPin' }, 'Your PIN'), pin) : null,
-    P && INAPP ? pinKeypad(['uPin'], tryIt) : null,     // phone: keypad; browser: plain field + button
+    P && !INAPP ? h('div', { class: 'field' }, h('label', { for: 'uPin' }, 'Your PIN'), pin) : null,
+    P && INAPP ? pinKeypad([{ id: 'uPin', label: 'Your PIN' }], tryIt) : null,     // phone: keypad; browser: plain field + button
     INAPP ? null : go1,
     h('button', { type: 'button', class: 'btn d', onclick: async () => {
       if (!(await uiConfirm('Sign in with your password instead?', 'This device is signed out, then you sign in again with your email and password.', 'Sign out', { icon: 'warn' }))) return;
@@ -2120,8 +2145,8 @@ function myPinSection() {
     h('div', { class: 'card', style: 'gap:8px' },
       h('p', { style: 'margin:0' }, `Type it in My requests on ${where} to approve or deny a request right there. It works only on the phones you look after.`),
       h('p', { class: 'hint', style: 'margin:0' }, set ? `Set${typeof set === 'string' ? ' · last changed ' + new Date(set).toLocaleDateString([], { day: 'numeric', month: 'short' }) : ''}.` : 'Not set yet.'),
-      pinIn('myPin', set ? 'New PIN' : 'Your PIN'), pinIn('myPin2', 'The same PIN again'),
-      INAPP ? pinKeypad(['myPin', 'myPin2'], () => go.onclick()) : null,
+      INAPP ? pinKeypad([{ id: 'myPin', label: set ? 'New PIN' : 'Your PIN' }, { id: 'myPin2', label: 'Repeat PIN' }], () => go.onclick())
+            : [pinIn('myPin', set ? 'New PIN' : 'Your PIN'), pinIn('myPin2', 'The same PIN again')],
       h('div', { class: 'acts' }, INAPP ? null : go, set ? remove : null),
       h('p', { class: 'hint', style: 'margin:0' }, 'It has to be different from every other admin\'s. It only approves requests: it doesn\'t open this admin page. After 5 wrong tries on a phone, PIN approvals lock on it.'))];
 }
@@ -2320,9 +2345,8 @@ function approvalPinScreen() {
     h('p', { class: 'hint' }, 'When you\'re with someone who wants a site, you can type this PIN on their phone to approve their request there and then, ' +
       'instead of answering it here. It only approves requests: it doesn\'t open this admin page, and it can\'t open sites on the adult, gambling or malware lists (only you can, with Approve anyway). A 6-digit PIN is best. ' +
     'Helper admins allowed to approve on the phone have their own PINs, which work only on their phones.'),
-    field('apNew', 'New PIN'), field('apAgain', 'The same PIN again'),
-    INAPP ? pinKeypad(['apNew', 'apAgain'], () => saveBtn.onclick()) : null,
-    INAPP ? null : saveBtn,
+    INAPP ? pinKeypad([{ id: 'apNew', label: 'New PIN' }, { id: 'apAgain', label: 'Repeat PIN' }], () => saveBtn.onclick())
+          : [field('apNew', 'New PIN'), field('apAgain', 'The same PIN again'), saveBtn],
     had ? h('button', { type: 'button', class: 'btn d', id: 'apRemove', onclick: remove }, 'Remove this PIN') : null,
     h('p', { class: 'hint' }, 'After 5 wrong PINs on a phone, PIN approvals lock on it for 24 hours (unlock it under Phones). Only a scrambled version of the PIN is stored.'));
 }
@@ -4355,10 +4379,16 @@ function browsersScreen() {
     h('div', { class: 'card', style: 'gap:8px' },
       h('div', { style: 'display:flex;align-items:center;gap:8px' }, h('b', { style: 'flex:1' }, 'Protection on the phone'),
         st ? h('span', { class: `chip ${st.tone}`, style: 'flex:none' }, st.label) : h('span', { class: 'chip', style: 'flex:none' }, 'No report yet')),
-      // The per-means breakdown, the same four the phone's own Protection screen shows.
-      (() => { const rows = protectMeans(id); return rows ? h('div', { class: 'group', style: 'margin-top:2px' }, rows.map(([t, on]) =>
+      // What you've asked for (your setting), separate from what the phone has actually granted.
+      p.mode && p.mode !== 'off' ? h('div', { class: 'ro', style: 'margin-top:2px' },
+        h('span', { class: 'grow' }, h('span', { class: 't' }, 'Requested by you'), h('span', { class: 's' }, p.mode === 'owner' ? 'Device owner' : 'Screen cover')),
+        h('span', { class: 'chip', style: 'flex:none' }, 'Set')) : null,
+      // The per-means breakdown — what the phone has actually granted (the same four its own Protection screen shows).
+      (() => { const rows = protectMeans(id); return rows ? h('div', { class: 'group', style: 'margin-top:2px' }, [h('div', { class: 'small muted', style: 'margin:2px 0' }, 'On the phone now:'), ...rows.map(([t, on]) =>
         h('div', { class: 'ro' }, h('span', { class: 'grow' }, h('span', { class: 't' }, t)),
-          h('span', { class: `chip ${on ? 'teal' : 'amber'}`, style: 'flex:none' }, on ? '✓ On' : 'Off')))) : null; })(),
+          h('span', { class: `chip ${on ? 'teal' : 'amber'}`, style: 'flex:none' }, on ? '✓ On' : 'Off')))]) : null; })(),
+      (!protectMeans(id) && p.mode && p.mode !== 'off' && !(seenProtect(id) && seenProtect(id).owner)) ?
+        h('p', { class: 'hint', style: 'margin:0' }, 'Waiting for the phone to report which permissions it has — open the app on the phone once it\'s online, and grant the steps it shows.') : null,
       protectionLapsed(id) ? h('p', { class: 'warn', style: 'margin:0' }, `Protection has lapsed on the phone${Array.isArray(seenProtect(id).missing) && seenProtect(id).missing.length ? ': ' + seenProtect(id).missing.join(', ') : ''}. Whoever has the phone was alerted to put it back.`) : null,
       seenProtect(id) && seenProtect(id).coverLists ? h('p', { class: 'hint', style: 'margin:0;color:var(--accent-text)' }, '✓ Also covering the whole Accessibility & Device admin lists.') : null,
       h('p', { class: 'hint', style: 'margin:0' }, 'Turned on from the phone (one switch under ⋮ → Settings → Protection & controls → Phone protection), or set up with a computer for device owner. Raising protection is free; turning it off sends you a request to approve.')),

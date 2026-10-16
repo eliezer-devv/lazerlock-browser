@@ -242,8 +242,15 @@ class GuardService : AccessibilityService() {
      * "Device admin apps" lists. OPTIONAL (coverLists on): also cover those two whole list screens.
      */
     private fun isGuarded(cls: String, text: String, us: Boolean, titles: String = ""): Boolean {
-        // Our device-admin detail / "deactivate?" screen, by class. No name/text needed, so an empty or still-drawing
-        // read (the cause of the "no overlay after reopening it" glitch) is still covered, in any phone language.
+        // The device-admin screen (its "deactivate?" page), by class — but ONLY once we're actually a device admin.
+        // Before it's granted this is the "activate?" screen, and covering it would stop the person ever turning it on
+        // (you can't grant device admin if the overlay is already on top of that screen). So cover it only to protect
+        // it from being switched OFF, never to block switching it on.
+        val adminActive = runCatching { DeviceOwner.isAdminActive(applicationContext) }.getOrDefault(false)
+        // While NOT yet a device admin, the device-admin screen is the "Activate?" screen (by class OR its wording):
+        // never cover it, or the overlay would sit on top of it and you could never grant device admin. Once active,
+        // it's the "Deactivate?" screen, which we DO cover.
+        if (!adminActive && (cls.contains("deviceadminadd") || DEVICE_ADMIN.any { text.contains(it) })) return false
         if (cls.contains("deviceadminadd")) return true
         // Optional: the whole list screens. Matched first on the clean WINDOW TITLE ("Device admin apps" / "Installed
         // apps") — a tidier, earlier signal than the full text — and the accessibility list also by our OWN description
