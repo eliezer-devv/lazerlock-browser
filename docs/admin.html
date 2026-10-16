@@ -4080,7 +4080,7 @@ function accountSection(section) {
   return section('Admin page', h('div', { class: 'group' },
     row('shield', 'Your account', ME ? `${ME.email}${getPin() || getBio() ? ` · locked on this ${INAPP ? 'phone' : 'device'}` : ''}` : '', () => open({ name: 'account' }), 'openAccount'),
     isOwner() ? row('phone', 'Admins', 'Add admins for some phones, and choose what they can do', () => { S.admins = null; open({ name: 'admins' }); }, 'openAdmins') : null,
-    ADMINAPP ? row('download', 'App update', 'Check for a new version of the admin app', () => { try { WLBAdmin.updateApp(); } catch {} }, 'adminAppUpdate') : null,
+    ADMINAPP ? row('download', 'App update', `${(() => { try { return 'Version ' + (WLBAdmin.appVersion ? WLBAdmin.appVersion() : '?') + ' · '; } catch { return ''; } })()}Check for a new version`, () => { try { WLBAdmin.updateApp(); } catch {} }, 'adminAppUpdate') : null,
     INAPP ? null : h('a', { class: 'row', href: status, target: '_blank', rel: 'noopener' }, h('span', { class: 'ic' }, icon('ext', 20)),
       h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Open the status page')))));
 }
@@ -4368,9 +4368,11 @@ function browsersScreen() {
         ['owner', 'Device owner', 'Strongest: blocked apps are switched off, the app can\'t be uninstalled, the clock is kept honest. Needs the one-time computer setup.'],
         ['cover', 'Screen cover', 'A blocked app is covered the moment it opens; uninstall needs a step that\'s covered. Set up on the phone, no computer.'],
         ['off', 'Off', 'Other browsers are found and listed, but nothing is blocked.'],
-      ].map(([v, t, s]) => h('label', { class: 'radio' },
-        h('input', { type: 'radio', name: 'pmode', value: v, checked: (p.mode || 'off') === v, onchange: () => setMode(v) }),
-        h('span', { class: 'grow' }, h('b', null, t), h('span', { class: 'small muted', style: 'display:block' }, s))))),
+      ].map(([v, t, s]) => { const dis = v === 'owner' && !isOwner;   // device owner can only be chosen once the phone is actually set up as one
+        return h('label', { class: 'radio', style: dis ? 'opacity:.55' : '' },
+          h('input', { type: 'radio', name: 'pmode', value: v, checked: (p.mode || 'off') === v, disabled: dis, onchange: () => setMode(v) }),
+          h('span', { class: 'grow' }, h('b', null, t), h('span', { class: 'small muted', style: 'display:block' },
+            dis ? 'Set this phone up as a device owner first (the one-time step with a computer); then you can choose this.' : s))); })),
       p.mode === 'cover' ? sw('Screen cover', 'Turn the cover off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { ensureProtect(d).overlay = v; }) : null,
       p.mode === 'cover' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = ensureProtect(d); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null,
       p.mode === 'owner' && !isOwner ? h('p', { class: 'warn', style: 'margin:0' }, 'This phone isn\'t a device owner yet. Follow the one-time setup, with a computer, first.') : null,

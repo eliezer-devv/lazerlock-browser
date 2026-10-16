@@ -118,6 +118,14 @@ class AdminActivity : Activity() {
             if (last != null && last != BuildConfig.VERSION_NAME)
                 Toast.makeText(this, "Updated to version ${BuildConfig.VERSION_NAME}", Toast.LENGTH_LONG).show()
             ap.edit().putString("lastVersion", BuildConfig.VERSION_NAME).apply()
+            // System notifications (update installed, new requests, …) need this on Android 13+. Ask once at startup so
+            // the admin app can notify like the regular app, not only when notifications are switched on.
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED &&
+                !ap.getBoolean("askedNotifPerm", false)) {
+                ap.edit().putBoolean("askedNotifPerm", true).apply()
+                runCatching { requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 33) }
+            }
         }
         // No screenshots or app-switcher previews of the admin screen (a password is typed here).
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
@@ -142,6 +150,10 @@ class AdminActivity : Activity() {
             /** This phone's ID: so an admin can turn on notifications for this phone (Settings → Your account). */
             @android.webkit.JavascriptInterface
             fun deviceId(): String = Device.id(this@AdminActivity)
+
+            /** The admin app's current version, shown on the App update row. */
+            @android.webkit.JavascriptInterface
+            fun appVersion(): String = BuildConfig.VERSION_NAME
 
             /** Test versions of the app on this phone (Settings → Your account → This device). */
             @android.webkit.JavascriptInterface
@@ -287,25 +299,28 @@ class AdminActivity : Activity() {
         }.start()
     }
 
-    /** "App update" tapped in the admin app: check now and, if there's a newer version, download and install it. */
+    /** "App update" tapped in the admin app: check now and, if there's a newer version, download and install it.
+     *  Always ends with a message, so it never just goes quiet — including on an error or when it can't find a build. */
     private fun manualUpdate() {
         Toast.makeText(this, "Checking for a new version…", Toast.LENGTH_SHORT).show()
         val ctx = applicationContext
+        fun say(msg: String) = runOnUiThread { if (!isDestroyed) Toast.makeText(this, msg, Toast.LENGTH_LONG).show() }
         Thread {
             runCatching {
-                Updater.waiting(ctx)?.let { Updater.install(ctx, it); return@runCatching }
+                // An update already downloaded and waiting (e.g. Android hadn't shown its install prompt): install it now.
+                Updater.waiting(ctx)?.let { say("Installing the downloaded update…"); Updater.install(ctx, it); return@runCatching }
                 val r = Updater.fetchLatest()
-                runOnUiThread {
-                    when {
-                        r == null -> Toast.makeText(this, "Couldn't check for an update. Try again later.", Toast.LENGTH_LONG).show()
-                        !Updater.isNewer(r) -> Toast.makeText(this, "You have the latest version (${BuildConfig.VERSION_NAME}).", Toast.LENGTH_LONG).show()
-                        else -> {
-                            Toast.makeText(this, "Downloading version ${r.versionName}; it installs by itself.", Toast.LENGTH_LONG).show()
-                            Thread { runCatching { if (!Updater.downloading(ctx, r)) Updater.startDownload(ctx, r) }.onFailure { AppLog.w("Update", "Download failed: ${it.message}") } }.start()
-                        }
+                when {
+                    r == null -> say(if (Updater.testVersions(ctx)) "No update found. (No matching build in the latest releases.)"
+                        else "No update found. The newest build may be a test version — turn on \"Get test versions\" under Your account → This device to get it.")
+                    !Updater.isNewer(r) -> say("You're on the latest version (${BuildConfig.VERSION_NAME}).")
+                    else -> {
+                        say("Downloading version ${r.versionName}; it installs by itself.")
+                        runCatching { if (!Updater.downloading(ctx, r)) Updater.startDownload(ctx, r) }
+                            .onFailure { AppLog.w("Update", "Download failed: ${it.message}"); say("Couldn't start the download: ${it.message}") }
                     }
                 }
-            }.onFailure { AppLog.w("Update", "Manual update check failed: ${it.message}") }
+            }.onFailure { AppLog.w("Update", "Manual update check failed: ${it.message}"); say("Couldn't check for an update: ${it.message}") }
         }.start()
     }
 
