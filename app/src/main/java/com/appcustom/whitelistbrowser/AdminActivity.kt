@@ -110,6 +110,15 @@ class AdminActivity : Activity() {
         super.onCreate(savedInstanceState)
         if (BuildConfig.ADMIN_APP) AppLog.start(applicationContext)    // (the admin app: this is the whole app)
         Updater.init(this)
+        // Tell the admin, in the app, when it has just been updated (a system notification needs permission the admin
+        // app may not have; this always shows). Compares the running version to the one last seen on this phone.
+        if (BuildConfig.ADMIN_APP) {
+            val ap = getSharedPreferences("adminApp", MODE_PRIVATE)
+            val last = ap.getString("lastVersion", null)
+            if (last != null && last != BuildConfig.VERSION_NAME)
+                Toast.makeText(this, "Updated to version ${BuildConfig.VERSION_NAME}", Toast.LENGTH_LONG).show()
+            ap.edit().putString("lastVersion", BuildConfig.VERSION_NAME).apply()
+        }
         // No screenshots or app-switcher previews of the admin screen (a password is typed here).
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         web = WebView(this)

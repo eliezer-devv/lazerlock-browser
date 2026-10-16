@@ -32,7 +32,7 @@ object Protection {
      * "turn off protection" request, which sets mode off, cleanly drops protection on the phone.
      */
     fun intended(ctx: Context): Boolean {
-        if (Whitelist.state.protect?.mode == "off") {        // admin turned it off on purpose: that wins
+        if (Whitelist.state.protect?.off == true) {          // admin explicitly turned it off (approved a turn-off): that wins
             val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             if (p.getBoolean(WANT, false)) p.edit().putBoolean(WANT, false).apply()
             return false
@@ -60,6 +60,9 @@ object Protection {
     }
     /** The admin set the whole-lists cover ON from the dashboard: it then can't be turned off on the phone. */
     fun coverListsForced(ctx: Context): Boolean = runCatching { Whitelist.state.protect?.coverLists == true }.getOrDefault(false)
+    /** Whether the whole-lists cover is MEANT to be on (admin set it, or turned on locally) — what the toggle shows,
+     *  independent of whether the screen cover happens to be running yet. */
+    fun coverListsWanted(ctx: Context): Boolean = coverListsForced(ctx) || coverListsLocal(ctx)
     /** The admin explicitly turned it OFF (e.g. approved a turn-off request): the phone can't turn it back on. */
     fun adminTurnedListsOff(ctx: Context): Boolean = runCatching { Whitelist.state.protect?.coverListsOff == true }.getOrDefault(false)
     /** The toggle can't be changed on the phone (admin forced it on, or explicitly off). */
@@ -108,7 +111,6 @@ object Protection {
         if (!coverOn(ctx)) out.add("Screen cover")
         if (!adminOn(ctx)) out.add("Uninstall protection")
         if (!batteryUnrestricted(ctx)) out.add("Always running (battery)")
-        if (!autoRevokeExempt(ctx)) out.add("Don't pause when unused")
         return out
     }
 

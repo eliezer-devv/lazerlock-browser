@@ -32,6 +32,7 @@ object BrowserGuard {
         val lockClock: Boolean,                 // device owner: keep automatic date and time on
         val coverLists: Boolean,                // optional: cover the whole Accessibility & Device-admin LIST screens
         val coverListsOff: Boolean,             // admin explicitly turned the whole-lists cover off (wins over a local turn-on)
+        val off: Boolean,                       // admin explicitly turned ALL protection off (wins over a local turn-on)
         val apps: Map<String, String>           // package -> "allow" | "block"
     )
 
@@ -47,6 +48,7 @@ object BrowserGuard {
             lockClock = o.optBoolean("lockClock", true),
             coverLists = o.optBoolean("coverLists", false),
             coverListsOff = o.optBoolean("coverListsOff", false),
+            off = o.optBoolean("off", false),
             apps = apps)
     }
 
@@ -68,6 +70,7 @@ object BrowserGuard {
             overlay = admin?.overlay ?: true, blockNew = admin?.blockNew ?: true,
             blockInstalls = admin?.blockInstalls ?: false, lockClock = admin?.lockClock ?: true,
             coverLists = admin?.coverLists ?: false, coverListsOff = admin?.coverListsOff ?: false,
+            off = admin?.off ?: false,
             apps = admin?.apps ?: emptyMap())
         return admin
     }

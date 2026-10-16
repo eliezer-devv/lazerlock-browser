@@ -3993,19 +3993,13 @@ class MainActivity : Activity() {
             val battery = Protection.batteryUnrestricted(this)
             d.add(meansRow("Always running", "Stops the phone sleeping the app to save battery, which would drop the cover.", battery,
                 if (!battery) "Allow" to { Protection.batteryIntent(this)?.let { bi -> d.dismiss(); runCatching { startActivity(bi) }.logged("Browsers", "Asking for unrestricted battery") } } else null))
-            // 4. Don't pause when unused (auto-revoke), Android 11+.
-            if (Build.VERSION.SDK_INT >= 30) {
-                val keep = Protection.autoRevokeExempt(this)
-                d.add(meansRow("Don't pause when unused", "Keeps Android from removing the app's permissions if it isn't opened for a while.", keep,
-                    if (!keep) "Fix" to { d.dismiss(); openAppInfo("Turn off \"Pause app activity if unused\" (it may be under ⋮ or \"App battery usage\").") } else null))
-            }
             if (status == Protection.Status.PARTIAL) d.add(Ui.box(this, "Some protection has lapsed — tap the parts above to put it back. Whoever manages this phone has been told.", "warn"), 8)
 
             // Stronger, optional: cover the WHOLE Accessibility "Installed apps" list and the Device-admin apps list,
             // not just this app's own pages. Turning it on is free; turning it off needs the admin's approval (like the
             // master switch). If the admin set it from the dashboard it's locked on; if the admin turned it off, locked off.
             d.add(Ui.text(this, "MORE PROTECTION", 11.5f, Ui.MUTED, "bold").apply { setPadding(Ui.dp(this@MainActivity, 2), Ui.dp(this@MainActivity, 14), 0, 0) }, 0)
-            val listsOn = BrowserGuard.coverLists(this)
+            val listsOn = Protection.coverListsWanted(this)   // show what's MEANT to be on (not whether the cover is live yet)
             val listsLocked = Protection.coverListsLocked(this)
             val listSw = Ui.Toggle(this).apply { isChecked = listsOn; isClickable = false }
             d.add(LinearLayout(this).apply {

@@ -1127,7 +1127,9 @@ async function signedOutHere(why) {
   if (why) say(why, true);
 }
 // Reopened from the background (called by the app): re-ask the PIN/fingerprint if one is set, by reloading the gate.
-window.wlRelock = () => { try { if (getPin() || getBio()) location.reload(); } catch {} };
+// Re-lock when the app is reopened — WITHOUT reloading the page, so after unlocking you return to the same screen
+// you were on (S.sub is kept). Showing the unlock screen just needs connected=false + locked=true.
+window.wlRelock = () => { try { if ((getPin() || getBio()) && !S.locked) { S.connected = false; S.locked = true; render(); } } catch {} };
 const NO_ISSUES_MSG = 'Couldn\'t answer it.';
 const listPathOf = name => name === 'public' ? 'docs/whitelist.json' : `docs/lists/${name}.json`;
 
@@ -1962,7 +1964,8 @@ function pinScreen() {
     bioBtn,
     bioBtn ? h('p', { class: 'hint', style: 'margin:0;text-align:center' }, 'or a PIN') : null,
     field('pinNew', had ? 'New PIN' : 'PIN'), field('pinAgain', 'The same PIN again'),
-    pinKeypad(['pinNew', 'pinAgain'], () => saveBtn.onclick()), saveBtn,
+    INAPP ? pinKeypad(['pinNew', 'pinAgain'], () => saveBtn.onclick()) : null,   // phone: keypad; browser: plain fields + button
+    INAPP ? null : saveBtn,
     skip, never ? h('label', { class: 'check', for: 'noLock' }, never, 'Don\'t ask again on this device') : null,
     had && !INAPP ? h('button', { type: 'button', class: 'btn d', id: 'pinRemove', onclick: () => { localStorage.removeItem(PIN_KEY); done('PIN removed from this device.'); } }, 'Remove the PIN') : null,
     h('p', { class: 'hint' }, `After 5 wrong PINs, this ${where} is signed out, and needs your email and password again.`));
@@ -1999,7 +2002,8 @@ function unlockScreen() {
   return h('main', { class: 'stack' }, screenTitle('Admin', B && !P ? 'Unlock with your fingerprint' : B ? 'Your fingerprint or PIN' : 'Type your PIN'),
     bioBtn,
     P ? h('div', { class: 'field' }, h('label', { for: 'uPin' }, 'Your PIN'), pin) : null,
-    P ? pinKeypad(['uPin'], () => go1 && go1.click()) : null, go1,
+    P && INAPP ? pinKeypad(['uPin'], tryIt) : null,     // phone: keypad; browser: plain field + button
+    INAPP ? null : go1,
     h('button', { type: 'button', class: 'btn d', onclick: async () => {
       if (!(await uiConfirm('Sign in with your password instead?', 'This device is signed out, then you sign in again with your email and password.', 'Sign out', { icon: 'warn' }))) return;
       command({ op: 'signout' }).catch(e => console.log(`(carried on, line 1952) ${e && e.message}`)); await sleep(300); localStorage.removeItem(PIN_KEY); localStorage.removeItem(BIO_KEY); S.locked = false; await signedOutHere(); } },
@@ -2117,8 +2121,8 @@ function myPinSection() {
       h('p', { style: 'margin:0' }, `Type it in My requests on ${where} to approve or deny a request right there. It works only on the phones you look after.`),
       h('p', { class: 'hint', style: 'margin:0' }, set ? `Set${typeof set === 'string' ? ' · last changed ' + new Date(set).toLocaleDateString([], { day: 'numeric', month: 'short' }) : ''}.` : 'Not set yet.'),
       pinIn('myPin', set ? 'New PIN' : 'Your PIN'), pinIn('myPin2', 'The same PIN again'),
-      pinKeypad(['myPin', 'myPin2'], () => go.onclick()),
-      h('div', { class: 'acts' }, go, set ? remove : null),
+      INAPP ? pinKeypad(['myPin', 'myPin2'], () => go.onclick()) : null,
+      h('div', { class: 'acts' }, INAPP ? null : go, set ? remove : null),
       h('p', { class: 'hint', style: 'margin:0' }, 'It has to be different from every other admin\'s. It only approves requests: it doesn\'t open this admin page. After 5 wrong tries on a phone, PIN approvals lock on it.'))];
 }
 // Your notifications: on this phone (in the app), by email, and about what (only what you can see).
@@ -2317,7 +2321,8 @@ function approvalPinScreen() {
       'instead of answering it here. It only approves requests: it doesn\'t open this admin page, and it can\'t open sites on the adult, gambling or malware lists (only you can, with Approve anyway). A 6-digit PIN is best. ' +
     'Helper admins allowed to approve on the phone have their own PINs, which work only on their phones.'),
     field('apNew', 'New PIN'), field('apAgain', 'The same PIN again'),
-    pinKeypad(['apNew', 'apAgain'], () => saveBtn.onclick()), saveBtn,
+    INAPP ? pinKeypad(['apNew', 'apAgain'], () => saveBtn.onclick()) : null,
+    INAPP ? null : saveBtn,
     had ? h('button', { type: 'button', class: 'btn d', id: 'apRemove', onclick: remove }, 'Remove this PIN') : null,
     h('p', { class: 'hint' }, 'After 5 wrong PINs on a phone, PIN approvals lock on it for 24 hours (unlock it under Phones). Only a scrambled version of the PIN is stored.'));
 }
@@ -2402,6 +2407,8 @@ function describe(req) {
     return { title: req.ask === 'more' ? `${fmtMin(m)} more of ${tn} today` : `${fmtMin(m)} off ${tn}`, page: null }; }
   if (req.type === 'mediaDefault') return { title: 'Change this phone\'s default', page: null };
   if (req.type === 'search') return { title: req.off === true ? 'Turn off search' : req.wasOn === true ? 'Change search' : 'Turn on search', page: null };
+  if (req.type === 'unprotect') return { title: 'Turn off phone protection', page: null };
+  if (req.type === 'uncoverlists') return { title: 'Turn off the stronger lists cover', page: null };
   const site = req.domain || '?';
   if (Array.isArray(req.frames) && req.frames.length) return { title: `Embedded content on ${site}`, page: null };
   const page = req.scope === 'page' && req.url ? pageKey(req.url) : null;
@@ -2475,6 +2482,7 @@ function requestCard(issue) {
   if (req.type === 'mediaDefault' || req.type === 'search') return settingRequestCard(issue, req);
   if (req.type === 'timer') return timerRequestCard(issue, req);
   if (req.type === 'browser') return browserRequestCard(issue, req);
+  if (req.type === 'unprotect' || req.type === 'uncoverlists') return protectRequestCard(issue, req);
   const { title, page } = describe(req);
   const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
   const note = field(issue.body, 'Note');
@@ -2726,6 +2734,39 @@ function browserRequestCard(issue, req) {
   return card;
 }
 
+// A phone asking to turn protection (or the stronger lists cover) off: clear wording, and the reply is relevant —
+// Approving turns it off; Keep it on is the safe default (shown as the primary button).
+function protectRequestCard(issue, req) {
+  const lists = req.type === 'uncoverlists';
+  const title = lists ? 'Turn off the stronger lists cover' : 'Turn off phone protection';
+  const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
+  const card = h('article', { class: 'card', 'data-n': issue.number });
+  const actions = h('div', { class: 'acts' });
+  const send = async (text, labelTxt) => {
+    actions.querySelectorAll('button').forEach(b => b.disabled = true);
+    try {
+      await reply(issue.number, text, issue._again);
+      S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
+      S.requests = (S.requests || []).filter(i => i.number !== issue.number);
+      S.answered.unshift({ title, label: `${labelTxt} for ${phone}` });
+      backOrRender();
+      say(`${labelTxt}. ${phone} picks it up within a few minutes.`);
+    } catch (e) { actions.querySelectorAll('button').forEach(b => b.disabled = false); say(e.message === 'NO_ISSUES' ? NO_ISSUES_MSG : e.message, true); }
+  };
+  actions.append(
+    h('button', { type: 'button', class: 'btn p grow', onclick: () => send('deny keep it on', 'Kept on') }, 'Keep it on'),
+    h('button', { type: 'button', class: 'btn dline', onclick: () => send('approve', lists ? 'Stronger cover turned off' : 'Protection turned off') }, lists ? 'Turn the cover off' : 'Turn protection off'));
+  card.append(...[
+    h('div', { class: 'who' }, h('span', null, h('span', { class: 'av' }, phone[0].toUpperCase()), h('b', null, phone), h('span', { class: 'muted small' }, '· ' + ago(issue.created_at))),
+      chip('Protection', 'amber', 'shield')),
+    h('h3', null, title),
+    h('p', { class: 'hint', style: 'margin:0' }, lists
+      ? `${phone} asked to stop covering the whole Accessibility and Device admin lists. The app's own screens stay covered either way. Approving turns the stronger cover off.`
+      : `${phone} asked to switch off all protection — blocking other browsers, the uninstall lock and the screen cover. Approving turns it all off; "Keep it on" leaves everything as it is.`),
+    actions].filter(Boolean));
+  return card;
+}
+
 function timerRequestCard(issue, req) {
   const { title } = describe(req);
   const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
@@ -2804,11 +2845,13 @@ function requestDetailsScreen() {
   const hops = Array.isArray(req.hops) ? req.hops : [];
   const hopText = hops.map(x => typeof x === 'string' ? x : `${x.url} (${x.scope === 'site' ? 'whole site' : 'this page'}${x.tile ? ', with a tile' : ', no tile'})`);
   const when = new Date(issue.created_at);
-  if (req.type === 'mediaDefault' || req.type === 'search') return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Requests'),
+  // Requests that aren't about a site (a setting, protection, …): a simple details card, then the (relevant) answer card.
+  if (req.type === 'mediaDefault' || req.type === 'search' || req.type === 'unprotect' || req.type === 'uncoverlists') return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Requests'),
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
       kv('Date asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
+      kv('Asking to', req.type === 'unprotect' ? 'Turn off all phone protection' : req.type === 'uncoverlists' ? 'Turn off the stronger lists cover' : null),
       kv('Note', field(issue.body, 'Note') ? `“${field(issue.body, 'Note')}”` : null),
       null),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
@@ -4232,9 +4275,7 @@ function protectionLapsed(id) {
 function protectMeans(id) {
   const s = seenProtect(id);
   if (!s || s.owner || s.intended === undefined) return null;
-  const rows = [['Screen cover', s.cover === true], ['Can’t be uninstalled', s.admin === true], ['Always running (battery)', s.battery === true]];
-  if (s.autoRevoke !== undefined) rows.push(['Doesn’t pause when unused', s.autoRevoke === true]);
-  return rows;
+  return [['Screen cover', s.cover === true], ['Can’t be uninstalled', s.admin === true], ['Always running (battery)', s.battery === true]];
 }
 // How an app stands: explicit allow/block, or (a found browser) blocked by "block new".
 function appDecision(d, app) {
