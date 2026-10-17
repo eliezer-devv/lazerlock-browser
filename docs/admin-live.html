@@ -1139,7 +1139,7 @@ async function signedOutHere(why) {
 // Reopened from the background (called by the app): re-ask the PIN/fingerprint if one is set, by reloading the gate.
 // Re-lock when the app is reopened — WITHOUT reloading the page, so after unlocking you return to the same screen
 // you were on (S.sub is kept). Showing the unlock screen just needs connected=false + locked=true.
-window.wlRelock = () => { try { if ((getPin() || getBio()) && !S.locked) { S.connected = false; S.locked = true; render(); } } catch {} };
+window.wlRelock = () => { try { if ((getPin() || getBio()) && !S.locked) { S.connected = false; S.locked = true; S.bioAsked = false; render(); } } catch {} };   // clear bioAsked so the fingerprint prompt opens by itself again on reopen
 const NO_ISSUES_MSG = 'Couldn\'t answer it.';
 const listPathOf = name => name === 'public' ? 'docs/whitelist.json' : `docs/lists/${name}.json`;
 
@@ -4382,13 +4382,13 @@ function browsersScreen() {
     // What's set up on the phone now.
     h('div', { class: 'card', style: 'gap:8px' },
       h('div', { style: 'display:flex;align-items:center;gap:8px' }, h('b', { style: 'flex:1' }, 'Protection on the phone'),
-        st ? h('span', { class: `chip ${st.tone}`, style: 'flex:none' }, st.label) : h('span', { class: 'chip', style: 'flex:none' }, 'No report yet')),
+        st ? h('span', { class: `chip ${st.tone}`, style: 'flex:none' }, st.label.split(' · ')[0]) : h('span', { class: 'chip', style: 'flex:none' }, 'No report yet')),
       // What you've asked for (your setting), separate from what the phone has actually granted.
       p.mode && p.mode !== 'off' ? h('div', { class: 'ro', style: 'margin-top:2px' },
         h('span', { class: 'grow' }, h('span', { class: 't' }, 'Mode you\'ve chosen'), h('span', { class: 's' }, p.mode === 'owner' ? 'Device owner' : 'Screen cover')),
         h('span', { class: 'chip', style: 'flex:none' }, 'Saved')) : null,
       // The per-means breakdown — what the phone has actually granted (the same four its own Protection screen shows).
-      (() => { const rows = protectMeans(id); return rows ? h('div', { class: 'group', style: 'margin-top:2px' }, [h('div', { class: 'small muted', style: 'margin:2px 0' }, 'On the phone now:'), ...rows.map(([t, on]) =>
+      (() => { const rows = protectMeans(id); return rows ? h('div', { class: 'group', style: 'margin-top:2px' }, [h('div', { class: 'small muted', style: 'margin:0;padding:10px 16px 4px' }, 'On the phone now:'), ...rows.map(([t, on]) =>
         h('div', { class: 'ro' }, h('span', { class: 'grow' }, h('span', { class: 't' }, t)),
           h('span', { class: `chip ${on ? 'teal' : 'amber'}`, style: 'flex:none' }, on ? '✓ On' : 'Off')))]) : null; })(),
       (!protectMeans(id) && p.mode && p.mode !== 'off' && !(seenProtect(id) && seenProtect(id).owner)) ?
