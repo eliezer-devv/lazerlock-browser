@@ -479,7 +479,7 @@ class MainActivity : Activity() {
 
     /** An admin phone with phone notifications on, but Android not allowing them: asked (at most once a day). */
     private fun askForAdminNotifications() {
-        if (!AdminAlerts.isAdminPhone() || !AdminAlerts.wanted(this) || AdminAlerts.allowed(this) || Build.VERSION.SDK_INT < 33) return
+        if (!AdminAlerts.actingAdminPhone(this) || !AdminAlerts.wanted(this) || AdminAlerts.allowed(this) || Build.VERSION.SDK_INT < 33) return
         val p = getSharedPreferences("adminAlerts", Context.MODE_PRIVATE)
         if (System.currentTimeMillis() - p.getLong("asked", 0L) < 86_400_000L) return
         p.edit().putLong("asked", System.currentTimeMillis()).apply()
@@ -2696,7 +2696,7 @@ class MainActivity : Activity() {
                 androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)),
             "Groups on: ${adGroups().joinToString().ifEmpty { "none" }}; blocked since the app started: ${AdBlock.blockedCount.get()}",
             "Now playing: ${PlaybackService.lastPlaying.ifEmpty { "nothing" }}",
-            "Admin phone: " + (if (!AdminAlerts.isAdminPhone()) "no" else "yes; phone notifications " +
+            "Admin phone: " + (if (!AdminAlerts.actingAdminPhone(this)) (if (AdminAlerts.isAdminPhone()) "flagged, but the admin is signed out here" else "no") else "yes; phone notifications " +
                 (if (AdminAlerts.wanted(this)) "on" else "off") + "; Android " + (if (AdminAlerts.allowed(this)) "allows them" else "doesn't allow them") +
                 "; last check: " + AdminAlerts.lastCheck(this)),
             "Desktop sites: ${desktopSites().joinToString().ifEmpty { "none" }}",
@@ -4882,7 +4882,7 @@ class MainActivity : Activity() {
                 orientation = LinearLayout.HORIZONTAL
                 addView(logButton("Message admin") { showMessageAdmin() },
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                if (AdminAlerts.isAdminPhone()) addView(logButton("Share log") { shareLog() },
+                if (AdminAlerts.actingAdminPhone(this@MainActivity)) addView(logButton("Share log") { shareLog() },
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = Ui.dp(ctx, 10) })
             }, 8)
             button("Copy ID", Ui.Kind.SECONDARY) { copy() }

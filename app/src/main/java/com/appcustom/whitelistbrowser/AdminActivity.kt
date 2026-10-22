@@ -215,6 +215,10 @@ class AdminActivity : Activity() {
             @android.webkit.JavascriptInterface
             fun updateApp() { runOnUiThread { manualUpdate() } }
 
+            /** The admin app's error log (Settings → Share error log): Android's share menu, to look into a problem. */
+            @android.webkit.JavascriptInterface
+            fun shareLog() { runOnUiThread { shareAdminLog() } }
+
             /** Fingerprint (or face) unlock: can this phone do it? */
             @android.webkit.JavascriptInterface
             fun canBiometric(): Boolean = canUseBiometric()
@@ -385,6 +389,22 @@ class AdminActivity : Activity() {
                 }
             }.onFailure { AppLog.w("Update", "Manual update check failed: ${it.message}"); say("Couldn't check for an update: ${it.message}") }
         }.start()
+    }
+
+    /** Settings → Share error log: a diagnostic header plus the app's rolling log, to Android's share menu. */
+    private fun shareAdminLog() {
+        val text = buildString {
+            append("Whitelist Admin app log\n")
+            append("Version ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})\n")
+            append("Phone ID: ${Device.id(this@AdminActivity)}\n")
+            append("Android ${android.os.Build.VERSION.RELEASE} (SDK ${android.os.Build.VERSION.SDK_INT}), ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}\n\n")
+            append(AppLog.text().ifBlank { "(the log is empty)" })
+        }
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, "Whitelist Admin log")
+            .putExtra(Intent.EXTRA_TEXT, text)
+        runCatching { startActivity(Intent.createChooser(send, "Share the log")) }
+            .onFailure { Toast.makeText(this, "Couldn't share the log: ${it.message}", Toast.LENGTH_LONG).show() }
     }
 
     private fun serve(path: String): WebResourceResponse {

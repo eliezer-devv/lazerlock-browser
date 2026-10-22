@@ -47,7 +47,13 @@ object AdminAlerts {
     }
     private fun signedOut(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("signedOut", false)
 
-    private fun receives(ctx: Context) = !signedOut(ctx) && (if (BuildConfig.ADMIN_APP) appOn(ctx) else isAdminPhone())
+    /**
+     * Whether this phone acts as an admin phone HERE, right now: it's flagged as one on the admin page (or, in the
+     * admin app, notifications are on) AND the admin is signed in on this device. The moment the admin signs out here
+     * it turns false — so admin-only bits (Share log, notifications) switch off at once, not only when the admin page
+     * un-flags the phone. Use this, not [isAdminPhone], to gate anything the device does as an admin phone.
+     */
+    fun actingAdminPhone(ctx: Context): Boolean = !signedOut(ctx) && (if (BuildConfig.ADMIN_APP) appOn(ctx) else isAdminPhone())
 
     /** Phone notifications: on unless switched off in Settings (admin phones only). */
     fun wanted(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("on", true)
@@ -55,7 +61,7 @@ object AdminAlerts {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean("on", on).apply()
         schedule(ctx)
     }
-    fun active(ctx: Context) = receives(ctx) && wanted(ctx) && (BuildConfig.ADMIN_APP || Requests.isSetUp())
+    fun active(ctx: Context) = actingAdminPhone(ctx) && wanted(ctx) && (BuildConfig.ADMIN_APP || Requests.isSetUp())
 
     /** Has Android allowed this app's notifications (Android 13+ asks the person)? */
     fun allowed(ctx: Context): Boolean = Build.VERSION.SDK_INT < 33 ||
