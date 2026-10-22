@@ -737,7 +737,7 @@ function command(cmd, opts = {}) {
   signedChain = run.catch(e => console.log(`(carried on, line 710) ${e && e.message}`));
   return run;
 }
-async function commandNow(cmd, { signed = true, minutes = 4 } = {}) {
+async function commandNow(cmd, { signed = true, minutes = 4, onSent = null } = {}) {
   const dev = await deviceKeys();
   const payload = { ...cmd, rk: dev.enc, at: Date.now(), tz: localTz() };
   let sealed;
@@ -750,6 +750,9 @@ async function commandNow(cmd, { signed = true, minutes = 4 } = {}) {
     sealed = { p, aid: s.aid, did: dev.did, mac: u8b64(await crypto.subtle.sign('HMAC', mac, enc8(p))) };
   } else sealed = { p: JSON.stringify(payload) };
   const number = await postCommand(sealed);
+  // The command has reached GitHub now — it's durable and will be applied even if the app closes. Tell the caller so
+  // it can show "Saved" straight away, while we keep waiting (below) only to catch a rare refusal and re-sync.
+  if (onSent) { try { onSent(number); } catch (e) { console.log(e); } }
   const seen = new Set();
   const r = await awaitAnswers(number, () => true, { minutes, seen });
   if (!r) throw new Error('No answer from GitHub yet. Its automation may be busy or switched off (private repository → Actions). Try again in a minute.');
@@ -874,7 +877,7 @@ async function getJson(path) {
   const t = await textOf(path);
   return t == null ? null : { sha: await gitSha(t), data: JSON.parse(t) };
 }
-const QUEUE = { ops: [], message: '', timer: null, busy: false, failed: null };
+const QUEUE = { ops: [], message: '', timer: null, busy: false, sending: false, failed: null };
 function queueOp(op, message) {
   QUEUE.ops.push(op);
   if (!QUEUE.message && message) QUEUE.message = message;
@@ -904,11 +907,13 @@ async function reply(number, text, again) { queueOp({ op: 'reply', number, text,
 async function flushQueue() {
   if (QUEUE.busy || !QUEUE.ops.length || QUEUE.failed) return;
   const ops = QUEUE.ops.splice(0), message = QUEUE.message;
-  QUEUE.message = ''; QUEUE.busy = true; renderSync();
+  QUEUE.message = ''; QUEUE.busy = true; QUEUE.sending = true; renderSync();
   try {
-    const r = await command({ op: 'write', ops, message });
+    // "Saved" shows the moment the change reaches GitHub (onSent) — it's durable from then on. We keep awaiting the
+    // answer to catch a rare refusal and to re-sync the tidied result, but the pill no longer waits for it.
+    const r = await command({ op: 'write', ops, message }, { onSent: () => { QUEUE.sending = false; QUEUE.savedAt = Date.now(); renderSync(); } });
     if (!r.ok) throw new Error(r.error || 'It wasn\'t saved.');
-    QUEUE.busy = false; QUEUE.savedAt = Date.now();
+    QUEUE.busy = false; QUEUE.sending = false; QUEUE.savedAt = Date.now();
     if (r.warning) say(r.warning, true);
     // Saved a little differently (tidied by GitHub's automation): carry on from what's there now.
     for (const [path, text] of Object.entries(r.files || {})) {
@@ -921,7 +926,7 @@ async function flushQueue() {
     }
     afterSave(r);
   } catch (e) {
-    QUEUE.busy = false;
+    QUEUE.busy = false; QUEUE.sending = false;
     if (e.message !== 'SIGNED_OUT') { QUEUE.failed = e.message; QUEUE.ops.unshift(...ops); }
   }
   renderSync();
@@ -968,11 +973,13 @@ async function refreshData(sha) {
 }
 // Account and admin changes (notifications, PINs, admins…): shown here at once, saved in the background (the
 // "Saving…" pill), so nothing waits for GitHub. If GitHub refuses one, it says why, and shows what GitHub has.
-const CMDQ = { pending: 0 };
+const CMDQ = { pending: 0, sending: 0 };
 function bg(cmd, okText, apply) {
   if (apply) { try { apply(); } catch (e) { console.log(e); } }
-  CMDQ.pending++; renderSync(); render();
-  command(cmd).then(async r => {
+  let sent = false;
+  const markSent = () => { if (!sent) { sent = true; CMDQ.sending--; QUEUE.savedAt = Date.now(); renderSync(); } };   // "Saved" once it reaches GitHub
+  CMDQ.pending++; CMDQ.sending++; renderSync(); render();
+  command(cmd, { onSent: markSent }).then(async r => {
     if (!r.ok) throw new Error(r.error || 'It wasn\'t saved.');
     QUEUE.savedAt = Date.now();
     if (r.later) afterSave(r); else await refreshData(r.sha).catch(e => console.log(`(carried on, line 951) ${e && e.message}`));
@@ -982,6 +989,7 @@ function bg(cmd, okText, apply) {
     say(e.message, true);
     await refreshData().catch(e => console.log(`(carried on, line 956) ${e && e.message}`));               // (back to what GitHub has)
   }).finally(() => {
+    markSent();                                                           // (also clears "sending" if it failed before it was sent)
     CMDQ.pending--; renderSync();
     // (Not while something's being typed: that would clear it.)
     const a = document.activeElement;
@@ -992,7 +1000,7 @@ function bg(cmd, okText, apply) {
 function renderSync() {
   const el = $('syncPill');
   if (!el) return;
-  const busy = QUEUE.busy || QUEUE.ops.length || CMDQ.pending;
+  const busy = QUEUE.sending || QUEUE.ops.length || CMDQ.sending;   // "Saving…" only while actually sending to GitHub; once sent it's "Saved"
   const upd = !busy && !QUEUE.failed && S.updating;
   el.hidden = !(busy || upd || QUEUE.failed || (QUEUE.savedAt && Date.now() - QUEUE.savedAt < 5000));
   el.className = QUEUE.failed ? 'bad' : busy || upd ? 'busy' : 'ok';
@@ -1372,7 +1380,7 @@ function renderSaveBar() {
 }
 $('saveBtn').onclick = saveAll;
 $('undoBtn').onclick = undoAll;
-if (!INAPP) window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length) { e.preventDefault(); e.returnValue = ''; } });
+if (!INAPP) window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.sending || QUEUE.ops.length || CMDQ.sending) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- lists ----------
 // Unsaved changes to the open list: ask before leaving them.
@@ -1668,7 +1676,7 @@ $('syncPill').onclick = () => showSaveProblem();
 $('closeBtn').hidden = !INAPP || ADMINAPP;
 $('closeBtn').onclick = async () => {
   if ((S.listDirty || S.devDirty) && !(await uiConfirmDanger('Close without saving?', 'Your changes haven\'t been saved.', 'Close', 'warn'))) return;
-  if ((QUEUE.busy || QUEUE.ops.length) && !(await uiConfirmDanger('Still saving', 'Closing now may stop your last change from being saved. Wait a moment, or close anyway.', 'Close anyway', 'warn'))) return;
+  if ((QUEUE.sending || QUEUE.ops.length || CMDQ.sending) && !(await uiConfirmDanger('Still saving', 'Closing now may stop your last change from being saved. Wait a moment, or close anyway.', 'Close anyway', 'warn'))) return;
   closeAdmin();
 };
 
