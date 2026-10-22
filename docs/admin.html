@@ -1721,11 +1721,29 @@ async function finishSignIn(r, macKey) {
 function signInScreen() {
   const st = S.signin || (S.signin = { step: 'form' });
   if (st.step === 'wait') {
-    return h('main', { class: 'stack' }, screenTitle('Check your email', `We sent a link to ${st.email}`),
+    const codeIn = h('input', { class: 'inp', id: 'siCode', type: 'text', inputmode: 'numeric', autocomplete: 'one-time-code',
+      maxlength: '7', placeholder: '6-digit code', value: st.codeVal || '', oninput: e => { st.codeVal = e.target.value; },
+      onkeydown: e => { if (e.key === 'Enter') confirmCode(); } });
+    const codeGo = h('button', { type: 'button', class: 'btn p wide', id: 'siCodeGo' }, 'Confirm');
+    const confirmCode = async () => {
+      const code = (codeIn.value || '').replace(/\s+/g, '');
+      if (!/^\d{6}$/.test(code)) return say('Type the 6-digit code from the email.', true);
+      if (!st.aid) return say('Sign in again to get a fresh code.', true);
+      codeGo.disabled = true; codeGo.textContent = 'Confirming…';
+      try {
+        const dev = await deviceKeys();
+        const r = await command({ op: 'confirm', aid: st.aid, did: dev.did, code }, { signed: false, minutes: 4 });
+        if (!r.ok) { codeGo.disabled = false; codeGo.textContent = 'Confirm'; return say(r.error, true); }
+        say('Confirmed — signing you in…');          // the wait below finishes the sign-in on this device
+      } catch (e) { codeGo.disabled = false; codeGo.textContent = 'Confirm'; say(e.message, true); }
+    };
+    codeGo.onclick = confirmCode;
+    return h('main', { class: 'stack' }, screenTitle('Check your email', `We sent a link and code to ${st.email}`),
       h('div', { class: 'card' }, h('p', { style: 'margin:0' }, 'This device is new, so we\'ve emailed you to make sure it\'s you. Open the email and tap ',
-        h('b', null, 'Yes, it\'s me'), ' (on any device: your phone is fine). This page signs in by itself a moment later.'),
-        h('p', { class: 'hint', style: 'margin:0' }, 'The link works for 30 minutes. No email? Check your spam folder.')),
-      waitNote('Waiting for you to tap the link…'),
+        h('b', null, 'Yes, it\'s me'), ' (on any device) — or type the code from the email here.'),
+        h('p', { class: 'hint', style: 'margin:0' }, 'The link and code work for 30 minutes. No email? Check your spam folder.')),
+      st.aid ? h('div', { class: 'field' }, h('label', { for: 'siCode' }, 'Code from the email'), codeIn, codeGo) : null,
+      waitNote('Waiting for you to tap the link or enter the code…'),
       h('button', { type: 'button', class: 'btn d', onclick: () => { S.signin = null; render(); } }, 'Start again'));
   }
   if (st.step === 'forgot') return forgotScreen();
@@ -1757,8 +1775,8 @@ function signInScreen() {
       }
       if (!first.ok) throw new Error(first.error);
       if (first.active) return finishSignIn(first, mac.key);
-      // A new device: waiting for the emailed link (the answer comes on the same issue).
-      S.signin = { step: 'wait', email: first.email || em };
+      // A new device: waiting for the emailed link, or the code typed here (the answer comes on the same issue).
+      S.signin = { step: 'wait', email: first.email || em, aid: first.aid };
       $('toast').hidden = true;
       render();
       const done = await awaitAnswers(number, r => r.active || !r.ok, { minutes: 32, seen });
@@ -2403,6 +2421,17 @@ async function loadInbox() {
 // "Check for new requests": the newest published data.
 async function checkInbox() {
   try { await refreshData(); } catch (e) { say(e.message, true); }
+}
+// "Sync now": ask the server to republish the newest, then pull everything — lists, phones, requests and each
+// phone's reported status (seen.json). Everything in one, matching the Sync button on the phone app.
+async function syncNow(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+  try {
+    await command({ op: 'refresh' }).then(r => (r && r.ok) ? refreshData(r.sha) : refreshData()).catch(() => refreshData());
+    try { S.seen = JSON.parse(await textOf('seen.json') || 'null'); } catch (e) { console.log('seen', e); }
+    say('Synced — showing the latest.');
+  } catch (e) { say(e.message, true); }
+  finally { if (btn) { btn.disabled = false; btn.textContent = 'Sync now'; } render(); }
 }
 // "photos", "photos and sound", "photos, videos and sound" (a request's mediaKind, e.g. "photos,sound"; not given: all).
 function mediaWords(k) {
@@ -4124,9 +4153,11 @@ function settingsScreen() {
   const D = S.D;
   const section = (title, ...kids) => h('section', { class: 'stack', style: 'gap:8px' }, h('h2', { class: 'sec', style: 'margin-top:4px' }, title), ...kids);
   // A mini admin: just their account (the settings for every phone aren't theirs to change).
+  const syncBtn = () => h('button', { type: 'button', class: 'btn s wide', id: 'syncNow', onclick: e => syncNow(e.currentTarget) }, 'Sync now');
   if (!fullAdmin()) return h('main', { class: 'stack' }, screenTitle('Settings', ME ? `Signed in as ${ME.name || ME.email}` : ''),
     h('div', { class: 'card' }, h('p', { style: 'margin:0' }, allPhonesAdmin() ? 'You look after every phone.' : `You look after ${plural(Object.keys(S.D.devices).length, 'phone')}: ${Object.values(S.D.devices).map(d => d.name || 'no name').join(', ') || 'none yet'}.`),
       h('p', { class: 'hint', style: 'margin:0' }, 'The settings for every phone are changed by the main admin.')),
+    syncBtn(),
     accountSection(section),
     INAPP && !ADMINAPP ? h('button', { type: 'button', class: 'btn s wide', onclick: () => $('closeBtn').click() }, 'Close admin and go back to the browser') : null);
   const row = (ic, label, count, onclick, id) => h('button', { type: 'button', class: 'row', onclick, id }, h('span', { class: 'ic' }, icon(ic, 20)),
@@ -4136,6 +4167,7 @@ function settingsScreen() {
   const status = `https://${C.owner.toLowerCase()}.github.io/${publicRepoName()}/`;
   return h('main', { class: 'stack' },
     screenTitle('Settings', 'For every phone'),
+    syncBtn(),
     !isOwner() ? h('div', { class: 'card' }, h('p', { class: 'hint', style: 'margin:0' }, 'Ads, filters and the approval PIN are set by the main admin.')) : section('Filters', h('div', { class: 'group' },
       h('label', { class: 'tg', for: 'adblock' }, h('span', { class: 'grow' }, h('span', { class: 't' }, 'Block ads'), h('span', { class: 's' }, 'AdGuard\'s ad lists (Base and Mobile Ads, plus its DNS list), updated daily by each phone')),
         h('input', { type: 'checkbox', class: 'sw', id: 'adblock', checked: D.adblock !== false, onchange: e => { D.adblock = e.target.checked; markDevices(); } })),
