@@ -4155,6 +4155,7 @@ function accountSection(section) {
     row('shield', 'Your account', ME ? `${ME.email}${getPin() || getBio() ? ` · locked on this ${INAPP ? 'phone' : 'device'}` : ''}` : '', () => open({ name: 'account' }), 'openAccount'),
     isOwner() ? row('phone', 'Admins', 'Add admins for some phones, and choose what they can do', () => { S.admins = null; open({ name: 'admins' }); }, 'openAdmins') : null,
     ADMINAPP ? row('download', 'App update', `${(() => { try { return 'Version ' + (WLBAdmin.appVersion ? WLBAdmin.appVersion() : '?') + ' · '; } catch { return ''; } })()}Check for a new version`, () => { try { WLBAdmin.updateApp(); } catch {} }, 'adminAppUpdate') : null,
+    ADMINAPP ? row('ext', 'Share error log', 'Send the app\'s log to look into a problem', () => { try { WLBAdmin.shareLog(); } catch {} }, 'adminShareLog') : null,
     INAPP ? null : h('a', { class: 'row', href: status, target: '_blank', rel: 'noopener' }, h('span', { class: 'ic' }, icon('ext', 20)),
       h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Open the status page')))));
 }
