@@ -4278,9 +4278,16 @@ const seenProtect = id => { const p = S.seen && S.seen.phones && S.seen.phones[i
 // "Screen cover", not "off". (Display only; it never changes the admin's saved setting.)
 function effectiveMode(id, d) {
   const p = protectOf(d);
-  if (p && p.off === true) return 'off';                                 // the admin deliberately turned it off
-  if (p && (p.mode === 'owner' || p.mode === 'cover')) return p.mode;    // the admin imposed a mode
-  const s = seenProtect(id);
+  if (p && (p.mode === 'owner' || p.mode === 'cover')) return p.mode;    // the admin chose a mode: that's the policy
+  const sp = S.seen && S.seen.phones && S.seen.phones[id];
+  const s = sp && sp.protect;
+  // The admin turned protection off — that holds, UNLESS the phone has raised it again since (a check-in made after
+  // the turn-off that reports protection on). Raising is free, so a later self-enable is honoured.
+  if (p && p.off === true) {
+    const seenAt = sp && sp.at ? Date.parse(sp.at) : 0;
+    const raisedSince = s && (s.owner || s.intended === true) && seenAt && p.offAt && seenAt > Number(p.offAt);
+    if (!raisedSince) return 'off';
+  }
   if (s) { if (s.owner) return 'owner'; if (s.intended === true) return 'cover'; }   // else: what the phone reports
   return 'off';
 }
@@ -4415,7 +4422,7 @@ function browsersScreen() {
       h('div', { class: 'group' }, [
         ['owner', 'Device owner', 'Strongest: blocked apps are switched off, the app can\'t be uninstalled, the clock is kept honest. Needs the one-time computer setup.'],
         ['cover', 'Screen cover', 'A blocked app is covered the moment it opens; uninstall needs a step that\'s covered. Set up on the phone, no computer.'],
-        ['off', 'Remove protection', 'Other browsers are found and listed, but nothing is blocked.'],
+        ['off', 'Off', 'Other browsers are found and listed, but nothing is blocked.'],
       ].map(([v, t, s]) => { const dis = v === 'owner' && !isOwner;   // device owner can only be chosen once the phone is actually set up as one
         return h('label', { class: 'radio', style: dis ? 'opacity:.55' : '' },
           h('input', { type: 'radio', name: 'pmode', value: v, checked: em === v, disabled: dis, onchange: () => setMode(v) }),
