@@ -1597,7 +1597,7 @@ class MainActivity : Activity() {
                 }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { if (bar.childCount > 0) marginStart = dp(6) })
             iconButton(R.drawable.ic_d_fwd, "Forward", web.canGoForward()) { if (web.canGoForward()) web.goForward() }
             iconButton(R.drawable.ic_d_reload, "Reload", true) { web.reload() }
-            iconButton(R.drawable.ic_d_listcheck, "Sync now", true) { syncEverything() }
+            iconButton(R.drawable.ic_sync, "Sync now", true) { syncEverything() }
             card.addView(bar)
             divider()
         }
