@@ -36,9 +36,9 @@
             android:textSize="@dimen/title_size"
             android:textStyle="bold" />
 
-        <!-- Check the list now (not the same as Reload, which reloads the page). -->
+        <!-- Sync now: refresh the lists, send this phone's status, and get the latest (not Reload, which reloads the page). -->
         <ImageButton android:id="@+id/listCheck" style="@style/ToolButton"
-            android:contentDescription="Check the list now" android:src="@drawable/ic_list_check" />
+            android:contentDescription="Sync now" android:src="@drawable/ic_list_check" />
 
         <ImageButton android:id="@+id/menu" style="@style/ToolButton"
             android:layout_marginStart="2dp"
