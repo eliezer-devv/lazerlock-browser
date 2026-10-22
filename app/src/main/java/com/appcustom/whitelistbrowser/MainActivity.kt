@@ -1348,6 +1348,15 @@ class MainActivity : Activity() {
         refreshWhitelist()
     }
 
+    /** "Sync now": push this phone's status (so the admin page is up to date), send anything waiting, and pull the
+     *  newest lists, settings and request answers — all in one. */
+    private fun syncEverything() {
+        Requests.checkInSoon(applicationContext)   // force a fresh check-in on this sync (not held back by the usual gap)
+        checkingByHand = true
+        toast("Syncing…")
+        refreshWhitelist()                          // refreshes the lists and, on success, flushes the outbox, checks in, and fetches answers
+    }
+
     private fun refreshWhitelist() {
         main.removeCallbacks(refreshTask)
         io.execute {
@@ -1402,9 +1411,9 @@ class MainActivity : Activity() {
                 if (checkingByHand) {
                     checkingByHand = false
                     toast(when {
-                        error != null -> "Couldn't check the list (no internet?). The saved list is still in use."
-                        !Whitelist.state.sameContent(before) -> "The list has changed. It's up to date now."
-                        else -> "The list is up to date."
+                        error != null -> "Couldn't sync (no internet?). The saved list is still in use."
+                        !Whitelist.state.sameContent(before) -> "Synced. The list has changed and is up to date now."
+                        else -> "Synced. Everything's up to date."
                     })
                 }
             }
@@ -1433,7 +1442,7 @@ class MainActivity : Activity() {
             imageTintList = android.content.res.ColorStateList.valueOf(Ui.INK2)
             setOnClickListener { hideTranslateBar() }
         }
-        findViewById<View>(R.id.listCheck).setOnClickListener { checkListNow() }
+        findViewById<View>(R.id.listCheck).setOnClickListener { syncEverything() }   // the one Sync button: lists + check-in + waiting items + answers
         if (tinyBar) {                             // room for the site's name: these go in the ⋮ menu
             forwardBtn.visibility = View.GONE
             findViewById<View>(R.id.reload).visibility = View.GONE
@@ -1588,7 +1597,7 @@ class MainActivity : Activity() {
                 }, LinearLayout.LayoutParams(0, dp(44), 1f).apply { if (bar.childCount > 0) marginStart = dp(6) })
             iconButton(R.drawable.ic_d_fwd, "Forward", web.canGoForward()) { if (web.canGoForward()) web.goForward() }
             iconButton(R.drawable.ic_d_reload, "Reload", true) { web.reload() }
-            iconButton(R.drawable.ic_d_listcheck, "Check the list now", true) { checkListNow() }
+            iconButton(R.drawable.ic_d_listcheck, "Sync now", true) { syncEverything() }
             card.addView(bar)
             divider()
         }
