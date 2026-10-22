@@ -4271,6 +4271,17 @@ const protectOf = d => (d.protect && typeof d.protect === 'object') ? d.protect 
 function ensureProtect(d) { if (!d.protect || typeof d.protect !== 'object') d.protect = { mode: 'off', apps: {} }; if (!d.protect.apps) d.protect.apps = {}; return d.protect; }
 const seenApps = id => { const p = S.seen && S.seen.phones && S.seen.phones[id]; return (p && Array.isArray(p.apps)) ? p.apps : []; };
 const seenProtect = id => { const p = S.seen && S.seen.phones && S.seen.phones[id]; return (p && p.protect) || null; };
+// The mode to SHOW for a phone: the admin's own setting when they've chosen one (or deliberately turned it off);
+// otherwise what the phone reports it's actually doing — so a phone that turned protection on itself reads as
+// "Screen cover", not "off". (Display only; it never changes the admin's saved setting.)
+function effectiveMode(id, d) {
+  const p = protectOf(d);
+  if (p && p.off === true) return 'off';                                 // the admin deliberately turned it off
+  if (p && (p.mode === 'owner' || p.mode === 'cover')) return p.mode;    // the admin imposed a mode
+  const s = seenProtect(id);
+  if (s) { if (s.owner) return 'owner'; if (s.intended === true) return 'cover'; }   // else: what the phone reports
+  return 'off';
+}
 // What's set up on the phone right now (from its check-in), in words.
 function protectState(id) {
   const s = seenProtect(id);
@@ -4314,11 +4325,11 @@ function appDecision(d, app) {
 }
 // A short line for the phone screen's row.
 function browsersSummary(id, d) {
-  const p = protectOf(d);
   const apps = seenApps(id);
   const blocked = apps.filter(a => appDecision(d, a) === 'block').length;
-  if (!p || p.mode === 'off') return apps.length ? `${plural(apps.length, 'app')} found · not blocking` : 'Not set up';
-  return `${p.mode === 'owner' ? 'Device owner' : 'Screen cover'} · ${blocked ? plural(blocked, 'app') + ' blocked' : 'nothing blocked yet'}`;
+  const m = effectiveMode(id, d);   // reflects the phone's own state when the admin hasn't set a mode
+  if (m === 'off') return apps.length ? `${plural(apps.length, 'app')} found · not blocking` : 'Not set up';
+  return `${m === 'owner' ? 'Device owner' : 'Screen cover'} · ${blocked ? plural(blocked, 'app') + ' blocked' : 'nothing blocked yet'}`;
 }
 function phoneBrowsers(id, d, M) {
   return h('div', { class: 'field', id: 'pBrowsers' },
@@ -4395,6 +4406,9 @@ function browsersScreen() {
         h('p', { class: 'hint', style: 'margin:0' }, 'Waiting for the phone to report which permissions it has — open the app on the phone once it\'s online, and grant the steps it shows.') : null,
       protectionLapsed(id) ? h('p', { class: 'warn', style: 'margin:0' }, `Protection has lapsed on the phone${Array.isArray(seenProtect(id).missing) && seenProtect(id).missing.length ? ': ' + seenProtect(id).missing.join(', ') : ''}. Whoever has the phone was alerted to put it back.`) : null,
       seenProtect(id) && seenProtect(id).coverLists ? h('p', { class: 'hint', style: 'margin:0;color:var(--accent-text)' }, '✓ Also covering the whole Accessibility & Device admin lists.') : null,
+      // The phone turned protection on itself and you haven't set a mode here — explain why the choice below still reads "Off".
+      (effectiveMode(id, d) !== 'off' && (!p.mode || p.mode === 'off') && !p.off && !(seenProtect(id) && seenProtect(id).owner)) ?
+        h('p', { class: 'hint', style: 'margin:0' }, 'The phone turned protection on itself (screen cover) — it\'s active now, and you don\'t need to do anything. The choice below shows "Off" only because you haven\'t set a mode here; pick one to lock it in or manage it from here.') : null,
       h('p', { class: 'hint', style: 'margin:0' }, 'Turned on from the phone (one switch under ⋮ → Settings → Protection & controls → Phone protection), or set up with a computer for device owner. Raising protection is free; turning it off sends you a request to approve.')),
     // How to keep it in place: which mode the admin wants.
     M ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Keep the managed browser in place'),
