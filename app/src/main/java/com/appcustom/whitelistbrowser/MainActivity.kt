@@ -198,7 +198,7 @@ class MainActivity : Activity() {
             if (r != null) startUpdate(r)
             else updateIo.execute {                               // one already downloaded and waiting: installed now
                 val apk = Updater.waiting(applicationContext) ?: return@execute
-                main.post { showBanner("Installing the update: the app closes for a moment") }
+                main.post { showBanner("Installing the update…") }
                 runCatching { Updater.install(applicationContext, apk) }.onFailure { AppLog.e("Update", "Installing failed", it) }
             }
         }
@@ -439,7 +439,7 @@ class MainActivity : Activity() {
     private fun installWaitingUpdate() {
         updateIo.execute {
             if (Updater.waiting(applicationContext) == null) return@execute
-            main.post { if (!isDestroyed && !updating) showBanner("An update is ready. Tap to install it (the app closes for a moment).") }
+            main.post { if (!isDestroyed && !updating) showBanner("Update ready — tap to install") }
         }
     }
 
@@ -1613,6 +1613,10 @@ class MainActivity : Activity() {
             item(R.drawable.ic_d_desktop, "Desktop site", if (isDesktop(cur)) "On" else null) { toggleDesktop() }
             if (translatedFrom != null) item(R.drawable.ic_d_translate, "Show original") { showOriginal() }
             else item(R.drawable.ic_d_translate, "Translate page") { showTranslate() }
+            item(R.drawable.ic_d_copy, "Copy link") {
+                runCatching { getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("Link", cur)) }
+                    .onSuccess { toast("Link copied") }.onFailure { toast("Couldn't copy the link") }
+            }
             asked = true
         }
         if (asked) divider()
@@ -1665,8 +1669,7 @@ class MainActivity : Activity() {
                         // A manual check (Settings → App update) goes straight to downloading and installing, so the
                         // only thing left to tap is Android's own install button.
                         if (manual) startUpdate(release)
-                        else showBanner(if (updateAskedByAdmin) "Please update: version ${release.versionName} is ready. Tap to update."
-                            else "Version ${release.versionName} is available. Tap to update.")
+                        else showBanner(if (updateAskedByAdmin) "Update needed — tap to install" else "Update available — tap to install")
                     }
                     result.isFailure && manual ->
                         toast("Couldn't check for updates: ${result.exceptionOrNull()?.message}")
@@ -1697,25 +1700,24 @@ class MainActivity : Activity() {
         // Already downloaded (Android's "update?" screen was closed, say): installed again, not downloaded again.
         Updater.readyFile(applicationContext, release)?.let { apk ->
             AppLog.i("Update", "Already downloaded: installing")
-            showBanner("Installing version ${release.versionName}: the app closes for a moment")
+            showBanner("Installing the update…")
             updateIo.execute { runCatching { Updater.install(applicationContext, apk) }.onFailure { AppLog.e("Update", "Installing failed", it) } }
             main.postDelayed({ updating = false }, 3_000)
             return
         }
         // Android's download manager: it carries on if the app is minimised or closed, and installs when it's done.
         try { if (!Updater.downloading(applicationContext, release)) Updater.startDownload(applicationContext, release) }
-        catch (e: Exception) { updating = false; showBanner("Update failed: ${e.message ?: "unknown error"}. Tap to try again."); return }
-        val name = release.versionName
-        showBanner("Downloading version $name (it carries on if you close the app, and installs by itself)")
+        catch (e: Exception) { updating = false; AppLog.e("Update", "Download failed", e); showBanner("Update failed — tap to try again"); return }
+        showBanner("Downloading the update…")
         val watch = object : Runnable {
             override fun run() {
                 if (isDestroyed) return
                 val pct = Updater.progress(applicationContext)
                 when {
-                    pct == null -> { updating = false; showBanner("Update failed. Tap to try again.") }
-                    pct >= 100 -> { updating = false; showBanner(if (PlaybackService.isPlaying) "Version $name is ready: it installs once nothing's playing"
-                        else "Installing version $name: the app closes for a moment") }
-                    else -> { showBanner("Downloading version $name: $pct% (it carries on if you close the app, and installs by itself)"); main.postDelayed(this, 1_000) }
+                    pct == null -> { updating = false; showBanner("Update failed — tap to try again") }
+                    pct >= 100 -> { updating = false; showBanner(if (PlaybackService.isPlaying) "Update ready — installs when nothing's playing"
+                        else "Installing the update…") }
+                    else -> { showBanner("Downloading the update… $pct%"); main.postDelayed(this, 1_000) }
                 }
             }
         }
@@ -3724,15 +3726,29 @@ class MainActivity : Activity() {
         toast("Cookies and site data cleared for $scope")
     }
 
-    private fun clearCookiesAndSiteData() {
-        CookieManager.getInstance().removeAllCookies { CookieManager.getInstance().flush() }
+    /**
+     * Clears saved site data, permission answers, form data and the cache. When [signOut] is true it also removes
+     * cookies, which signs you out of sites; when false the cookies are kept, so you stay signed in to your sites.
+     */
+    private fun clearCookiesAndSiteData(signOut: Boolean = true) {
+        if (signOut) CookieManager.getInstance().removeAllCookies { CookieManager.getInstance().flush() }
         WebStorage.getInstance().deleteAllData()        // local storage, databases, offline data
         GeolocationPermissions.getInstance().clearAll()
         web.clearFormData()
         siteChoices.clear()                             // camera / mic / location answers
         web.clearCache(true)
         web.reload()
-        toast("Cookies and site data cleared")
+        toast(if (signOut) "Cookies and site data cleared" else "Site data cleared — you're still signed in")
+    }
+
+    /** Clears saved site data and cache but keeps cookies, so sign-ins are kept. */
+    private fun confirmClearKeepSignedIn() {
+        Ui.AppDialog(this, sheet = false).apply {
+            title("Clear site data?", icon = R.drawable.ic_d_cookie)
+            add(Ui.text(this@MainActivity, "Sites forget their saved data and free up space, and camera, microphone and location answers are reset. Your sign-ins are kept, so you stay signed in to your sites.", 14.5f, Ui.MUTED))
+            button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
+            button("Clear", Ui.Kind.PRIMARY) { it.dismiss(); clearCookiesAndSiteData(signOut = false) }
+        }.show()
     }
 
     // ---------- embedded content ----------
@@ -3923,19 +3939,19 @@ class MainActivity : Activity() {
         val name = Device.name(this) ?: "Not registered yet"
         menuSheet("Settings", null, null, listOf(
             Triple(R.drawable.ic_d_theme, "Appearance" to look) { showAppearance() },
-            Triple(R.drawable.ic_d_user, "Protection & controls" to "Phone protection · Photos, videos and sound · Search · My activity") { showThisPhone() },
-            Triple(R.drawable.ic_d_cookie, "Cookies and cache" to "Sign out of sites, free up space") { showCookiesAndCache() },
+            Triple(R.drawable.ic_d_user, "Protection & controls" to "Phone protection · Photos, videos and sound · Search") { showThisPhone() },
+            Triple(R.drawable.ic_d_clock, "My activity" to "Time on each site, for you only") { showMyActivity() },
+            Triple(R.drawable.ic_d_cookie, "Cookies and cache" to "Clear cache or site data, free up space") { showCookiesAndCache() },
             Triple(R.drawable.ic_d_update, "App update" to "Version ${BuildConfig.VERSION_NAME}. Check for a new one") { checkForUpdate(manual = true) },
             Triple(R.drawable.ic_d_user, "About this phone" to "$name · ${Device.id(this)}") { showAbout() }))
     }
 
-    /** Settings → This phone: its default for photos, videos and sound, search, my activity, and being the phone's browser. */
+    /** Settings → Protection & controls: photos/videos/sound default, search, being the phone's browser, protection and the app PIN. */
     private fun showThisPhone() {
         menuSheet("Protection & controls", "Settings", { showSettings() }, listOf(
             Triple(R.drawable.ic_d_photo, "Photos, videos and sound" to ("This phone's default: " + Whitelist.MEDIA_KINDS.joinToString(", ") { k ->
                 "$k ${if (Whitelist.defaultBlocks(k)) "blocked" else "open"}" })) { showPhoneDefault() },
             Triple(R.drawable.ic_d_search, "Search" to searchNow()) { showSearchSettings() },
-            Triple(R.drawable.ic_d_clock, "My activity" to "Time on each site, for you only") { showMyActivity() },
             Triple(R.drawable.ic_d_globe, "Phone's browser" to (if (isPhonesBrowser()) "This is the phone's browser: links from other apps open here"
                 else "Make it the phone's browser, so links from other apps open here")) { becomePhonesBrowser() },
             Triple(R.drawable.ic_d_shield, "Phone protection" to otherBrowsersStatus()) { showOtherBrowsers() },
@@ -4127,8 +4143,9 @@ class MainActivity : Activity() {
     /** Settings → Cookies and cache: signing out of sites, and clearing the cache. */
     private fun showCookiesAndCache() {
         menuSheet("Cookies and cache", "Settings", { showSettings() }, listOf(
-            Triple(R.drawable.ic_d_cookie, "Cookies and site data" to "Sign out of sites, reset camera and location answers") { confirmClearCookies() },
-            Triple(R.drawable.ic_d_broom, "Clear cache" to "Frees space; pages load fresh") { clearCache() }))
+            Triple(R.drawable.ic_d_broom, "Clear cache" to "Frees space; pages load fresh. You stay signed in.") { clearCache() },
+            Triple(R.drawable.ic_d_cookie, "Clear site data, stay signed in" to "Clears saved site data and frees space; keeps your sign-ins") { confirmClearKeepSignedIn() },
+            Triple(R.drawable.ic_d_trash, "Clear everything and sign out" to "Also signs you out of every site; resets camera and location answers") { confirmClearCookies() }))
     }
 
     // ---------- timers ----------
@@ -4300,9 +4317,9 @@ class MainActivity : Activity() {
     private fun showMyActivity(days: Int = 1) {
         runCatching { MyActivity.save(applicationContext) }.logged("Activity", "Saving")
         val d = Ui.AppDialog(this, sheet = true)
-        d.add(Ui.text(this, "‹ Protection & controls", 15f, Ui.ACCENT_TEXT, "bold").apply {
+        d.add(Ui.text(this, "‹ Settings", 15f, Ui.ACCENT_TEXT, "bold").apply {
             minHeight = Ui.dp(this@MainActivity, 36); gravity = android.view.Gravity.CENTER_VERTICAL
-            setOnClickListener { d.dismiss(); showThisPhone() }
+            setOnClickListener { d.dismiss(); showSettings() }
         }, 0)
         d.title("My activity")
         d.add(Ui.Segmented(this, listOf("Today", "Last 7 days"), if (days == 1) 0 else 1, false) { i ->
@@ -4314,7 +4331,9 @@ class MainActivity : Activity() {
         d.add(Ui.text(this, if (rows.isEmpty()) "Nothing yet" + (if (days == 1) " today." else " in the last 7 days.")
             else "${MyActivity.fmt(total)} in the browser", 15f, Ui.INK, "bold"), 10)
         if (rows.isNotEmpty()) {
-            val top = rows.first().second.coerceAtLeast(1L)
+            // Each bar is this site's share of the TOTAL time, so the lengths add up to your whole time in the browser
+            // (not relative to the single most-used site, which made the top one always a full bar).
+            val scale = total.coerceAtLeast(1L)
             d.add(LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 background = Ui.rounded(Ui.CARD, Ui.dp(this@MainActivity, 16).toFloat(), Ui.LINE, Ui.dp(this@MainActivity, 1))
@@ -4330,7 +4349,7 @@ class MainActivity : Activity() {
                                 LinearLayout.LayoutParams(0, -2, 1f))
                             addView(Ui.text(this@MainActivity, MyActivity.fmt(ms), 14f, Ui.MUTED))
                         })
-                        // A bar: this site's time against the most, as weights so it's exactly proportional (no
+                        // A bar: this site's share of the total time, as weights so it's exactly proportional (no
                         // measure-time guesswork). The filled part is this site's time; the rest is the remainder.
                         val track = LinearLayout(this@MainActivity).apply {
                             orientation = LinearLayout.HORIZONTAL
@@ -4339,7 +4358,7 @@ class MainActivity : Activity() {
                         }
                         track.addView(View(this@MainActivity).apply { background = Ui.rounded(Ui.ACCENT, Ui.dp(this@MainActivity, 4).toFloat()) },
                             LinearLayout.LayoutParams(0, -1, maxOf(1f, ms.toFloat())))
-                        val rest = (top - ms).toFloat()
+                        val rest = (scale - ms).toFloat()
                         if (rest > 0f) track.addView(View(this@MainActivity), LinearLayout.LayoutParams(0, -1, rest))
                         addView(track, LinearLayout.LayoutParams(-1, Ui.dp(this@MainActivity, 7)).apply { topMargin = Ui.dp(this@MainActivity, 6) })
                     })

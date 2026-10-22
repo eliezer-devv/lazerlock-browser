@@ -12,6 +12,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import java.io.ByteArrayInputStream
 
@@ -25,6 +27,10 @@ import java.io.ByteArrayInputStream
 class AdminActivity : Activity() {
     private lateinit var web: WebView
     private var fileCallback: ValueCallback<Array<Uri>>? = null
+    private lateinit var updateBanner: TextView
+    private var availableUpdate: Updater.Release? = null
+    private var updating = false
+    private val main by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
 
     @SuppressLint("SetJavaScriptEnabled")
     /**
@@ -131,7 +137,21 @@ class AdminActivity : Activity() {
         window.setFlags(WindowManager.LayoutParams.FLAG_SECURE, WindowManager.LayoutParams.FLAG_SECURE)
         web = WebView(this)
         web.setBackgroundColor(Ui.PAGE)
-        setContentView(web)
+        // An update banner across the top, matching the main app: tap it to download and install a new version.
+        updateBanner = TextView(this).apply {
+            setBackgroundColor(getColor(R.color.update))
+            setTextColor(getColor(R.color.bar))
+            textSize = 14f
+            typeface = Ui.boldFace
+            val x = Ui.dp(this@AdminActivity, 16); val y = Ui.dp(this@AdminActivity, 10)
+            setPadding(x, y, x, y)
+            visibility = android.view.View.GONE
+            setOnClickListener { onBannerTap() }
+        }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(updateBanner, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+        root.addView(web, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        setContentView(root)
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true   // this phone's sign-in and its keys (kept by the page)
         web.settings.allowFileAccess = false
@@ -279,28 +299,75 @@ class AdminActivity : Activity() {
     }
 
     /**
-     * The admin app keeps itself up to date (the browser does this on its own screen): every 6 hours at most, the
-     * newest version is downloaded in the background and installed (Android may ask first).
+     * The admin app's update banner, matching the main app: a look (every few hours at most) for a newer version, and
+     * right away for one already downloaded and waiting. When there's one, the banner across the top offers it; tapping
+     * it downloads (with progress) and installs. Nothing installs on its own — the admin taps, like the main app.
      */
     private fun checkForUpdate() {
+        val ctx = applicationContext
+        // Right away (not throttled): if a new version already finished downloading, offer it.
+        Thread { if (Updater.waiting(ctx) != null) runOnUiThread { if (!updating && !isDestroyed) showBanner("Update ready — tap to install") } }.start()
+        // Throttled: look for a newer version in the background.
         val p = getSharedPreferences("adminApp", MODE_PRIVATE)
         if (System.currentTimeMillis() - p.getLong("updateCheck", 0L) < Config.UPDATE_CHECK_HOURS * 3_600_000L) return
         p.edit().putLong("updateCheck", System.currentTimeMillis()).apply()
-        val ctx = applicationContext
         Thread {
             runCatching {
-                Updater.waiting(ctx)?.let { Updater.install(ctx, it); return@runCatching }
+                if (Updater.waiting(ctx) != null) return@runCatching
                 val r = Updater.fetchLatest() ?: return@runCatching
-                if (Updater.isNewer(r) && !Updater.downloading(ctx, r)) {
-                    Updater.startDownload(ctx, r)
-                    runOnUiThread { Toast.makeText(this, "Downloading an update (version ${r.versionName})", Toast.LENGTH_SHORT).show() }
-                }
+                if (Updater.isNewer(r)) { availableUpdate = r; runOnUiThread { if (!updating && !isDestroyed) showBanner("Update available — tap to install") } }
             }.onFailure { AppLog.w("Update", "Couldn't check for an update: ${it.message}") }
         }.start()
     }
 
-    /** "App update" tapped in the admin app: check now and, if there's a newer version, download and install it.
-     *  Always ends with a message, so it never just goes quiet — including on an error or when it can't find a build. */
+    /** The banner tapped (or "App update" with one found): download and install the new version, showing progress. */
+    private fun startUpdate(release: Updater.Release) {
+        if (updating) return
+        if (android.os.Build.VERSION.SDK_INT >= 26 && !packageManager.canRequestPackageInstalls()) {
+            Toast.makeText(this, "Allow this app to install updates, then tap the banner again", Toast.LENGTH_LONG).show()
+            runCatching { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName"))) }
+            return
+        }
+        updating = true
+        val ctx = applicationContext
+        // Already downloaded (Android's "update?" screen was closed, say): install again, don't download again.
+        Updater.readyFile(ctx, release)?.let { apk ->
+            showBanner("Installing the update…")
+            Thread { runCatching { Updater.install(ctx, apk) }.onFailure { AppLog.e("Update", "Installing failed", it) } }.start()
+            main.postDelayed({ updating = false }, 3_000)
+            return
+        }
+        try { if (!Updater.downloading(ctx, release)) Updater.startDownload(ctx, release) }
+        catch (e: Exception) { updating = false; AppLog.e("Update", "Download failed", e); showBanner("Update failed — tap to try again"); return }
+        showBanner("Downloading the update…")
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                if (isDestroyed) return
+                when (val pct = Updater.progress(ctx)) {
+                    null -> { updating = false; showBanner("Update failed — tap to try again") }
+                    in 100..Int.MAX_VALUE -> { updating = false; showBanner("Installing the update…") }
+                    else -> { showBanner("Downloading the update… $pct%"); main.postDelayed(this, 1_000) }
+                }
+            }
+        }, 1_000)
+    }
+
+    /** The banner tapped: install the new version (one found, or one already downloaded and waiting). */
+    private fun onBannerTap() {
+        val r = availableUpdate
+        if (r != null) { startUpdate(r); return }
+        val ctx = applicationContext
+        Thread { Updater.waiting(ctx)?.let { apk -> runOnUiThread { showBanner("Installing the update…") }; runCatching { Updater.install(ctx, apk) }.onFailure { AppLog.e("Update", "Installing failed", it) } } }.start()
+    }
+
+    private fun showBanner(text: String) {
+        if (isDestroyed) return
+        updateBanner.text = text
+        updateBanner.visibility = android.view.View.VISIBLE
+    }
+
+    /** "App update" tapped in the admin app (Settings): check now. If there's a newer version, the banner takes over
+     *  (download + install). Otherwise it says so, so it never just goes quiet. */
     private fun manualUpdate() {
         Toast.makeText(this, "Checking for a new version…", Toast.LENGTH_SHORT).show()
         val ctx = applicationContext
@@ -308,17 +375,13 @@ class AdminActivity : Activity() {
         Thread {
             runCatching {
                 // An update already downloaded and waiting (e.g. Android hadn't shown its install prompt): install it now.
-                Updater.waiting(ctx)?.let { say("Installing the downloaded update…"); Updater.install(ctx, it); return@runCatching }
+                Updater.waiting(ctx)?.let { apk -> runOnUiThread { showBanner("Installing the update…") }; runCatching { Updater.install(ctx, apk) }.onFailure { AppLog.e("Update", "Installing failed", it) }; return@runCatching }
                 val r = Updater.fetchLatest()
                 when {
                     r == null -> say(if (Updater.testVersions(ctx)) "No update found. (No matching build in the latest releases.)"
                         else "No update found. The newest build may be a test version — turn on \"Get test versions\" under Your account → This device to get it.")
                     !Updater.isNewer(r) -> say("You're on the latest version (${BuildConfig.VERSION_NAME}).")
-                    else -> {
-                        say("Downloading version ${r.versionName}; it installs by itself.")
-                        runCatching { if (!Updater.downloading(ctx, r)) Updater.startDownload(ctx, r) }
-                            .onFailure { AppLog.w("Update", "Download failed: ${it.message}"); say("Couldn't start the download: ${it.message}") }
-                    }
+                    else -> { availableUpdate = r; runOnUiThread { startUpdate(r) } }
                 }
             }.onFailure { AppLog.w("Update", "Manual update check failed: ${it.message}"); say("Couldn't check for an update: ${it.message}") }
         }.start()
