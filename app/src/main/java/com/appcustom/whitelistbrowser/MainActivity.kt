@@ -3997,12 +3997,12 @@ class MainActivity : Activity() {
             // 1. Uninstall protection (device admin) — first, while the cover isn't on yet.
             d.add(meansRow("1. Can't be uninstalled", "Android won't remove the app until this is switched off.", admin,
                 if (!admin) "Turn it on" to { reopenProtection = true; d.dismiss(); runCatching { startActivity(DeviceOwner.addAdminIntent(this)) }.logged("Browsers", "Opening device admin") } else null))
-            // 2. Unrestricted battery — locked until step 1 is done.
-            d.add(meansRow("2. Always running", if (admin) "Stops the phone sleeping the app to save battery." else "Do step 1 first.", battery,
+            // 2. Unrestricted battery — locked until step 1 is done (the row greys out until then).
+            d.add(meansRow("2. Always running", "Stops the phone sleeping the app to save battery.", battery,
                 if (!battery) "Allow" to { Protection.batteryIntent(this)?.let { bi -> reopenProtection = true; d.dismiss(); runCatching { startActivity(bi) }.logged("Browsers", "Asking for unrestricted battery") } } else null, enabled = admin))
-            // 3. Screen cover (accessibility) — LAST, locked until steps 1 and 2 are done (once it's on it covers the
-            // Settings screens used for those steps, so it must go on last).
-            d.add(meansRow("3. Screen cover", if (admin && battery) "Covers a blocked app the moment it opens. Do this one LAST." else "Do steps 1 and 2 first — once this is on it covers the Settings screens you'd need for them.", cover,
+            // 3. Screen cover (accessibility) — locked until steps 1 and 2 are done (the row greys out until then). It
+            // must come last because, once on, it covers the very Settings screens used for the first two steps.
+            d.add(meansRow("3. Screen cover", "Covers a blocked app the moment it opens.", cover,
                 if (!cover) "Turn it on" to { reopenProtection = true; d.dismiss(); openSettingsScreen(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "Find Whitelist Browser and turn it on. If it's greyed out, use \"Allow restricted settings\" first (⋮, top right).") } else null, enabled = admin && battery))
             if (!cover && admin && battery) d.add(Ui.box(this, "If the Accessibility switch is greyed out (Android 13+): Settings → Apps → Whitelist Browser → ⋮ → Allow restricted settings, then turn the cover on.", "warn"), 6)
             if (status == Protection.Status.PARTIAL) d.add(Ui.box(this, "Some protection has lapsed — tap the parts above to put it back. Whoever manages this phone has been told.", "warn"), 8)
