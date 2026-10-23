@@ -1,4 +1,4 @@
-# Whitelist Browser
+# LazerLock
 
 An Android browser that only opens websites you've approved. You keep the lists of approved sites in a private
 GitHub repository and change them on the admin page, from anywhere. Every phone running the app picks up the change
@@ -180,7 +180,7 @@ The admin page never needs a GitHub token: you sign in with your email and a pas
 everything, and sends the emails (invitations, "is this you signing in?", forgotten passwords) from a Gmail account.
 1. **Gmail's app password** (in the Gmail account that will send the emails):
    1. [myaccount.google.com](https://myaccount.google.com) → **Security** → turn on **2-Step Verification** (if it isn't).
-   2. [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) → name it `Whitelist Browser` →
+   2. [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) → name it `LazerLock` →
       **Create**. Copy the 16-letter password it shows (Google shows it once).
 2. **Two secrets in the private repo** (`whitelist-browser-private`, not the public one): **Settings** → **Secrets and
    variables** → **Actions** → **New repository secret**:
@@ -898,7 +898,7 @@ page at any time. It never touches apps Android itself needs (Phone, Settings, t
 ### Two ways to keep it in place (Phones → a phone → Other browsers)
 - **Screen cover** (no computer): an accessibility service covers a blocked app the moment it opens — in split
   screen and pop-up windows too — and covers the few settings screens where the protection could be switched off
-  (Accessibility, this app's App info, and the device-admin screen). **On Android 13+** the Accessibility switch may be greyed out for a sideloaded app until you allow it (**Settings → Apps → Whitelist Browser → ⋮ → Allow restricted settings**); the phone's own **Only this browser** screen has a button that opens that page. With **uninstall protection** (a device admin)
+  (Accessibility, this app's App info, and the device-admin screen). **On Android 13+** the Accessibility switch may be greyed out for a sideloaded app until you allow it (**Settings → Apps → LazerLock → ⋮ → Allow restricted settings**); the phone's own **Only this browser** screen has a button that opens that page. With **uninstall protection** (a device admin)
   Android won't uninstall the app until it's switched off there, and that screen is covered. It's the weaker option:
   someone who knows Android could still get round it (for example in safe mode), and you'd be told.
 - **Device owner** (set up once, with a computer): the strongest. Blocked apps are **switched off** so they won't
@@ -1039,7 +1039,7 @@ into the app (below). It never needs a GitHub token.
   taps the title 7 times would get in otherwise); elsewhere **Not now** skips it, and **Don't ask again on this
   device** stops the offer (set one any time in **Your account**). **5 wrong PINs** sign that device out.
 - **The emailed links** (*Yes, it's me*, invitations, new passwords) work on any device. Tapped on the device that's
-  signing in, it opens the admin right there. On a phone where Whitelist Browser is the phone's browser, they open
+  signing in, it opens the admin right there. On a phone where LazerLock is the phone's browser, they open
   in the app's own admin screen.
 - **Forgot password?** on the sign-in screen emails you a link to choose a new one (it also signs you out everywhere
   else). After 5 wrong passwords, signing in on a new device pauses for 15 minutes (devices already signed in carry on).
@@ -1223,12 +1223,12 @@ The same admin page is built into the app, so you can manage everything from the
   (a test build), and shows on the web at `admin-test.html` until you **Release to everyone** (see
   [Test first, then release to everyone](#test-first-then-release-to-everyone)).
 
-### The admin app (Whitelist Admin)
-A separate app that's **just the admin page**, for the people who manage Whitelist Browser (you, and helper admins)
+### The admin app (LazerLock Admin)
+A separate app that's **just the admin page**, for the people who manage LazerLock (you, and helper admins)
 on their own phones. It's built from the same code, every time **Build APK** runs.
 - **Get it:** the status page's **Download the admin app**, or
   `https://github.com/YOUR_USERNAME/whitelist-browser/releases/latest/download/whitelist-for-admins.apk`
-  (always the newest). It has its own icon (the tick on a shield) and name, **Whitelist Admin**, and sits next to
+  (always the newest). It has its own icon (the tick on a shield) and name, **LazerLock Admin**, and sits next to
   the browser if both are on one phone.
 - **It opens straight to the admin page:** sign in once (email, password, the emailed link), then a PIN or your
   fingerprint, the same as inside the browser. No browsing, no lists, and it doesn't ask for the camera,
@@ -1292,7 +1292,7 @@ A new version is built whenever you commit a change to the app code (anything in
 ### Test first, then release to everyone
 **Every build is a test build first:** a GitHub *pre-release* titled **Test 1.0.<number>**. Phones don't get it,
 except your test phones:
-1. **Make a phone a test phone:** open the admin inside the app (or the Whitelist Admin app) → **Settings** →
+1. **Make a phone a test phone:** open the admin inside the app (or the LazerLock Admin app) → **Settings** →
    **Your account** → **This device** → **Get test versions of the app**. It then updates to test builds by itself
    (or straight away from ⋮ → Settings → App update). You can also install a test build by hand from its release page.
 2. **Try it out.** Something wrong? Fix it and build again: nobody else got it.
@@ -1320,7 +1320,7 @@ except your test phones:
 - **The download link always gives the newest version:**
   `https://github.com/YOUR_USERNAME/whitelist-browser/releases/latest/download/whitelist-browser.apk`
 - **Each build makes the admin app too:** every release has both files, `whitelist-browser.apk` (the browser) and
-  `whitelist-for-admins.apk` (Whitelist Admin), signed with the same key. Each app updates only from its own file. See
+  `whitelist-for-admins.apk` (LazerLock Admin), signed with the same key. Each app updates only from its own file. See
   [The admin app](#the-admin-app-whitelist-admin).
 
 ---
@@ -1431,10 +1431,10 @@ here, but together they make Play Protect cautious.
   it (the Android Developer Console). It started in Brazil, Indonesia, Singapore and Thailand on 30 September 2026,
   and expands worldwide in 2027. Without registering, installing needs a much longer process, including a
   24-hour wait. Registering doesn't change the app. When it applies where you live, register, and add the
-  app's package name, `com.appcustom.whitelistbrowser`.
+  app's package name, `com.lazerlock.browser`.
 
 ### The app's package name
-Android identifies the app by its package name, `com.appcustom.whitelistbrowser` (in `app/build.gradle.kts`).
+Android identifies the app by its package name, `com.lazerlock.browser` (in `app/build.gradle.kts`).
 People never see it.
 - **Don't change it.** A different package name is a different app: phones can't update across it, and every
   phone would need uninstalling and installing again.
@@ -1469,7 +1469,7 @@ request, message or log.
 - **Only the admin page decides** which phones are admin phones (it reaches the phone in its sealed lists): using the
   admin screen on someone's phone doesn't make it one.
 - **Each admin can turn on their own** (helpers too): **Settings** → **Your account** → **Notifications**.
-  - **On this phone:** open the **Whitelist Admin** app on your phone (or the admin inside the browser app: tap the
+  - **On this phone:** open the **LazerLock Admin** app on your phone (or the admin inside the browser app: tap the
     name at the top 7 times), and switch it on. That app then gets notes, like an admin phone.
   - **By email:** the same notes, to your email (from the Gmail set up for sign-in).
   - **Tell me about:** **New requests** (and new phones, for those who manage every phone), **Messages and logs**, and
@@ -1511,7 +1511,7 @@ Tapping the update banner downloads the new version with Android's own download 
 notification), so it **carries on if you minimise or close the app**, and then **installs by itself**: on Android 12
 and newer without asking (where the app installed its current version itself, as it does once it has updated itself
 once). Installing closes the app for a moment, so if something's playing it waits until that stops. Afterwards, a
-notification says **"Whitelist Browser updated to 1.0.x"** (tap to open it).
+notification says **"LazerLock updated to 1.0.x"** (tap to open it).
 
 If Android wants to ask first (older Android, or the app was last installed by hand), its "Do you want to update this
 app?" screen shows when the app's open, else a **"Update ready: tap to install"** notification opens it. Android
@@ -1570,11 +1570,11 @@ silence.
   a dialog if one is open.
 
 ### The phone's browser (links from other apps)
-- **Web links from other apps** (WhatsApp, email, Messages, a PDF…) can open in Whitelist Browser: it's offered in
+- **Web links from other apps** (WhatsApp, email, Messages, a PDF…) can open in LazerLock: it's offered in
   "Open with". Each link is checked like anything typed or tapped: not on the list, and it shows the blocked page with
   **Ask to open**.
 - **Make it the phone's default browser:** ⋮ → **Settings** → **Phone's browser** (Android asks *"Set as default
-  browser?"*; on older phones it opens the right settings page: choose **Whitelist Browser** under **Browser**). Then
+  browser?"*; on older phones it opens the right settings page: choose **LazerLock** under **Browser**). Then
   every web link from every app opens here, through the lists.
 - **For a locked-down phone,** also hide or block the other browsers (Google Family Link, the phone's own parental
   controls, or a device-management app): then this is the only way onto the web. Being the default alone doesn't stop
@@ -1665,7 +1665,7 @@ The app, its dialogs, the home page, the blocked page and the admin page all wor
 | *"Could not save for 5 minutes"* | Very many changes arrived at once and this one kept losing the race. Nothing was changed. Answer it again on the admin page. |
 | A phone says *"GitHub is busy"* | GitHub limits how many requests one account can create per minute, which lots of phones at once can reach. Wait a few minutes and send it again. Phones registering themselves retry by themselves. |
 | Something typed on a request on GitHub did nothing | Only the admin page answers requests. Answer it there. |
-| Camera, mic or location doesn't work on a site | The site was blocked earlier in this session, or Android permission was refused. Reopen the app, or allow it in Android Settings → Apps → Whitelist Browser → Permissions. |
+| Camera, mic or location doesn't work on a site | The site was blocked earlier in this session, or Android permission was refused. Reopen the app, or allow it in Android Settings → Apps → LazerLock → Permissions. |
 | A phone, email or app link does nothing | No app on the phone can open it. Install the app it's meant for. |
 | *"Couldn't check for updates: Set GITHUB_USERNAME"* | Set your username in `Config.kt`. |
 | *"Update refused: it's signed with a different key"* | The installed app was signed with a different key, which only happens if the signing key was recreated (section 8). Uninstall it and install from the download link. |
@@ -1699,7 +1699,7 @@ app/                           The Android app
   src/main/java/.../MainActivity.kt    Browser screen, blocking, menu, requests, translation bar, finding sites
   src/main/java/.../AdminActivity.kt   The admin page inside the app (7 taps on the name at the top; the whole admin app)
   src/browser/AndroidManifest.xml      The browser app only: its launcher icon, and opening web links
-  src/admin/                           The admin app only (Whitelist Admin): its name, icon, and opening to the admin page
+  src/admin/                           The admin app only (LazerLock Admin): its name, icon, and opening to the admin page
   src/main/java/.../AdminAlerts.kt     Phone notifications for admin phones
   src/main/java/.../UserAlerts.kt      Notifications for answers to this phone's requests (app closed)
   src/main/java/.../Whitelist.kt       Downloading, unsealing and combining the phone's lists, checking addresses

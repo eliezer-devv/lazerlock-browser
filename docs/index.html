@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LazerLock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700&family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #F5F3EE; --card: #FFFFFF; --ink: #1C2B2D; --muted: #5B6B69; --line: #E7E3DB; --accent: #1F5F55; --accent-dark: #16463F; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1B2627; --card: #243233; --ink: #ECF2F0; --muted: #A9B9B6; --line: #34484A; --accent: #7FD1A8; --accent-dark: #A6E3C4; } }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 Figtree, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 34rem; margin: 0 auto; padding: 3rem 16px; display: flex; flex-direction: column; gap: 16px; }
+  h1 { font: 700 32px/1.15 "Bricolage Grotesque", Figtree, system-ui, sans-serif; margin: 0; }
+  p { margin: 0; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 4px 0; }
+  a.row { display: flex; align-items: center; justify-content: space-between; min-height: 56px; padding: 0 18px; color: var(--ink);
+    text-decoration: none; font-weight: 600; }
+  a.row + a.row { border-top: 1px solid var(--line); }
+  a.row span { color: var(--accent); font-size: 20px; }
+  a.row:hover { color: var(--accent-dark); }
+</style>
+</head>
+<body>
+<main>
+  <h1>LazerLock</h1>
+  <p>A browser that only opens approved sites. Each phone's lists are published here sealed, so only that phone can
+    read them: to see or change them, sign in to the admin page.</p>
+  <div class="card">
+    <a class="row" href="admin.html">Open the admin page <span aria-hidden="true">›</span></a>
+    <a class="row" id="apk" href="#">Download the Android app <span aria-hidden="true">›</span></a>
+    <a class="row" id="adminApk" href="#">Download the admin app (for admins' phones) <span aria-hidden="true">›</span></a>
+  </div>
+</main>
+<script>
+  if (location.hostname.endsWith('.github.io')) {
+    const owner = location.hostname.split('.')[0], repo = location.pathname.split('/')[1];
+    document.getElementById('apk').href = `https://github.com/${owner}/${repo}/releases/latest/download/whitelist-browser.apk`;
+    document.getElementById('adminApk').href = `https://github.com/${owner}/${repo}/releases/latest/download/whitelist-for-admins.apk`;
+  }
+</script>
+</body>
+</html>
