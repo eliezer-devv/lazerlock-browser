@@ -84,6 +84,27 @@
   .msgprev { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .msgprev.un { color: var(--ink); font-weight: 600; }
   .msgtag { color: var(--accent); font-weight: 700; }
+  /* Full-height thread view (the mockup look). */
+  .thrd { display: flex; flex-direction: column; min-height: calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)); padding-bottom: 0; }
+  .chead { display: flex; align-items: center; gap: 10px; padding: 10px 2px 10px 0; position: sticky; top: env(safe-area-inset-top,0px); background: var(--bg); z-index: 5; }
+  .chead .back { margin: 0; }
+  .chead .chmid { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .chead .chmid b { font-family: var(--display); font-size: 17px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chead .chsub { font-size: 12.5px; color: var(--muted); }
+  .chead .chsel { background: none; border: 0; color: var(--accent); padding: 8px; border-radius: 10px; }
+  .thrd .chat { flex: 1; max-height: none; gap: 8px; padding: 10px 2px 14px; background:
+    linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, var(--bg)), var(--bg)); border-radius: 16px; }
+  .cbub { position: relative; box-shadow: 0 1px 1px rgba(0,0,0,.05); }
+  .cbub.me { border-bottom-right-radius: 5px; } .cbub.them { border-bottom-left-radius: 5px; }
+  .cbub.sel { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .ccompose { position: sticky; bottom: 0; display: flex; align-items: flex-end; gap: 8px; padding: 8px 0 calc(8px + env(safe-area-inset-bottom,0px)); background: var(--bg); }
+  .cinp { flex: 1; min-width: 0; resize: none; font: inherit; font-size: 15px; line-height: 1.35; color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 9px 14px; max-height: 120px; overflow-y: auto; }
+  .cclip, .csend { flex: none; width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; border: 0; }
+  .cclip { background: var(--card); border: 1px solid var(--line); color: var(--muted); }
+  .cclip.on { color: var(--accent); border-color: var(--accent); }
+  .csend { background: var(--accent); color: #fff; }
+  .selbar { position: sticky; bottom: 0; display: flex; align-items: center; gap: 10px; padding: 10px 0 calc(10px + env(safe-area-inset-bottom,0px)); background: var(--bg); }
+  .selbar > span { flex: 1; color: var(--muted); font-size: 14px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #2E8B57; }
   .dot.off { background: #B4492F; }
 
@@ -322,8 +343,9 @@
   #tabs { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: min(560px, 100%); z-index: 20;
     display: flex; justify-content: space-around; align-items: flex-start; padding: 8px 8px calc(8px + env(safe-area-inset-bottom, 0px));
     background: #fff; border-top: 1px solid #E3E0D8; }
-  #tabs button { position: relative; width: 84px; min-height: 52px; display: flex; flex-direction: column; align-items: center; gap: 4px; border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 600; }
-  #tabs .pill { position: relative; display: grid; place-items: center; width: 56px; height: 30px; border-radius: 15px; }
+  #tabs button { position: relative; flex: 1 1 0; min-width: 0; max-width: 96px; min-height: 52px; display: flex; flex-direction: column; align-items: center; gap: 4px; border: 0; background: none; color: var(--muted); font-size: 11.5px; font-weight: 600; overflow: hidden; }
+  #tabs button > :last-child { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #tabs .pill { position: relative; display: grid; place-items: center; width: 48px; max-width: 100%; height: 30px; border-radius: 15px; }
   #tabs button[aria-current="page"] { color: var(--accent); }
   #tabs button[aria-current="page"] .pill { background: var(--accent-soft); }
   #tabs .badge { position: absolute; top: -4px; right: 4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: #B4492F; color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
@@ -466,6 +488,8 @@
 <nav id="tabs" aria-label="Sections" hidden></nav>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <button type="button" id="syncPill" hidden></button>
+<!-- Optional browser-push config (filled in from the Firebase console; see FCM-SETUP.md). Harmless if missing/blank. -->
+<script src="firebase-web-config.js" onerror="window.FIREBASE_WEB=window.FIREBASE_WEB||null"></script>
 <script>
 (() => {
 'use strict';
@@ -650,6 +674,9 @@ const enc8 = s => new TextEncoder().encode(s);
 const dec8 = b => new TextDecoder().decode(b);
 // The phone's back button (the app asks this first): go back a screen if there is one.
 window.wlBack = () => {
+  // An open popup (our themed dialog) takes the back press first — close it instead of navigating.
+  const shade = document.querySelector('.dlg-shade');
+  if (shade) { const cancel = shade.querySelector('#dlgCancel'); if (cancel) cancel.click(); else shade.remove(); return true; }
   if (S.connected && S.sub) { back(); return true; }
   // Back on the top screen with unsaved changes: our own themed dialog (not the system one), then close if confirmed.
   if (S.connected && (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length)) {
@@ -1087,7 +1114,8 @@ function logScreen() {
   const text = S.logView.text;
   const download = () => saveFile(new Blob([text || ''], { type: 'text/plain' }), `whitelist-browser-log-${id}-${file}`);
   const name = (S.D.devices[id] && S.D.devices[id].name) || id;
-  return h('main', { class: 'stack' }, backLink(name, () => open({ name: 'phone', id })),
+  const from = S.sub.from;
+  return h('main', { class: 'stack' }, backLink(from ? 'Messages' : name, () => from ? (S.sub = { name: 'thread', id: from.id, thread: from.thread }, S.tab = 'messages', render()) : open({ name: 'phone', id })),
     screenTitle(/_message\.txt$/.test(file) ? (String(text || '').match(/^Subject: (.*)/) || [, 'Message'])[1] : 'Log', `${name} · ${logLabel(file)}`),
     h('div', { class: 'acts' },
       h('button', { type: 'button', class: 'btn s', id: 'logDownload', disabled: text == null, onclick: download }, 'Download'),
@@ -1674,7 +1702,10 @@ function go(tab) { S.tab = tab; S.sub = null; render(); }
 function open(sub) { S.sub = sub; render(); }
 function back() { S.sub = null; render(); }
 // After answering a request from its detail screen, go back to the requests list instead of the "already answered" card.
-function backOrRender() { if (S.sub && S.sub.name === 'request') back(); else render(); }
+function backOrRender() { if (S.sub && S.sub.fromThread) return reqBack(); if (S.sub && S.sub.name === 'request') back(); else render(); }
+// After viewing/answering a request that was opened from a message, go back to that conversation.
+function reqBack() { const f = S.sub && S.sub.fromThread; if (f && S.D.devices[f.id]) { S.sub = { name: 'thread', id: f.id, thread: f.thread }; S.tab = 'messages'; render(); } else back(); }
+const reqBackLabel = () => (S.sub && S.sub.fromThread) ? 'Messages' : 'Requests';
 const screenTitle = (title, sub) => h('div', { class: 'title' }, h('h1', null, title), sub ? h('p', null, sub) : null);
 const backLink = (label, onclick = back) => h('button', { type: 'button', class: 'back', onclick }, icon('back', 20, 2), label);
 function render() {
@@ -2747,7 +2778,7 @@ function answeredBy(a) {
 }
 function answeredDetailsScreen() {
   const x = (S.answeredList || []).find(i => i.number === S.sub.number);
-  if (!x) return h('main', { class: 'stack' }, backLink('Requests'), h('div', { class: 'card empty' }, h('b', null, 'Not found'), 'It may be more than 30 days old.'));
+  if (!x) return h('main', { class: 'stack' }, backLink(reqBackLabel(), reqBack), h('div', { class: 'card empty' }, h('b', null, 'Not found'), 'It may be more than 30 days old.'));
   const req = x.request || {}, a = x.answer || {};
   const { title, page } = describe(req);
   const dev = S.D.devices[x.phone] || (S.D.archived || {})[x.phone];
@@ -2758,7 +2789,7 @@ function answeredDetailsScreen() {
   const asked = Number(req.minutes) || 0;
   const changed = (a.changed || []).map(c => `${c.text}${c.list ? ` (${c.list === x.phone.toLowerCase() ? (dev && dev.name ? dev.name + '\'s own list' : 'own list') : /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(c.list) ? 'phone' : listLabel(c.list)})` : ''}`);
   const status = a.undone ? 'Approval undone' : denied ? 'Denied' : 'Approved';
-  const kids = [backLink('Requests'), screenTitle(title, `Request #${x.number} · ${status}`),
+  const kids = [backLink(reqBackLabel(), reqBack), screenTitle(title, `Request #${x.number} · ${status}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || x.phone} (${x.phone})` : x.phone),
       x.asked ? kv('Date asked', whenText(x.asked)) : null,
@@ -2945,7 +2976,7 @@ function siteAbout(req, site) {
 // ---------- a request: all the details ----------
 function requestDetailsScreen() {
   const issue = S.requests.find(i => i.number === S.sub.number);
-  if (!issue) return h('main', { class: 'stack' }, backLink('Requests'), h('div', { class: 'card empty' }, h('b', null, 'Already answered'), 'This request isn\'t waiting any more.'));
+  if (!issue) return h('main', { class: 'stack' }, backLink(reqBackLabel(), reqBack), h('div', { class: 'card empty' }, h('b', null, 'Already answered'), 'This request isn\'t waiting any more.'));
   const req = marker(issue.body);
   const { title, page } = describe(req);
   const devId = String(req.device || '').toUpperCase(), dev = S.D.devices[devId];
@@ -2955,7 +2986,7 @@ function requestDetailsScreen() {
   const hopText = hops.map(x => typeof x === 'string' ? x : `${x.url} (${x.scope === 'site' ? 'whole site' : 'this page'}${x.tile ? ', with a tile' : ', no tile'})`);
   const when = new Date(issue.created_at);
   // Requests that aren't about a site (a setting, protection, …): a simple details card, then the (relevant) answer card.
-  if (req.type === 'mediaDefault' || req.type === 'search' || req.type === 'unprotect' || req.type === 'uncoverlists') return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Requests'),
+  if (req.type === 'mediaDefault' || req.type === 'search' || req.type === 'unprotect' || req.type === 'uncoverlists') return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(reqBackLabel(), reqBack),
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
@@ -2965,7 +2996,7 @@ function requestDetailsScreen() {
       null),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
     requestCard(issue));
-  return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Requests'),
+  return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(reqBackLabel(), reqBack),
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
@@ -4431,7 +4462,6 @@ function phoneBrowsers(id, d, M) {
         h('span', { class: 'dom' }, browsersSummary(id, d))),
       icon('chev', 16)));
 }
-// The two-way message thread with one phone (shows on the phone under ⋮ → Messages).
 // ================= Messages: threaded conversations with phones =================
 const whenMsg = at => { try { return new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
 const parseAt = s => { const t = Date.parse(s || ''); return isNaN(t) ? 0 : t; };
@@ -4441,7 +4471,6 @@ function msgManage() { return fullAdmin() || canDo('manage') || canDo('requests'
 function visibleThreads(id) {
   const d = S.D.devices[id]; if (!d) return [];
   let threads = Array.isArray(d.threads) ? d.threads : [];
-  // Legacy: a pre-threads conversation (d.chat) shows as one "Messages" thread until the next message migrates it.
   if (!threads.length && Array.isArray(d.chat) && d.chat.length)
     threads = [{ id: 'legacy', subject: 'Messages', at: d.chat[d.chat.length - 1].at,
       msgs: d.chat.map((m, i) => ({ id: m.id || ('legacy' + i), who: m.who === 'admin' ? 'admin' : 'phone', text: m.text, at: m.at, by: m.by })) }];
@@ -4460,6 +4489,7 @@ function messagesUnread() { try { return allThreadsFlat().reduce((n, x) => n + t
 
 // The Messages tab: every phone's threads in one inbox, newest first.
 function messagesScreen() {
+  S.msgRef = null; S.msel = null;
   const flat = allThreadsFlat();
   return h('main', null,
     screenTitle('Messages', 'Conversations with every phone, newest first.'),
@@ -4467,7 +4497,6 @@ function messagesScreen() {
     flat.length ? h('div', { class: 'msglist' }, ...flat.map(x => threadRowView(x.id, x.t, true)))
       : h('div', { class: 'empty' }, h('b', null, 'No messages yet'), 'Start a conversation with a phone, and replies appear here.'));
 }
-// One conversation in a list: initials avatar, subject, phone tag, a preview, time, and an unread count.
 function threadRowView(id, t, showPhone) {
   const d = S.D.devices[id] || {}; const msgs = t.msgs || []; const last = msgs[msgs.length - 1];
   const unread = threadUnreadAdmin(t);
@@ -4480,71 +4509,91 @@ function threadRowView(id, t, showPhone) {
     unread ? h('span', { class: 'badge' }, String(unread)) : null);
 }
 
-// One open thread: the conversation, read receipts, and (for admins who may) a reply box with attach.
+// One open thread: a full-height chat with a header, the conversation, read receipts, and a reply bar.
 function threadScreen() {
   const { id, thread } = S.sub; const d = S.D.devices[id];
   if (!d) { S.sub = null; S.tab = 'messages'; return messagesScreen(); }
   const t = visibleThreads(id).find(x => x.id === thread);
   if (!t) { S.sub = null; S.tab = 'messages'; return messagesScreen(); }
-  markThreadRead(id, t);
+  if (!S.msel || S.msel.thread !== thread) S.msel = null;      // selection belongs to one thread
+  const scope = 'thread:' + thread;                            // a pending reference belongs to one composer only
+  if (S.msgRefScope !== scope) { S.msgRef = null; S.msgRefScope = scope; }
+  const selecting = !!(S.msel && S.msel.thread === thread && S.msel.ids.size);
+  if (!selecting) markThreadRead(id, t);
   const msgs = (t.msgs || []).slice().sort((a, b) => parseAt(a.at) - parseAt(b.at));
-  const threadEl = h('div', { class: 'chat', id: 'chatThread' },
-    msgs.length ? msgs.map(m => bubbleView(id, t, m)) : h('p', { class: 'hint', style: 'margin:0' }, 'No messages yet.'));
+  const body = msgs.length ? msgs.map(m => bubbleView(id, t, m, selecting)) : [h('p', { class: 'hint', style: 'margin:auto' }, 'No messages yet.')];
   setTimeout(() => { const el = $('chatThread'); if (el) el.scrollTop = el.scrollHeight; }, 0);
-  return h('main', null,
-    backLink('Messages', () => { S.sub = null; S.tab = 'messages'; render(); }),
-    screenTitle(t.subject || 'Messages', d.name || id),
-    threadEl,
-    msgManage() ? composeRow(id, thread) : h('p', { class: 'hint' }, 'You can read this conversation, but not reply.'));
+  const header = h('div', { class: 'chead' },
+    h('button', { type: 'button', class: 'back', style: 'margin:0', onclick: () => { S.msel = null; S.sub = null; S.tab = 'messages'; render(); } }, icon('back', 20, 2), 'Messages'),
+    h('span', { class: 'msgav' }, adminInitials(d.name || id)),
+    h('span', { class: 'chmid' }, h('b', null, t.subject || 'Messages'), h('span', { class: 'chsub' }, d.name || id)),
+    (msgManage() && msgs.some(m => !m.del)) ? h('button', { type: 'button', class: 'chsel', title: 'Select messages', onclick: () => { S.msel = { thread, ids: new Set() }; render(); } }, icon('check', 18, 2.2)) : null);
+  const foot = selecting
+    ? h('div', { class: 'selbar' }, h('span', null, `${S.msel.ids.size} selected`),
+        h('button', { type: 'button', class: 'btn d sm', onclick: () => { S.msel = null; render(); } }, 'Cancel'),
+        h('button', { type: 'button', class: 'btn p sm', disabled: S.msel.ids.size ? null : 'disabled', onclick: () => delSelected(id, t) }, 'Delete'))
+    : (msgManage() ? composeRow(id, thread) : h('p', { class: 'hint', style: 'padding:10px 0' }, 'You can read this conversation, but not reply.'));
+  return h('main', { class: 'thrd' }, header, h('div', { class: 'chat', id: 'chatThread' }, ...body), foot);
 }
 
-// A message bubble: the referenced-request / app-log chip, the text, and (for the admin's own) delivery/read ticks.
-function bubbleView(id, t, m) {
+// A message bubble: request/log chip, text, and (admin's own) delivery/read ticks. In select mode a tap toggles it.
+function bubbleView(id, t, m, selecting) {
   const d = S.D.devices[id] || {}; const mine = m.who === 'admin';
+  const sel = selecting && !m.del && S.msel.ids.has(m.id);
   const parts = [];
   if (m.del) parts.push(h('div', { class: 'ctext del' }, 'Message deleted'));
   else {
-    if (m.ref) parts.push(refChip(m.ref, mine));
-    if (m.log) parts.push(logChip(id, m.log, mine));
+    if (m.ref) parts.push(refChip(m.ref, mine, selecting));
+    if (m.log) parts.push(logChip(id, m.log, mine, selecting));
     if (m.text) parts.push(h('div', { class: 'ctext' }, m.text));
   }
-  const metaText = (mine ? (m.by ? m.by + ' · ' : '') : '') + whenMsg(m.at);
-  parts.push(h('div', { class: 'cmeta' }, metaText, mine && !m.del ? tickEl(d, t, m) : null));
-  if (!m.del && msgManage()) parts.push(h('button', { type: 'button', class: 'cdel', 'aria-label': 'Delete', onclick: e => { e.stopPropagation(); delMsgMenu(id, t.id, m); } }, icon('trash', 13, 2)));
-  return h('div', { class: 'cbub ' + (mine ? 'me' : 'them') + (m.del ? ' gone' : '') }, ...parts);
+  parts.push(h('div', { class: 'cmeta' }, (mine ? (m.by ? m.by + ' · ' : '') : '') + whenMsg(m.at), mine && !m.del ? tickEl(d, t, m) : null));
+  const attrs = { class: 'cbub ' + (mine ? 'me' : 'them') + (m.del ? ' gone' : '') + (sel ? ' sel' : '') };
+  if (!m.del) {
+    if (selecting) attrs.onclick = () => { if (S.msel.ids.has(m.id)) S.msel.ids.delete(m.id); else S.msel.ids.add(m.id); render(); };
+    else { let timer = null;
+      attrs.onpointerdown = () => { if (!msgManage()) return; timer = setTimeout(() => { S.msel = { thread: t.id, ids: new Set([m.id]) }; render(); }, 450); };
+      attrs.onpointerup = () => clearTimeout(timer); attrs.onpointerleave = () => clearTimeout(timer); attrs.oncontextmenu = e => e.preventDefault();
+    }
+  }
+  return h('div', attrs, ...parts);
 }
 function tickEl(d, t, m) {
   const read = parseAt(t.seenByPhoneAt) > 0 && parseAt(t.seenByPhoneAt) >= parseAt(m.at);
   const delivered = parseAt(d.phoneSyncAt) > 0 && parseAt(d.phoneSyncAt) >= parseAt(m.at);
   return h('span', { class: 'tk' + (read ? ' read' : '') }, read || delivered ? '✓✓' : '✓');
 }
-function refChip(ref, mine) {
-  return h('button', { type: 'button', class: 'rchip' + (mine ? ' onme' : ''), onclick: e => { e.stopPropagation(); openRef(ref.number); } },
+function refChip(ref, mine, selecting) {
+  return h('button', { type: 'button', class: 'rchip' + (mine ? ' onme' : ''), onclick: e => { e.stopPropagation(); if (!selecting) openRef(ref.number); } },
     icon('inbox', 15, 2), h('span', { class: 'rct' }, ref.subject || ('Request #' + ref.number)), h('span', { class: 'rcs' }, 'View'));
 }
-function logChip(id, log, mine) {
-  return h('button', { type: 'button', class: 'rchip' + (mine ? ' onme' : ''), onclick: e => { e.stopPropagation(); open({ name: 'log', id, file: log.file }); } },
+function logChip(id, log, mine, selecting) {
+  return h('button', { type: 'button', class: 'rchip' + (mine ? ' onme' : ''), onclick: e => { e.stopPropagation(); if (!selecting) open({ name: 'log', id, file: log.file, from: { thread: S.sub.thread, id } }); } },
     icon('list', 15, 2), h('span', { class: 'rct' }, 'App log'), h('span', { class: 'rcs' }, 'Open'));
 }
+// Open a referenced request, remembering to come back to this thread afterwards.
 function openRef(n) {
-  if ((S.requests || []).some(i => i.number === n)) return open({ name: 'request', number: n });
-  if ((S.answeredList || []).some(i => i.number === n)) return open({ name: 'answered', number: n });
+  const from = S.sub && S.sub.name === 'thread' ? { thread: S.sub.thread, id: S.sub.id } : null;
+  if ((S.requests || []).some(i => i.number === n)) return open({ name: 'request', number: n, fromThread: from });
+  if ((S.answeredList || []).some(i => i.number === n)) return open({ name: 'answered', number: n, fromThread: from });
   say('That request isn\'t in your current list.', true);
 }
-// Admin delete: for everyone (a tombstone the phone sees too) or just from the admin view.
-function delMsgMenu(id, thread, m) {
-  const forMe = () => bg({ op: 'chatdel', device: id, thread, msg: m.id, scope: 'me' }, 'Removed from your view.', () => markDelLocal(id, thread, m.id, 'me'));
+// Delete the selected messages, the same way as the phone: for everyone (a tombstone) or just from the admin view.
+function delSelected(id, t) {
+  const ids = [...S.msel.ids]; if (!ids.length) return;
+  const forMe = () => { ids.forEach(mid => bg({ op: 'chatdel', device: id, thread: t.id, msg: mid, scope: 'me' }, null, () => markDelLocal(id, t.id, mid, 'me'))); S.msel = null; render(); say('Removed from your view.'); };
   const meBtn = h('button', { type: 'button', class: 'btn s wide', style: 'margin-top:4px', onclick: () => { forMe(); const c = $('dlgCancel'); if (c) c.click(); } }, 'Delete for me only');
-  uiDialog({ title: 'Delete this message?', text: 'Deleting for everyone removes it on the phone too, for good. “For me only” just hides it from your view.', icon: 'trash', red: true, danger: true,
-    ok: 'Delete for everyone', cancel: 'Cancel', body: [meBtn],
-    onOk: () => { bg({ op: 'chatdel', device: id, thread, msg: m.id, scope: 'all' }, 'Deleted for everyone.', () => markDelLocal(id, thread, m.id, 'all')); } });
+  uiDialog({ title: ids.length === 1 ? 'Delete this message?' : `Delete ${ids.length} messages?`,
+    text: 'Deleting for everyone removes them on the phone too, for good. “For me only” just hides them from your view.',
+    icon: 'trash', red: true, danger: true, ok: 'Delete for everyone', cancel: 'Cancel', body: [meBtn],
+    onOk: () => { ids.forEach(mid => bg({ op: 'chatdel', device: id, thread: t.id, msg: mid, scope: 'all' }, null, () => markDelLocal(id, t.id, mid, 'all'))); S.msel = null; render(); say('Deleted for everyone.'); } });
 }
 function markDelLocal(id, thread, msgId, scope) {
   const d = S.D.devices[id]; if (!d) return; const t = (d.threads || []).find(x => x.id === thread); if (!t) return;
   const m = (t.msgs || []).find(x => x.id === msgId); if (!m) return;
   if (scope === 'all') { m.del = true; delete m.text; delete m.ref; delete m.log; } else m.hideAdmin = true;
 }
-// Mark a thread read when the admin opens it: the phone's messages there show as read, silently (no "Saved" noise).
+// Mark a thread read when the admin opens it, silently (no "Saved" noise, no notification — just the ticks).
 function markThreadRead(id, t) {
   const newest = Math.max(0, ...(t.msgs || []).filter(m => m.who === 'phone').map(m => parseAt(m.at)));
   if (!newest || parseAt(t.seenByAdminAt) >= newest) return;
@@ -4552,49 +4601,62 @@ function markThreadRead(id, t) {
   const key = id + '|' + t.id;
   if ((S.seenSent[key] || 0) >= newest) return;
   S.seenSent[key] = newest;
-  t.seenByAdminAt = new Date().toISOString();                // optimistic (so unread clears and ticks update now)
+  t.seenByAdminAt = new Date().toISOString();
   const d = S.D.devices[id]; if (d) d.adminViewAt = new Date().toISOString();
   setTimeout(() => { command({ op: 'chatseen', device: id, thread: t.id }).catch(e => console.log(`(carried on, chatseen) ${e && e.message}`)); }, 0);
 }
 
-// The reply box, with the current attachment chip and a "reference a request" button.
+// The reply bar: a paperclip (reference a request), the message box, and a round send button.
 function composeRow(id, thread) {
-  const input = h('textarea', { class: 'inp', id: 'tReply', rows: '2', placeholder: 'Reply…', style: 'resize:vertical' });
-  const send = h('button', { type: 'button', class: 'btn p', id: 'tSend', onclick: () => {
+  const input = h('textarea', { class: 'cinp', id: 'tReply', rows: '1', placeholder: 'Reply…',
+    oninput: e => { e.target.style.height = 'auto'; e.target.style.height = Math.min(120, e.target.scrollHeight) + 'px'; } });
+  const sendIt = () => {
     const text = input.value.trim(); const ref = S.msgRef || undefined;
     if (!text && !ref) return;
     S.msgRef = null;
     bg({ op: 'chat', device: id, thread, text, ref }, null, () => {
-      const d = S.D.devices[id]; const t = (d.threads || []).find(x => x.id === thread);
-      if (t) { t.msgs = [...(t.msgs || []), { id: 'tmp' + Date.now(), who: 'admin', text, at: new Date().toISOString(), by: (ME && ME.name) || 'You', ...(ref ? { ref } : {}) }]; t.at = new Date().toISOString(); d.adminViewAt = new Date().toISOString(); }
+      const dd = S.D.devices[id]; const tt = (dd.threads || []).find(x => x.id === thread);
+      if (tt) { tt.msgs = [...(tt.msgs || []), { id: 'tmp' + Date.now(), who: 'admin', text, at: new Date().toISOString(), by: (ME && ME.name) || 'You', ...(ref ? { ref } : {}) }]; tt.at = new Date().toISOString(); dd.adminViewAt = new Date().toISOString(); }
     });
-  } }, 'Send');
-  const attach = h('button', { type: 'button', class: 'btn s sm', onclick: () => attachRefMenu(id) }, icon('inbox', 16, 2), 'Reference a request');
-  return h('div', { class: 'field' }, h('div', { id: 'msgChip' }, chipInner()),
-    h('div', { style: 'margin:6px 0' }, attach),
-    h('div', { style: 'display:flex;gap:8px;align-items:flex-end' }, h('div', { style: 'flex:1' }, input), send));
+  };
+  const send = h('button', { type: 'button', class: 'csend', 'aria-label': 'Send', onclick: sendIt }, icon('send', 20, 2));
+  const clip = h('button', { type: 'button', class: 'cclip' + (S.msgRef ? ' on' : ''), 'aria-label': 'Reference a request', onclick: () => attachRefMenu(id) }, icon('inbox', 20, 2));
+  return h('div', null, h('div', { id: 'msgChip' }, chipInner()), h('div', { class: 'ccompose' }, clip, input, send));
 }
 function chipInner() {
   if (!S.msgRef) return null;
-  return h('div', { class: 'rchip', style: 'max-width:100%' }, icon('inbox', 15, 2),
+  return h('div', { class: 'rchip', style: 'margin:0 0 6px' }, icon('inbox', 15, 2),
     h('span', { class: 'rct' }, S.msgRef.subject || ('Request #' + S.msgRef.number)),
-    h('button', { type: 'button', class: 'rcx', onclick: () => { S.msgRef = null; refreshChip(); } }, 'Remove'));
+    h('button', { type: 'button', class: 'rcx', onclick: () => { S.msgRef = null; refreshChip(); const c = document.querySelector('.cclip'); if (c) c.classList.remove('on'); } }, 'Remove'));
 }
 function refreshChip() { const el = $('msgChip'); if (el) el.replaceChildren(...(chipInner() ? [chipInner()] : [])); }
 function reqPhoneId(iss) { const raw = field(iss.body, 'Phone') || ''; const m = raw.match(/\(([2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4})\)/i); return m ? m[1].toUpperCase() : null; }
+// Reference a request: this phone's open requests and its recently answered ones.
 function attachRefMenu(id) {
-  const reqs = (S.requests || []).filter(iss => reqPhoneId(iss) === id);
-  const body = reqs.length ? reqs.slice(0, 30).map(iss => { const title = describe(marker(iss.body)).title;
-    return h('button', { type: 'button', class: 'btn s wide', style: 'margin-top:6px;justify-content:flex-start;text-align:left', onclick: () => { S.msgRef = { number: iss.number, subject: title }; const c = $('dlgCancel'); if (c) c.click(); refreshChip(); } }, title);
-  }) : [h('p', { class: 'hint', style: 'margin:0' }, 'No open requests from this phone right now.')];
-  uiDialog({ title: 'Reference a request', icon: 'inbox', text: 'Link one of this phone\'s open requests to your message.', body, ok: 'Done', cancel: null });
+  // Closed requests live in answered.json, loaded lazily — fetch it once so they show here too.
+  if (!Array.isArray(S.answeredList)) {
+    const reopen = () => { document.querySelectorAll('.dlg-shade').forEach(s => s.remove()); attachRefMenu(id); };
+    textOf('answered.json').then(t => { try { S.answeredList = JSON.parse(t || '[]'); } catch { S.answeredList = []; } reopen(); })
+      .catch(() => { S.answeredList = []; reopen(); });
+    return uiDialog({ title: 'Reference a request', icon: 'inbox', text: 'Loading your requests…', body: [], ok: 'Cancel', cancel: null });
+  }
+  const open0 = (S.requests || []).filter(iss => reqPhoneId(iss) === id).map(iss => ({ number: iss.number, title: describe(marker(iss.body)).title, when: 'Waiting' }));
+  const closed = (S.answeredList || []).filter(x => x.phone === id).slice(0, 20).map(x => ({ number: x.number, title: describe(x.request).title, when: x.answer && x.answer.verdict === 'denied' ? 'Denied' : 'Approved' }));
+  const all = [...open0, ...closed];
+  const body = all.length ? all.map(r => h('button', { type: 'button', class: 'btn s wide', style: 'margin-top:6px;justify-content:space-between;text-align:left',
+      onclick: () => { S.msgRef = { number: r.number, subject: r.title }; const c = $('dlgCancel'); if (c) c.click(); refreshChip(); const cc = document.querySelector('.cclip'); if (cc) cc.classList.add('on'); } },
+      h('span', { style: 'overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, r.title), h('span', { class: 'chip' + (r.when === 'Waiting' ? ' teal' : '') }, r.when)))
+    : [h('p', { class: 'hint', style: 'margin:0' }, 'No requests from this phone yet.')];
+  uiDialog({ title: 'Reference a request', icon: 'inbox', text: 'Link one of this phone\'s requests to your message.', body, ok: 'Done', cancel: null });
 }
 
 // Starting a new conversation: pick the phone, a subject, the first message, and an optional request reference.
 function newMsgScreen() {
+  S.msel = null;
+  if (S.msgRefScope !== 'newmsg') { S.msgRef = null; S.msgRefScope = 'newmsg'; }
   const phones = Object.entries(S.D.devices || {}).map(([id, d]) => [id, d.name || id]).sort((a, b) => a[1].localeCompare(b[1]));
   if (!phones.length) { S.sub = null; S.tab = 'messages'; return messagesScreen(); }
-  if (!S.newTo || !S.D.devices[S.newTo]) S.newTo = (S.sub && S.sub.id) || phones[0][0];
+  if (!S.newTo || !S.D.devices[S.newTo]) { S.newTo = (S.sub && S.sub.id) || phones[0][0]; S.msgRef = null; }
   const toSel = h('select', { class: 'inp', onchange: e => { S.newTo = e.target.value; S.msgRef = null; refreshChip(); } },
     phones.map(([id, nm]) => h('option', { value: id, selected: id === S.newTo ? 'selected' : null }, nm)));
   const subj = h('input', { class: 'inp', id: 'nmSubj', placeholder: 'e.g. Bedtime rules' });
@@ -4615,24 +4677,53 @@ function newMsgScreen() {
     h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Subject'), subj),
     h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Message'), msg),
     h('div', { class: 'field' }, h('div', { id: 'msgChip' }, chipInner()),
-      h('button', { type: 'button', class: 'btn s sm', onclick: () => attachRefMenu(S.newTo) }, icon('inbox', 16, 2), 'Reference a request')),
+      h('button', { type: 'button', class: 'btn s sm', style: 'align-self:flex-start', onclick: () => attachRefMenu(S.newTo) }, icon('inbox', 16, 2), 'Reference a request')),
     send);
 }
 
-// A compact Messages section on a phone's own screen (full inbox lives in the Messages tab).
-// Admin app only: register this device's Firebase token (from the native bridge) so phone→admin messages wake it.
+// Admin app / browser: register this device's push token (from the native bridge or the web SDK) so phone→admin
+// messages wake it instantly. Web push needs the Firebase web config + a VAPID key (see FCM-SETUP.md); without
+// them this is a no-op and the dashboard falls back to its normal refresh.
 function registerAdminPush() {
+  // 1) Admin app: a token from the native bridge.
   try {
-    if (!INAPP || !window.WLBAdmin || !WLBAdmin.fcmToken) return;
-    const token = WLBAdmin.fcmToken();
-    if (!token || token.length < 20) return;
-    let last = '', lastAt = 0;
-    try { last = localStorage.getItem('fcmToken') || ''; lastAt = Number(localStorage.getItem('fcmTokenAt') || 0); } catch {}
-    if (token === last && Date.now() - lastAt < 7 * 86400000) return;
-    command({ op: 'fcmtoken', token }).then(() => { try { localStorage.setItem('fcmToken', token); localStorage.setItem('fcmTokenAt', String(Date.now())); } catch {} })
-      .catch(e => console.log(`(carried on, fcmtoken) ${e && e.message}`));
+    if (INAPP && window.WLBAdmin && WLBAdmin.fcmToken) {
+      const token = WLBAdmin.fcmToken();
+      if (token && token.length > 20) sendAdminToken(token);
+    }
   } catch (e) { console.log(e); }
+  // 2) Browser (dashboard in a normal browser): the Firebase web SDK, if it's configured.
+  if (!INAPP) registerWebPush();
 }
+function sendAdminToken(token) {
+  let last = '', lastAt = 0;
+  try { last = localStorage.getItem('fcmToken') || ''; lastAt = Number(localStorage.getItem('fcmTokenAt') || 0); } catch {}
+  if (token === last && Date.now() - lastAt < 7 * 86400000) return;
+  command({ op: 'fcmtoken', token }).then(() => { try { localStorage.setItem('fcmToken', token); localStorage.setItem('fcmTokenAt', String(Date.now())); } catch {} })
+    .catch(e => console.log(`(carried on, fcmtoken) ${e && e.message}`));
+}
+// Browser push via the Firebase JS SDK + a service worker. FIREBASE_WEB is filled in from your Firebase console
+// (see FCM-SETUP.md). If it's left blank, this does nothing.
+async function registerWebPush() {
+  try {
+    const cfg = window.FIREBASE_WEB;
+    if (!cfg || !cfg.apiKey || !cfg.vapidKey || !('serviceWorker' in navigator) || !('Notification' in window)) return;
+    if (Notification.permission === 'denied') return;
+    if (Notification.permission !== 'granted') { const p = await Notification.requestPermission(); if (p !== 'granted') return; }
+    const [{ initializeApp }, { getMessaging, getToken, onMessage }] = await Promise.all([
+      import('https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js'),
+      import('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging.js'),
+    ]);
+    const appF = initializeApp(cfg);
+    const reg = await navigator.serviceWorker.register('firebase-messaging-sw.js');
+    const messaging = getMessaging(appF);
+    const token = await getToken(messaging, { vapidKey: cfg.vapidKey, serviceWorkerRegistration: reg });
+    if (token) sendAdminToken(token);
+    onMessage(messaging, () => { refreshData().catch(() => {}); });   // in-tab ping: just re-sync
+  } catch (e) { console.log(`Web push not set up: ${e && e.message}`); }
+}
+
+// A compact Messages section on a phone's own screen (full inbox lives in the Messages tab).
 function phoneMessages(id) {
   const ths = visibleThreads(id).slice().sort((a, b) => parseAt(b.at) - parseAt(a.at));
   return h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Messages'),
@@ -4640,6 +4731,7 @@ function phoneMessages(id) {
     msgManage() ? h('button', { type: 'button', class: 'btn s sm', style: 'margin-top:8px', onclick: () => { S.msgRef = null; open({ name: 'newmsg', id }); } }, icon('send', 16, 2), 'New message') : null,
     h('p', { class: 'hint', style: 'margin:0' }, 'Also in the Messages tab. Shows on the phone under ⋮ → Messages.'));
 }
+
 
 // The Other browsers screen for one phone.
 function browsersScreen() {
