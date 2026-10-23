@@ -175,6 +175,10 @@ class AdminActivity : Activity() {
             @android.webkit.JavascriptInterface
             fun appVersion(): String = BuildConfig.VERSION_NAME
 
+            /** This admin app's Firebase push token, so the page can register it (phone→admin messages wake it instantly). */
+            @android.webkit.JavascriptInterface
+            fun fcmToken(): String = Fcm.token(this@AdminActivity)
+
             /** Test versions of the app on this phone (Settings → Your account → This device). */
             @android.webkit.JavascriptInterface
             fun testVersions(): Boolean = Updater.testVersions(this@AdminActivity)
@@ -285,12 +289,15 @@ class AdminActivity : Activity() {
 
     override fun onPause() {
         AdminAlerts.adminScreenOpen = false
+        Fcm.markForeground(this, false)
         super.onPause()
     }
 
     override fun onResume() {
         super.onResume()
         AdminAlerts.adminScreenOpen = true
+        Fcm.markForeground(this, true)
+        Fcm.register(this)                                   // keep a push token ready; the page registers it when signed in
         runCatching { GuardService.dismissCover() }
         // Reopened after being in the background: ask for the PIN/fingerprint again (the page re-locks if one is set).
         if (wasStopped) { wasStopped = false; runCatching { web.evaluateJavascript("window.wlRelock && window.wlRelock()", null) } }

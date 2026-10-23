@@ -41,17 +41,50 @@ object Requests {
         queueLog(ctx, "message", text, extra = JSONObject().put("subject", subject))
     }
 
-    /** A message to the admin in the two-way thread: text only, sealed like a request. Each one is kept (not replaced),
-     *  so several sent in a row all arrive; they appear in the thread after the round-trip. */
-    fun queueChat(ctx: Context, text: String) {
+    /** A message to the admin, in a thread (new or existing), optionally with a request reference and/or the app log.
+     *  Sealed like a request; each is kept (not replaced), so several sent in a row all arrive and show after the round-trip.
+     *  [threadId] null/blank starts a new thread (with [subject]); [ref] is {number, subject, action}; [logText] attaches the log. */
+    fun queueChat(ctx: Context, threadId: String?, subject: String?, text: String, ref: JSONObject? = null, logText: String? = null) {
         if (!isSetUp()) return
         val msg = text.trim().take(2000)
-        if (msg.isEmpty()) return
-        val marker = JSONObject().put("type", "chat").put("device", Device.id(ctx)).put("text", msg).put("version", BuildConfig.VERSION_NAME)
+        if (msg.isEmpty() && ref == null && logText == null) return
+        val marker = JSONObject().put("type", "chat").put("device", Device.id(ctx)).put("version", BuildConfig.VERSION_NAME)
+        if (!threadId.isNullOrBlank()) marker.put("thread", threadId)
+        if (!subject.isNullOrBlank()) marker.put("subject", subject.trim().take(80))
+        if (msg.isNotEmpty()) marker.put("text", msg)
+        if (ref != null) marker.put("ref", ref)
+        if (logText != null) runCatching {
+            val gz = java.io.ByteArrayOutputStream().also { o -> java.util.zip.GZIPOutputStream(o).use { it.write(logText.takeLast(200_000).toByteArray(Charsets.UTF_8)) } }.toByteArray()
+            marker.put("gz", android.util.Base64.encodeToString(gz, android.util.Base64.NO_WRAP))
+        }
         val body = "🔒 A message from a phone.\n\n${Seal.hiddenPart(marker)}"
         Outbox.add(ctx, "chat-${System.currentTimeMillis()}-${(0..9999).random()}",
             JSONObject().put("title", "Message from a phone").put("body", body), summary = "Message")
         AppLog.i("Chat", "Queued a message for the admin")
+    }
+
+    /** Tell the admin this phone opened a thread (read receipt), so the admin's messages there show as read. */
+    fun queueChatSeen(ctx: Context, threadId: String) {
+        if (!isSetUp() || threadId.isBlank()) return
+        val marker = JSONObject().put("type", "chatseen").put("device", Device.id(ctx)).put("thread", threadId).put("version", BuildConfig.VERSION_NAME)
+        val body = "🔒 A read receipt from a phone.\n\n${Seal.hiddenPart(marker)}"
+        Outbox.add(ctx, "chatseen-$threadId", JSONObject().put("title", "Read receipt").put("body", body), summary = "Read receipt")
+    }
+
+    /** Ask the admin to delete this phone's own message for everyone (only honoured within 5 minutes of sending). */
+    fun queueChatDelete(ctx: Context, threadId: String, msgId: String) {
+        if (!isSetUp() || threadId.isBlank() || msgId.isBlank()) return
+        val marker = JSONObject().put("type", "chatdel").put("device", Device.id(ctx)).put("thread", threadId).put("msg", msgId).put("version", BuildConfig.VERSION_NAME)
+        val body = "🔒 A delete request from a phone.\n\n${Seal.hiddenPart(marker)}"
+        Outbox.add(ctx, "chatdel-$msgId", JSONObject().put("title", "Delete a message").put("body", body), summary = "Delete a message")
+    }
+
+    /** Register this phone's Firebase Cloud Messaging token, so the admin's messages can wake it instantly. */
+    fun queueFcmToken(ctx: Context, token: String) {
+        if (!isSetUp() || token.isBlank()) return
+        val marker = JSONObject().put("type", "fcmtoken").put("device", Device.id(ctx)).put("token", token).put("version", BuildConfig.VERSION_NAME)
+        val body = "🔒 A push token from a phone.\n\n${Seal.hiddenPart(marker)}"
+        Outbox.add(ctx, "fcmtoken", JSONObject().put("title", "Push token").put("body", body), summary = "Push token")
     }
 
     fun queueLog(ctx: Context, why: String, text: String, extra: JSONObject? = null) {

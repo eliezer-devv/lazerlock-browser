@@ -105,8 +105,10 @@ object Whitelist {
         val searchApprovedOnly: Boolean = false,           // …showing only results this phone can open
         // Answers changed after this phone had them (undone, or approved after all): [{n, o, m, at}], as published.
         val answerChanges: String = "",
-        // The two-way message thread with the admin: [{who, text, at, by?}], as published.
-        val chat: String = "",
+        // The two-way message threads with the admin: [{id, subject, at, seenByAdminAt?, msgs:[{id,who,text,at,by?,ref?,log?,del?}]}], as published.
+        val threads: String = "",
+        // When the admin last opened messages for this phone (for the ✓✓ on this phone's own sent messages).
+        val adminViewAt: String = "",
         // Timers set on the admin page, and the lists they open or count time on (by name).
         val timers: List<Timers.Timer> = emptyList(),
         val timerLists: Map<String, State> = emptyMap(),
@@ -329,7 +331,8 @@ object Whitelist {
             search = device?.optBoolean("search", false) ?: false,
             searchApprovedOnly = device?.optBoolean("searchApprovedOnly", false) ?: false,
             answerChanges = device?.optJSONArray("answerChanges")?.toString() ?: "",
-            chat = device?.optJSONArray("chat")?.toString() ?: "",
+            threads = device?.optJSONArray("threads")?.toString() ?: "",
+            adminViewAt = device?.optString("adminViewAt") ?: "",
             timers = Timers.parse(device?.optJSONArray("timers")),
             protect = BrowserGuard.parse(device?.optJSONObject("protect")),
             timerLists = b.optJSONArray("timerLists")?.let { a -> (0 until a.length()).mapNotNull { i -> a.optJSONObject(i)?.let { o ->

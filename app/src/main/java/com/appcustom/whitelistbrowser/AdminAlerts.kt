@@ -159,6 +159,26 @@ object AdminAlerts {
         runCatching { nm.notify(10_000 + id, b.build()) }.logged("Admin notes", "Showing a notification")
         AppLog.i("Notifications", "Shown: $title")
     }
+
+    const val ACTION_OPEN_MESSAGES = "com.appcustom.whitelistbrowser.OPEN_MESSAGES"
+    private const val MSG_CHANNEL = "messages"
+    /** A plain "new message" notification (opens Messages). Content stays sealed — this is only a heads-up. */
+    fun notifyMessage(ctx: Context, title: String, text: String) {
+        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= 26 && nm.getNotificationChannel(MSG_CHANNEL) == null) {
+            nm.createNotificationChannel(NotificationChannel(MSG_CHANNEL, "Messages", NotificationManager.IMPORTANCE_HIGH)
+                .apply { description = "Messages from whoever manages this phone, and replies from phones" })
+        }
+        val target = if (BuildConfig.ADMIN_APP) Intent(ctx, AdminActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            else Intent(ctx, MainActivity::class.java).setAction(ACTION_OPEN_MESSAGES).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        val open = PendingIntent.getActivity(ctx, 777, target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        @Suppress("DEPRECATION")
+        val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(ctx, MSG_CHANNEL) else android.app.Notification.Builder(ctx)
+        b.setSmallIcon(R.drawable.ic_d_send).setContentTitle(title).setContentText(text)
+            .setStyle(android.app.Notification.BigTextStyle().bigText(text)).setContentIntent(open).setAutoCancel(true)
+        runCatching { nm.notify(20_777, b.build()) }.logged("Messages", "Showing a message notification")
+        AppLog.i("Notifications", "Shown message heads-up")
+    }
 }
 
 /** The background check for admin phones (Android runs it every 15 minutes or so, when online). */

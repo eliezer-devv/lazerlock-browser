@@ -33,8 +33,9 @@ object Outbox {
     @Synchronized fun add(ctx: Context, kind: String, payload: JSONObject, summary: String? = null, request: JSONObject? = null): String {
         val id = UUID.randomUUID().toString()
         val items = read(ctx)
-        if (kind == "log") {                                     // only the newest log waits
-            for (i in items.length() - 1 downTo 0) if (items.getJSONObject(i).optString("kind") == "log") items.remove(i)
+        // Only the newest of these waits (a read receipt / push token / log is replaced, not piled up).
+        if (kind == "log" || kind == "fcmtoken" || kind.startsWith("chatseen-")) {
+            for (i in items.length() - 1 downTo 0) if (items.getJSONObject(i).optString("kind") == kind) items.remove(i)
         }
         items.put(JSONObject().put("id", id).put("kind", kind).put("payload", payload)
             .put("summary", summary ?: "").put("created", System.currentTimeMillis())
