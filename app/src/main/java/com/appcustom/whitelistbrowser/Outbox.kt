@@ -103,9 +103,11 @@ object Outbox {
             val id = item.optString("id")
             try {
                 val payload = item.getJSONObject("payload")
-                if (item.optString("kind") == "register") { Requests.deliverRegistration(ctx, payload); AppLog.i("Setup", "Registration sent") }
-                else if (item.optString("kind") == "log" || item.optString("kind") == "message") {      // not one of My requests
-                    Requests.deliverIssue(payload); AppLog.i("Log", if (item.optString("kind") == "message") "Message sent to the admin" else "Sent to the admin")
+                val kind = item.optString("kind")
+                // Logs, messages, read receipts, delete requests and push tokens are NOT "My requests": don't track them there.
+                if (kind == "register") { Requests.deliverRegistration(ctx, payload); AppLog.i("Setup", "Registration sent") }
+                else if (kind == "log" || kind == "message" || kind == "fcmtoken" || kind.startsWith("chat")) {
+                    Requests.deliverIssue(payload); AppLog.i("Outbox", "Sent to the admin ($kind)")
                 }
                 else MyRequests.sent(ctx, Requests.deliverIssue(payload), item.optString("summary"), item.optLong("created"),
                     item.optJSONObject("request"))

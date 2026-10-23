@@ -3204,11 +3204,20 @@ class MainActivity : Activity() {
     private data class ChatMsg(val id: String, val who: String, val text: String, val at: Long,
         val by: String?, val ref: ChatRef?, val logFile: String?, val deleted: Boolean,
         val pending: Boolean = false, val localId: String = "")
-    private data class ChatThread(val id: String, val subject: String, val at: Long, val seenByAdminAt: Long, val msgs: List<ChatMsg>)
+    private data class ChatThread(val id: String, val subject: String, val at: Long, val seenByAdminAt: Long,
+        val msgs: List<ChatMsg>, val pendingNew: Boolean = false)
 
     // A request the composer is attaching to the next message, and whether to attach the app log (kept while composing).
     private var composeRef: ChatRef? = null
     private var composeLog: Boolean = false
+    private var composeDraft = ""
+    private var reopenComposer: (() -> Unit)? = null
+    private var pendingNewSubject = ""
+    private var pendingNewText = ""
+    // Multi-select delete: the thread being selected in, and the chosen message ids.
+    private var selThread = ""
+    private val msgSel = HashSet<String>()
+    private var threadDialog: Ui.AppDialog? = null
 
     private fun chatPrefs() = getSharedPreferences("chat", Context.MODE_PRIVATE)
     private fun parseIsoUtc(s: String): Long = runCatching {
@@ -3217,12 +3226,11 @@ class MainActivity : Activity() {
     }.getOrDefault(0L)
     private fun adminViewAt(): Long = parseIsoUtc(Whitelist.state.adminViewAt)
 
-    /** Phone-only deletions (never leave the phone): a set of message ids, or of thread ids. */
     private fun localHidden(key: String): Set<String> = runCatching {
         val a = org.json.JSONArray(chatPrefs().getString(key, "[]")); (0 until a.length()).map { a.optString(it) }.toSet()
     }.getOrDefault(emptySet())
-    private fun addLocalHidden(key: String, id: String) = runCatching {
-        val s = localHidden(key).toMutableSet(); s.add(id)
+    private fun addLocalHidden(key: String, ids: Collection<String>) = runCatching {
+        val s = localHidden(key).toMutableSet(); s.addAll(ids)
         chatPrefs().edit().putString(key, org.json.JSONArray(s.toList()).toString()).apply()
     }
 
@@ -3252,7 +3260,20 @@ class MainActivity : Activity() {
         return out.sortedBy { it.at }
     }
 
-    /** Messages queued from here that haven't come back in a synced thread yet (shown as "sending…"). */
+    /** Pending new conversations started here that haven't come back yet — shown so a just-sent message doesn't vanish. */
+    private fun pendingNewThreads(): List<ChatThread> {
+        val syncedSubjects = syncedThreads().map { it.subject }
+        return pendingAll().filter { it.optString("thread").isBlank() && System.currentTimeMillis() - it.optLong("at") < 3_600_000L }
+            .groupBy { it.optString("localId") }
+            .map { (lid, items) ->
+                val first = items.first(); val subj = first.optString("subject").ifBlank { "Messages" }; val at = first.optLong("at")
+                ChatThread("pending:$lid", subj, at, 0L,
+                    items.map { ChatMsg("", "phone", it.optString("text"), it.optLong("at"), null, null, null, false, pending = true, localId = lid) }, pendingNew = true)
+            }
+            // (If a thread with the same subject has already synced, the pending copy can go.)
+            .filter { it.subject !in syncedSubjects }
+    }
+
     private fun pendingAll(): List<org.json.JSONObject> = runCatching {
         val a = org.json.JSONArray(chatPrefs().getString("pending", "[]")); (0 until a.length()).mapNotNull { a.optJSONObject(it) }
     }.getOrDefault(emptyList())
@@ -3262,7 +3283,6 @@ class MainActivity : Activity() {
             .put("thread", threadId ?: "").put("subject", subject ?: "").put("text", text).put("at", System.currentTimeMillis()))
         chatPrefs().edit().putString("pending", a.toString()).apply()
     }
-    /** Drop pending sends that now appear in a synced thread (matched by text), or are over an hour old. */
     private fun prunePending() = runCatching {
         val synced = syncedThreads()
         val a = org.json.JSONArray(chatPrefs().getString("pending", "[]")); val kept = org.json.JSONArray()
@@ -3279,17 +3299,14 @@ class MainActivity : Activity() {
         .filter { p -> base.none { it.who == "phone" && it.text == p.optString("text") && it.at >= p.optLong("at") - 3000 } }
         .map { ChatMsg("", "phone", it.optString("text"), it.optLong("at"), null, null, null, false, pending = true, localId = it.optString("localId")) }
 
-    // Per-thread "seen up to" marks (for the unread badge), kept on this phone.
     private fun threadSeen() = runCatching { org.json.JSONObject(chatPrefs().getString("seen", "{}")) }.getOrDefault(org.json.JSONObject())
     private fun lastSeen(threadId: String): Long = threadSeen().optLong(threadId, 0L)
     private fun markThreadSeen(threadId: String, at: Long) {
         val o = threadSeen(); if (at > o.optLong(threadId, 0L)) { o.put(threadId, at); chatPrefs().edit().putString("seen", o.toString()).apply() }
     }
     private fun threadUnread(th: ChatThread): Int = th.msgs.count { it.who == "admin" && !it.deleted && it.at > lastSeen(th.id) }
-    /** New admin messages this phone hasn't opened yet, across all threads (for the badge). */
     fun unreadMessages(): Int = syncedThreads().sumOf { threadUnread(it) }
 
-    /** After a sync: forget pending sends that arrived, and give a gentle heads-up for new admin messages. */
     private fun onChatSynced() {
         prunePending()
         val newest = syncedThreads().flatMap { it.msgs }.filter { it.who == "admin" && !it.deleted }.maxOfOrNull { it.at } ?: 0L
@@ -3302,15 +3319,16 @@ class MainActivity : Activity() {
 
     /** ⋮ → Messages / About: the list of conversation threads with whoever manages this phone. */
     private fun showMessages() {
+        selThread = ""; msgSel.clear()
         val d = Ui.AppDialog(this, sheet = true)
         d.title("Messages", icon = R.drawable.ic_d_send)
-        val threads = syncedThreads().sortedByDescending { it.at }
+        val threads = (syncedThreads() + pendingNewThreads()).sortedByDescending { it.at }
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         if (threads.isEmpty()) col.addView(Ui.text(this, "No messages yet. Start one with whoever manages this phone, and their replies show here.", 14f, Ui.MUTED))
         else for (th in threads) col.addView(threadRow(th, d))
         d.add(col, 6)
         d.add(Ui.text(this, "Long-press a conversation to remove it from this phone.", 12f, Ui.MUTED), 6)
-        d.button("New message", Ui.Kind.PRIMARY) { it.dismiss(); composeRef = null; composeLog = false; newThreadDialog() }
+        d.button("New message", Ui.Kind.PRIMARY) { it.dismiss(); composeRef = null; composeLog = false; composeDraft = ""; newThreadDialog() }
         d.button("Close", Ui.Kind.GHOST) { it.dismiss() }
         d.show()
     }
@@ -3318,7 +3336,7 @@ class MainActivity : Activity() {
     /** One conversation in the Messages list: subject, a preview of the last message, time, and an unread count. */
     private fun threadRow(th: ChatThread, parent: Ui.AppDialog): View {
         val last = th.msgs.lastOrNull()
-        val unread = threadUnread(th)
+        val unread = if (th.pendingNew) 0 else threadUnread(th)
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
@@ -3328,6 +3346,7 @@ class MainActivity : Activity() {
         val mid = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         mid.addView(Ui.text(this, th.subject, 15f, Ui.INK).apply { typeface = Ui.boldFace })
         val previewText = when {
+            th.pendingNew -> "Sending…"
             last == null -> ""
             last.deleted -> "Message deleted"
             last.who == "phone" -> "You: " + (last.text.ifBlank { if (last.logFile != null) "App log" else "Request" })
@@ -3335,122 +3354,162 @@ class MainActivity : Activity() {
         }
         mid.addView(Ui.text(this, previewText, 13f, if (unread > 0) Ui.INK else Ui.MUTED).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END })
         row.addView(mid, LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(Ui.text(this, if (th.at > 0) shortDate(th.at) else "", 11f, Ui.MUTED).apply {
-            setPadding(Ui.dp(this@MainActivity, 8), 0, 0, 0) })
+        row.addView(Ui.text(this, if (th.at > 0) shortDate(th.at) else "", 11f, Ui.MUTED).apply { setPadding(Ui.dp(this@MainActivity, 8), 0, 0, 0) })
         if (unread > 0) row.addView(TextView(this).apply {
             text = unread.toString(); setTextColor(android.graphics.Color.WHITE); textSize = 11f; typeface = Ui.boldFace
             gravity = android.view.Gravity.CENTER; minWidth = Ui.dp(this@MainActivity, 20); minHeight = Ui.dp(this@MainActivity, 20)
             background = Ui.rounded(Ui.ACCENT, Ui.dp(this@MainActivity, 10).toFloat())
             setPadding(Ui.dp(this@MainActivity, 6), Ui.dp(this@MainActivity, 1), Ui.dp(this@MainActivity, 6), Ui.dp(this@MainActivity, 1))
-            (layoutParams as? LinearLayout.LayoutParams ?: LinearLayout.LayoutParams(-2, -2)).also { it.marginStart = Ui.dp(this@MainActivity, 8); layoutParams = it }
+            layoutParams = LinearLayout.LayoutParams(-2, -2).apply { marginStart = Ui.dp(this@MainActivity, 8) }
         })
-        row.setOnClickListener { parent.dismiss(); composeRef = null; composeLog = false; composeDraft = ""; openThread(th.id) }
-        row.setOnLongClickListener { confirmDeleteThread(th); true }
+        if (!th.pendingNew) {
+            row.setOnClickListener { parent.dismiss(); composeRef = null; composeLog = false; composeDraft = ""; openThread(th.id) }
+            row.setOnLongClickListener { confirmDeleteThread(th); true }
+        } else row.alpha = 0.6f
         val wrap = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(0, Ui.dp(this@MainActivity, 4), 0, Ui.dp(this@MainActivity, 4)) }
         wrap.addView(row, LinearLayout.LayoutParams(-1, -2))
         return wrap
     }
 
-    /** Opening a thread: the conversation, read receipts, a reply box, and attach (request / app log). */
+    /** Opening a thread: a back link to the list, the conversation, read receipts, and a reply bar with a paperclip. */
     private fun openThread(threadId: String) {
         val th = syncedThreads().firstOrNull { it.id == threadId } ?: run { showMessages(); return }
-        // Mark read locally (badge) and, only if something was unread, tell the admin (their messages show as read).
-        val wasUnread = threadUnread(th) > 0
-        markThreadSeen(threadId, th.msgs.filter { it.who == "admin" }.maxOfOrNull { it.at } ?: th.at)
-        if (wasUnread) io.execute { Requests.queueChatSeen(applicationContext, threadId); Outbox.flush(applicationContext) }
+        if (selThread != threadId) { selThread = ""; msgSel.clear() }      // selection belongs to one thread at a time
+        val selecting = selThread == threadId && msgSel.isNotEmpty()
+        if (!selecting) {
+            val wasUnread = threadUnread(th) > 0
+            markThreadSeen(threadId, th.msgs.filter { it.who == "admin" }.maxOfOrNull { it.at } ?: th.at)
+            if (wasUnread) io.execute { Requests.queueChatSeen(applicationContext, threadId); Outbox.flush(applicationContext) }
+        }
+        threadDialog?.let { runCatching { it.dismiss() } }   // re-opening (select/send/delete) replaces the old one, never stacks
         val d = Ui.AppDialog(this, sheet = true)
+        threadDialog = d
+        backRow(d, "Messages") { threadDialog = null; selThread = ""; msgSel.clear(); showMessages() }
         d.title(th.subject, icon = R.drawable.ic_d_send)
-        val msgs = (th.msgs + pendingReplies(threadId, th.msgs)).sortedBy { it.at }.takeLast(50)
+        val msgs = (th.msgs + pendingReplies(threadId, th.msgs)).sortedBy { it.at }.takeLast(60)
         val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         if (msgs.isEmpty()) col.addView(Ui.text(this, "No messages yet.", 14f, Ui.MUTED))
-        else for (m in msgs) col.addView(chatBubble(th, m))
+        else for (m in msgs) col.addView(chatBubble(th, m, selecting))
         d.add(col, 6)
-        d.add(Ui.text(this, "Long-press a message to delete it.", 12f, Ui.MUTED), 6)
-        attachChipInto(d)
-        val input = Ui.field(this, "Message…", type = android.text.InputType.TYPE_CLASS_TEXT or
-            android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES).apply { minLines = 1; maxLines = 5; setText(composeDraft) }
-        d.add(input, 6)
-        d.button("Attach…", Ui.Kind.GHOST) { dlg -> composeDraft = input.text.toString(); attachSheet { dlg.dismiss(); openThread(threadId) } }
-        d.button("Send", Ui.Kind.PRIMARY) {
-            val t = input.text.toString().trim()
-            if (t.isEmpty() && composeRef == null && !composeLog) { input.error = "Type a message"; return@button }
-            val ref = composeRef; val withLog = composeLog
-            addPending(threadId, null, if (t.isNotEmpty()) t else if (ref != null) "(about a request)" else "(app log)")
-            composeRef = null; composeLog = false; composeDraft = ""
-            io.execute {
-                Requests.queueChat(applicationContext, threadId, null, t, ref?.let { r ->
-                    org.json.JSONObject().put("number", r.number).put("subject", r.subject).apply { if (r.action.isNotBlank()) put("action", r.action) } },
-                    if (withLog) logReport() else null)
-                Outbox.flush(applicationContext)
-                main.post { if (!isDestroyed) Requests.checkInSoon(applicationContext) }
-            }
-            it.dismiss(); openThread(threadId)
+        if (selecting) {
+            d.add(Ui.text(this, "${msgSel.size} selected", 12.5f, Ui.MUTED), 6)
+            d.button("Delete selected", Ui.Kind.DANGER) { deleteSelected(th) }
+            d.button("Cancel", Ui.Kind.GHOST) { it.dismiss(); selThread = ""; msgSel.clear(); openThread(threadId) }
+        } else {
+            d.add(Ui.text(this, "Long-press a message to select and delete.", 12f, Ui.MUTED), 6)
+            d.add(composeBar(d, threadId), 6)
         }
-        d.button("Close", Ui.Kind.GHOST) { it.dismiss(); composeRef = null; composeLog = false; composeDraft = "" }
         d.show()
     }
 
-    /** Starting a new conversation: a subject, the first message, and attach. */
+    /** The reply bar inside a thread: a paperclip (attach), the message box (wraps, slim), and a round send button. */
+    private fun composeBar(d: Ui.AppDialog, threadId: String): View {
+        val ctx = this
+        val input = android.widget.EditText(ctx).apply {
+            hint = "Message…"; setHintTextColor(Ui.MUTED); setTextColor(Ui.INK); textSize = 15f
+            background = Ui.rounded(Ui.SEG, Ui.dp(ctx, 20).toFloat())
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setPadding(Ui.dp(ctx, 14), Ui.dp(ctx, 6), Ui.dp(ctx, 14), Ui.dp(ctx, 6))
+            minLines = 1; maxLines = 4; setText(composeDraft)
+        }
+        val clip = android.widget.ImageButton(ctx).apply {
+            setImageResource(R.drawable.ic_d_attach); background = null; setColorFilter(if (composeRef != null || composeLog) Ui.ACCENT else Ui.MUTED)
+            contentDescription = "Attach"; setPadding(Ui.dp(ctx, 4), 0, Ui.dp(ctx, 6), 0)
+            setOnClickListener { composeDraft = input.text.toString(); attachSheet { d.dismiss(); openThread(threadId) } }
+        }
+        val send = android.widget.ImageButton(ctx).apply {
+            setImageResource(R.drawable.ic_d_send); setColorFilter(android.graphics.Color.WHITE)
+            background = Ui.rounded(Ui.ACCENT, Ui.dp(ctx, 21).toFloat()); contentDescription = "Send"
+            setOnClickListener {
+                val t = input.text.toString().trim()
+                if (t.isEmpty() && composeRef == null && !composeLog) { input.error = "Type a message"; return@setOnClickListener }
+                val ref = composeRef; val withLog = composeLog
+                addPending(threadId, null, if (t.isNotEmpty()) t else if (ref != null) "Request" else "App log")
+                composeRef = null; composeLog = false; composeDraft = ""
+                io.execute {
+                    Requests.queueChat(applicationContext, threadId, null, t, refJson(ref), if (withLog) logReport() else null)
+                    Outbox.flush(applicationContext); main.post { if (!isDestroyed) Requests.checkInSoon(applicationContext) }
+                }
+                d.dismiss(); openThread(threadId)
+            }
+        }
+        return LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.BOTTOM
+            addView(clip, LinearLayout.LayoutParams(Ui.dp(ctx, 34), Ui.dp(ctx, 40)))
+            addView(input, LinearLayout.LayoutParams(0, -2, 1f))
+            addView(send, LinearLayout.LayoutParams(Ui.dp(ctx, 42), Ui.dp(ctx, 42)).apply { marginStart = Ui.dp(ctx, 8) })
+        }
+    }
+    private fun refJson(ref: ChatRef?) = ref?.let { r -> org.json.JSONObject().put("number", r.number).put("subject", r.subject).apply { if (r.action.isNotBlank()) put("action", r.action) } }
+
+    /** Starting a new conversation: a subject, the first message, and the same paperclip attach. */
     private fun newThreadDialog() {
         val subject = Ui.field(this, "Subject")
-        val input = Ui.field(this, "Message…", type = android.text.InputType.TYPE_CLASS_TEXT or
-            android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES).apply { minLines = 3; maxLines = 8 }
-        subject.setText(pendingNewSubject); input.setText(pendingNewText)
-        Ui.AppDialog(this, sheet = true).apply {
-            title("New message", icon = R.drawable.ic_d_send)
-            add(Ui.label(this@MainActivity, "Subject")); add(subject, 4)
-            add(Ui.label(this@MainActivity, "Message")); add(input, 4)
-            attachChipInto(this)
-            button("Attach…", Ui.Kind.GHOST) { dlg -> pendingNewSubject = subject.text.toString(); pendingNewText = input.text.toString()
-                attachSheet { dlg.dismiss(); newThreadDialog() } }
-            button("Send", Ui.Kind.PRIMARY) {
-                val s = subject.text.toString().trim(); val t = input.text.toString().trim()
-                if (s.isEmpty()) { subject.error = "Type a subject"; return@button }
-                if (t.isEmpty() && composeRef == null && !composeLog) { input.error = "Type a message"; return@button }
-                val ref = composeRef; val withLog = composeLog
-                addPending(null, s, t)
-                composeRef = null; composeLog = false; pendingNewSubject = ""; pendingNewText = ""
-                it.dismiss()
-                toast("Sending your message…")
-                io.execute {
-                    Requests.queueChat(applicationContext, null, s, t, ref?.let { r ->
-                        org.json.JSONObject().put("number", r.number).put("subject", r.subject).apply { if (r.action.isNotBlank()) put("action", r.action) } },
-                        if (withLog) logReport() else null)
-                    val sent = runCatching { Outbox.flush(applicationContext) }.isSuccess
-                    main.post { if (!isDestroyed) { Requests.checkInSoon(applicationContext); toast(if (sent) "Message sent" else "It'll be sent as soon as the phone is online"); showMessages() } }
-                }
+        subject.setText(pendingNewSubject)
+        val d = Ui.AppDialog(this, sheet = true)
+        backRow(d, "Messages") { showMessages() }
+        d.title("New message", icon = R.drawable.ic_d_send)
+        d.add(Ui.label(this, "Subject")); d.add(subject, 4)
+        d.add(Ui.label(this, "Message"))
+        val ctx = this
+        val input = android.widget.EditText(ctx).apply {
+            hint = "Message…"; setHintTextColor(Ui.MUTED); setTextColor(Ui.INK); textSize = 15f
+            background = Ui.rounded(Ui.SEG, Ui.dp(ctx, 16).toFloat())
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            setPadding(Ui.dp(ctx, 14), Ui.dp(ctx, 8), Ui.dp(ctx, 14), Ui.dp(ctx, 8)); minLines = 3; maxLines = 8; setText(pendingNewText)
+            gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        }
+        d.add(input, 4)
+        attachChipInto(d)
+        val clipRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(android.widget.ImageButton(ctx).apply {
+                setImageResource(R.drawable.ic_d_attach); background = null; setColorFilter(if (composeRef != null || composeLog) Ui.ACCENT else Ui.MUTED)
+                contentDescription = "Attach"
+                setOnClickListener { pendingNewSubject = subject.text.toString(); pendingNewText = input.text.toString(); attachSheet { d.dismiss(); newThreadDialog() } }
+            }, LinearLayout.LayoutParams(Ui.dp(ctx, 34), Ui.dp(ctx, 38)))
+            addView(Ui.text(ctx, "Attach a request or the app log", 13f, Ui.MUTED))
+        }
+        d.add(clipRow, 6)
+        d.button("Send", Ui.Kind.PRIMARY) {
+            val s = subject.text.toString().trim(); val t = input.text.toString().trim()
+            if (s.isEmpty()) { subject.error = "Type a subject"; return@button }
+            if (t.isEmpty() && composeRef == null && !composeLog) { input.error = "Type a message"; return@button }
+            val ref = composeRef; val withLog = composeLog
+            addPending(null, s, t.ifEmpty { if (ref != null) "Request" else "App log" })
+            composeRef = null; composeLog = false; pendingNewSubject = ""; pendingNewText = ""
+            it.dismiss(); toast("Sending your message…")
+            io.execute {
+                Requests.queueChat(applicationContext, null, s, t, refJson(ref), if (withLog) logReport() else null)
+                val ok = runCatching { Outbox.flush(applicationContext) }.isSuccess
+                main.post { if (!isDestroyed) { Requests.checkInSoon(applicationContext); toast(if (ok) "Message sent" else "It'll be sent as soon as the phone is online"); showMessages() } }
             }
-            button("Cancel", Ui.Kind.GHOST) { it.dismiss(); composeRef = null; composeLog = false; pendingNewSubject = ""; pendingNewText = "" }
-        }.show()
+        }
+        d.button("Cancel", Ui.Kind.GHOST) { it.dismiss(); composeRef = null; composeLog = false; pendingNewSubject = ""; pendingNewText = "" }
+        d.show()
     }
-    private var pendingNewSubject = ""
-    private var pendingNewText = ""
 
-    /** Shows the current attachment (request chip or app log) above the reply box, with a way to remove it. */
+    /** Shows the current attachment (request chip or app log) above the box, with a way to remove it. */
     private fun attachChipInto(d: Ui.AppDialog) {
         val ref = composeRef
-        val label = when { ref != null -> "📎 Request: ${ref.subject.ifBlank { "#${ref.number}" }}"; composeLog -> "📎 App log attached"; else -> null } ?: return
-        val chip = LinearLayout(this).apply {
+        val label = when { ref != null -> "📎 ${ref.subject.ifBlank { "Request #${ref.number}" }}"; composeLog -> "📎 App log attached"; else -> null } ?: return
+        d.add(LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.CENTER_VERTICAL
             background = Ui.rounded(Ui.SEG, Ui.dp(this@MainActivity, 12).toFloat())
             setPadding(Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 8), Ui.dp(this@MainActivity, 10), Ui.dp(this@MainActivity, 8))
             addView(Ui.text(this@MainActivity, label, 13f, Ui.INK), LinearLayout.LayoutParams(0, -2, 1f))
             addView(TextView(this@MainActivity).apply { text = "Remove"; setTextColor(Ui.ACCENT); textSize = 13f; typeface = Ui.boldFace
                 setOnClickListener { composeRef = null; composeLog = false; reopenComposer?.invoke() } })
-        }
-        d.add(chip, 6)
+        }, 6)
     }
-    // Re-open whichever composer is showing so the chip row updates (simple and reliable for a modal sheet).
-    private var reopenComposer: (() -> Unit)? = null
-    private var composeDraft = ""
 
-    /** The attach chooser: reference one of this phone's requests, or attach the app log. */
+    /** The attach chooser — a small popup (like WhatsApp), not a full screen. */
     private fun attachSheet(reopen: () -> Unit) {
         reopenComposer = reopen
-        val d = Ui.AppDialog(this, sheet = true)
-        d.title("Add to your message", icon = R.drawable.ic_d_send)
-        d.add(attachOption("Reference a request", "Link a site, app or time request you've made") { d.dismiss(); pickRequest(reopen) })
-        d.add(attachOption("Attach the app log", "Lists the sites opened (names only); helps when something isn't working") { d.dismiss(); composeLog = true; reopen() }, 8)
+        val d = Ui.AppDialog(this, sheet = false)
+        d.title("Add to your message")
+        d.add(attachOption("📎  Reference a request", "Link a site, app or time request you've made") { d.dismiss(); pickRequest(reopen) })
+        d.add(attachOption("📄  Attach the app log", "Lists the sites opened (names only); helps with problems") { d.dismiss(); composeLog = true; reopen() }, 8)
         d.button("Cancel", Ui.Kind.GHOST) { it.dismiss(); reopen() }
         d.show()
     }
@@ -3461,8 +3520,8 @@ class MainActivity : Activity() {
             setPadding(Ui.dp(this@MainActivity, 14), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 14), Ui.dp(this@MainActivity, 12))
             addView(Ui.text(this@MainActivity, title, 15f, Ui.INK).apply { typeface = Ui.boldFace })
             addView(Ui.text(this@MainActivity, sub, 12.5f, Ui.MUTED))
+            setOnClickListener { onClick() }
         }
-        v.setOnClickListener { onClick() }
         return LinearLayout(this).apply { setPadding(0, Ui.dp(this@MainActivity, 4), 0, 0); addView(v, LinearLayout.LayoutParams(-1, -2)) }
     }
 
@@ -3479,10 +3538,7 @@ class MainActivity : Activity() {
                 setPadding(Ui.dp(this@MainActivity, 14), Ui.dp(this@MainActivity, 11), Ui.dp(this@MainActivity, 14), Ui.dp(this@MainActivity, 11))
                 addView(Ui.text(this@MainActivity, it0.summary.ifBlank { "Request #${it0.number}" }, 14.5f, Ui.INK).apply { typeface = Ui.boldFace })
                 addView(Ui.text(this@MainActivity, statusWord(it0.status), 12.5f, Ui.MUTED))
-                setOnClickListener { _ ->
-                    composeRef = ChatRef(it0.number, it0.summary.take(120), it0.request?.optString("type") ?: it0.status)
-                    d.dismiss(); reopen()
-                }
+                setOnClickListener { _ -> composeRef = ChatRef(it0.number, it0.summary.take(120), it0.request?.optString("type") ?: it0.status); d.dismiss(); reopen() }
             }, LinearLayout.LayoutParams(-1, -2).apply { topMargin = Ui.dp(this@MainActivity, 8) })
             d.add(col, 2)
         }
@@ -3491,9 +3547,10 @@ class MainActivity : Activity() {
     }
     private fun statusWord(s: String) = when (s) { "approved" -> "Approved"; "denied" -> "Not allowed"; "waiting" -> "Waiting for an answer"; else -> "Request" }
 
-    /** One message bubble, with the referenced-request / app-log card and (for this phone's own messages) ticks. */
-    private fun chatBubble(th: ChatThread, m: ChatMsg): View {
+    /** One message bubble; in select mode a tap toggles selection, otherwise a long-press starts selecting. */
+    private fun chatBubble(th: ChatThread, m: ChatMsg, selecting: Boolean): View {
         val mine = m.who == "phone"
+        val selected = selecting && m.id.isNotBlank() && m.id in msgSel
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = if (mine) android.view.Gravity.END else android.view.Gravity.START
@@ -3501,30 +3558,33 @@ class MainActivity : Activity() {
         }
         val bubble = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = Ui.rounded(if (mine) Ui.ACCENT else Ui.SEG, Ui.dp(this@MainActivity, 14).toFloat())
+            background = Ui.rounded(if (mine) Ui.ACCENT else Ui.SEG, Ui.dp(this@MainActivity, 14).toFloat(),
+                if (selected) Ui.ACCENT_TEXT else 0, if (selected) Ui.dp(this@MainActivity, 2) else 0)
             setPadding(Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 8), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 8))
+            alpha = if (selecting && !selected) 0.6f else 1f
         }
         val fg = if (mine) android.graphics.Color.WHITE else Ui.INK
-        if (m.deleted) {
-            bubble.addView(Ui.text(this, "Message deleted", 14f, if (mine) android.graphics.Color.parseColor("#D7EDE4") else Ui.MUTED).apply { setTypeface(typeface, android.graphics.Typeface.ITALIC) })
-        } else {
-            // Referenced request card.
-            m.ref?.let { r -> bubble.addView(refCard(r.subject.ifBlank { "Request #${r.number}" }, "View the request", mine) { showMyRequests() }) }
-            // Attached app log card (the phone's own log it sent).
+        if (m.deleted) bubble.addView(Ui.text(this, "Message deleted", 14f, if (mine) android.graphics.Color.parseColor("#D7EDE4") else Ui.MUTED).apply { setTypeface(typeface, android.graphics.Typeface.ITALIC) })
+        else {
+            m.ref?.let { r -> bubble.addView(refCard(r.subject.ifBlank { "Request #${r.number}" }, "View the request", mine) { if (!selecting) showMyRequests() }) }
             if (m.logFile != null) bubble.addView(refCard("App log", "Sent to whoever manages this phone", mine, null))
             if (m.text.isNotBlank()) bubble.addView(Ui.text(this, m.text, 15f, fg))
         }
         val tick = if (mine && !m.pending && !m.deleted) tickMark(th, m) else null
         val meta = (m.by?.let { "$it · " } ?: "") + (if (m.at > 0) shortDate(m.at) else "") + (if (m.pending) " · sending…" else "")
-        val metaRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.END
+        bubble.addView(LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = android.view.Gravity.END
             addView(Ui.text(this@MainActivity, meta, 11f, if (mine) android.graphics.Color.parseColor("#D7EDE4") else Ui.MUTED))
             if (tick != null) addView(TextView(this@MainActivity).apply { text = "  ${tick.first}"; textSize = 11f
-                setTextColor(if (tick.second) android.graphics.Color.parseColor("#8FD0FF") else android.graphics.Color.parseColor("#D7EDE4")) }) }
-        bubble.addView(metaRow)
+                setTextColor(if (tick.second) android.graphics.Color.parseColor("#8FD0FF") else android.graphics.Color.parseColor("#D7EDE4")) }) })
         row.addView(bubble, LinearLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.74f).toInt(), -2))
-        if (!m.deleted) row.setOnLongClickListener { confirmDeleteMessage(th, m); true }
+        if (!m.deleted && m.id.isNotBlank()) {
+            row.setOnClickListener { if (selecting) toggleSelect(th, m.id) }
+            row.setOnLongClickListener { if (!selecting) { selThread = th.id; msgSel.clear(); msgSel.add(m.id) }; reopenThread(th.id); true }
+        }
         return row
     }
+    private fun toggleSelect(th: ChatThread, id: String) { if (id in msgSel) msgSel.remove(id) else msgSel.add(id); if (msgSel.isEmpty()) selThread = ""; reopenThread(th.id) }
+    private fun reopenThread(threadId: String) { runCatching { openThread(threadId) } }   // re-draw the open thread (dialogs can't update in place)
 
     /** sent ✓ / delivered ✓✓ / read ✓✓(blue), for this phone's own messages. */
     private fun tickMark(th: ChatThread, m: ChatMsg): Pair<String, Boolean> {
@@ -3543,26 +3603,28 @@ class MainActivity : Activity() {
             addView(Ui.text(this@MainActivity, sub, 11.5f, if (mine) android.graphics.Color.parseColor("#D7EDE4") else Ui.MUTED))
         }
         if (onClick != null) card.setOnClickListener { onClick() }
-        val lp = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = Ui.dp(this@MainActivity, 6) }
-        return LinearLayout(this).apply { addView(card, lp) }
+        return LinearLayout(this).apply { addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = Ui.dp(this@MainActivity, 6) }) }
     }
 
-    /** Child deleting a message: "for everyone" within 5 minutes of their own send, else only from this phone. */
-    private fun confirmDeleteMessage(th: ChatThread, m: ChatMsg) {
-        val mineRecent = m.who == "phone" && !m.pending && m.id.isNotBlank() && System.currentTimeMillis() - m.at < 5 * 60_000L
+    /** Delete the selected messages: "for everyone" offered only when every one is this phone's own, sent under 5 min ago. */
+    private fun deleteSelected(th: ChatThread) {
+        val ids = msgSel.toList()
+        if (ids.isEmpty()) { selThread = ""; reopenThread(th.id); return }
+        val chosen = th.msgs.filter { it.id in ids }
+        val allMineRecent = chosen.isNotEmpty() && chosen.all { it.who == "phone" && !it.pending && System.currentTimeMillis() - it.at < 5 * 60_000L }
+        val n = ids.size
         Ui.AppDialog(this, sheet = false).apply {
-            title("Delete this message?")
-            if (mineRecent) {
-                add(Ui.text(this@MainActivity, "You sent this just now, so you can still take it back for everyone — or only from this phone.", 14f, Ui.MUTED), 4)
-                button("Delete for everyone", Ui.Kind.DANGER) { d ->
-                    io.execute { Requests.queueChatDelete(applicationContext, th.id, m.id); Outbox.flush(applicationContext)
-                        main.post { if (!isDestroyed) Requests.checkInSoon(applicationContext) } }
-                    addLocalHidden("hiddenMsgs", m.id); d.dismiss(); openThread(th.id)
+            title(if (n == 1) "Delete this message?" else "Delete $n messages?")
+            if (allMineRecent) {
+                add(Ui.text(this@MainActivity, "Sent just now, so you can take them back for everyone — or only from this phone.", 14f, Ui.MUTED), 4)
+                button("Delete for everyone", Ui.Kind.DANGER) { dd ->
+                    io.execute { ids.forEach { Requests.queueChatDelete(applicationContext, th.id, it) }; Outbox.flush(applicationContext); main.post { if (!isDestroyed) Requests.checkInSoon(applicationContext) } }
+                    addLocalHidden("hiddenMsgs", ids); selThread = ""; msgSel.clear(); dd.dismiss(); openThread(th.id)
                 }
-                button("Delete from this phone", Ui.Kind.GHOST) { d -> if (m.id.isNotBlank()) addLocalHidden("hiddenMsgs", m.id); d.dismiss(); openThread(th.id) }
+                button("Delete from this phone", Ui.Kind.GHOST) { dd -> addLocalHidden("hiddenMsgs", ids); selThread = ""; msgSel.clear(); dd.dismiss(); openThread(th.id) }
             } else {
-                add(Ui.text(this@MainActivity, "It's removed from this phone only. Whoever manages this phone will still have it.", 14f, Ui.MUTED), 4)
-                button("Delete from this phone", Ui.Kind.DANGER) { d -> if (m.id.isNotBlank()) addLocalHidden("hiddenMsgs", m.id); d.dismiss(); openThread(th.id) }
+                add(Ui.text(this@MainActivity, "Removed from this phone only. Whoever manages this phone will still have them.", 14f, Ui.MUTED), 4)
+                button("Delete from this phone", Ui.Kind.DANGER) { dd -> addLocalHidden("hiddenMsgs", ids); selThread = ""; msgSel.clear(); dd.dismiss(); openThread(th.id) }
             }
             button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
         }.show()
@@ -3573,10 +3635,11 @@ class MainActivity : Activity() {
         Ui.AppDialog(this, sheet = false).apply {
             title("Remove this conversation?")
             add(Ui.text(this@MainActivity, "It's removed from this phone only. Whoever manages this phone will still have it.", 14f, Ui.MUTED), 4)
-            button("Remove from this phone", Ui.Kind.DANGER) { d -> addLocalHidden("hiddenThreads", th.id); d.dismiss(); showMessages() }
+            button("Remove from this phone", Ui.Kind.DANGER) { d -> addLocalHidden("hiddenThreads", listOf(th.id)); d.dismiss(); showMessages() }
             button("Cancel", Ui.Kind.GHOST) { it.dismiss() }
         }.show()
     }
+
 
 
     /** About this phone → Share log (admin phones): Android's share menu (WhatsApp, email, Drive, save to a file…). */
