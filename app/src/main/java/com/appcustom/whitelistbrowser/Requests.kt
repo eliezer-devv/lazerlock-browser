@@ -41,6 +41,19 @@ object Requests {
         queueLog(ctx, "message", text, extra = JSONObject().put("subject", subject))
     }
 
+    /** A message to the admin in the two-way thread: text only, sealed like a request. Each one is kept (not replaced),
+     *  so several sent in a row all arrive; they appear in the thread after the round-trip. */
+    fun queueChat(ctx: Context, text: String) {
+        if (!isSetUp()) return
+        val msg = text.trim().take(2000)
+        if (msg.isEmpty()) return
+        val marker = JSONObject().put("type", "chat").put("device", Device.id(ctx)).put("text", msg).put("version", BuildConfig.VERSION_NAME)
+        val body = "🔒 A message from a phone.\n\n${Seal.hiddenPart(marker)}"
+        Outbox.add(ctx, "chat-${System.currentTimeMillis()}-${(0..9999).random()}",
+            JSONObject().put("title", "Message from a phone").put("body", body), summary = "Message")
+        AppLog.i("Chat", "Queued a message for the admin")
+    }
+
     fun queueLog(ctx: Context, why: String, text: String, extra: JSONObject? = null) {
         if (!isSetUp()) return
         var keep = text.length

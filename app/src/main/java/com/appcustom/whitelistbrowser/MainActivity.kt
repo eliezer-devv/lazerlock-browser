@@ -1398,6 +1398,8 @@ class MainActivity : Activity() {
                 if (HomePage.isHome(web.url) && !Whitelist.state.sameContent(before)) web.reload()
                 enforceCurrent()
                 updateUi()
+                runCatching { onChatSynced() }   // new admin messages: prune pending sends, gentle heads-up
+
                 // (Quick checks working: every minute or so, more apart with many phones; else every few minutes, as before.)
                 val normal = Whitelist.state.refreshMinutes * 60_000L
                 if (isResumedNow) main.postDelayed(refreshTask, if (fast) 20_000L
@@ -1635,6 +1637,8 @@ class MainActivity : Activity() {
         if (!Whitelist.state.search && Whitelist.state.registered && Requests.isSetUp()) item(R.drawable.ic_d_search, "Ask for search") { showAskSearch() }
         val waiting = MyRequests.all(this).count { it.status == "waiting" && !it.archived } + Outbox.waitingRequests(this).size
         item(R.drawable.ic_d_inbox, "My requests", if (waiting > 0) waiting.toString() else null) { showMyRequests() }
+        // Messages: the two-way thread with whoever manages this phone (unread admin replies shown as a badge).
+        if (Requests.isSetUp()) { val unread = unreadMessages(); item(R.drawable.ic_d_send, "Messages", if (unread > 0) unread.toString() else null) { showMessages() } }
         // "My timers": only ever shown when this phone actually has a timer (otherwise the child never sees it).
         if (Whitelist.state.timers.isNotEmpty()) item(R.drawable.ic_d_clock, "My timers") { showMyTimers() }
         divider()
@@ -3189,9 +3193,119 @@ class MainActivity : Activity() {
         return true
     }
 
+    // ---------- Messages: the two-way thread with whoever manages this phone ----------
+
+    private data class ChatMsg(val who: String, val text: String, val at: Long, val by: String?, val pending: Boolean = false)
+    private fun chatPrefs() = getSharedPreferences("chat", Context.MODE_PRIVATE)
+    private fun parseIsoUtc(s: String): Long = runCatching {
+        java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
+            .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }.parse(s.take(19))?.time ?: 0L
+    }.getOrDefault(0L)
+    /** The thread as published to this phone (admin + phone messages). */
+    private fun syncedChat(): List<ChatMsg> {
+        val out = ArrayList<ChatMsg>()
+        runCatching {
+            val arr = org.json.JSONArray(Whitelist.state.chat.ifBlank { "[]" })
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                out.add(ChatMsg(if (o.optString("who") == "admin") "admin" else "phone", o.optString("text"),
+                    parseIsoUtc(o.optString("at")), o.optString("by").takeIf { it.isNotBlank() }))
+            }
+        }
+        return out
+    }
+    /** Messages sent from here that haven't come back in the synced thread yet (shown as "sending…"). */
+    private fun pendingChat(): List<ChatMsg> {
+        val out = ArrayList<ChatMsg>()
+        runCatching {
+            val arr = org.json.JSONArray(chatPrefs().getString("pending", "[]"))
+            for (i in 0 until arr.length()) { val o = arr.optJSONObject(i) ?: continue
+                out.add(ChatMsg("phone", o.optString("text"), o.optLong("at"), null, pending = true)) }
+        }
+        return out
+    }
+    private fun addPendingChat(text: String) = runCatching {
+        val arr = org.json.JSONArray(chatPrefs().getString("pending", "[]"))
+        arr.put(org.json.JSONObject().put("text", text).put("at", System.currentTimeMillis()))
+        chatPrefs().edit().putString("pending", arr.toString()).apply()
+    }
+    /** Drop pending sends that now appear in the synced thread (or are over an hour old). */
+    private fun prunePendingChat() = runCatching {
+        val sent = syncedChat().filter { it.who == "phone" }.map { it.text }.toSet()
+        val arr = org.json.JSONArray(chatPrefs().getString("pending", "[]"))
+        val kept = org.json.JSONArray()
+        for (i in 0 until arr.length()) { val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("text") !in sent && System.currentTimeMillis() - o.optLong("at") < 3_600_000L) kept.put(o) }
+        chatPrefs().edit().putString("pending", kept.toString()).apply()
+    }
+    private fun allChat(): List<ChatMsg> = (syncedChat() + pendingChat()).sortedBy { it.at }
+    private fun newestChatAt(): Long = syncedChat().maxOfOrNull { it.at } ?: 0L
+    private fun lastSeenChatAt(): Long = chatPrefs().getLong("lastSeen", 0L)
+    private fun markChatSeen() { chatPrefs().edit().putLong("lastSeen", maxOf(newestChatAt(), lastSeenChatAt())).apply() }
+    /** New admin messages this phone hasn't seen yet (for the badge). */
+    fun unreadMessages(): Int = syncedChat().count { it.who == "admin" && it.at > lastSeenChatAt() }
+
+    /** After a sync: forget pending sends that arrived, and give a gentle heads-up for new admin messages. */
+    private fun onChatSynced() {
+        prunePendingChat()
+        val newest = newestChatAt()
+        val unread = unreadMessages()
+        if (unread > 0 && isResumedNow && chatPrefs().getLong("notified", 0L) < newest) {
+            chatPrefs().edit().putLong("notified", newest).apply()
+            toast(if (unread == 1) "New message from whoever manages this phone" else "$unread new messages from whoever manages this phone")
+        }
+    }
+
+    /** About this phone / ⋮ → Messages: the conversation with whoever manages this phone, and a box to reply. */
+    private fun showMessages() {
+        markChatSeen()
+        val d = Ui.AppDialog(this, sheet = true)
+        d.title("Messages", icon = R.drawable.ic_d_send)
+        val msgs = allChat().takeLast(40)        // the sheet scrolls; keep the view to the recent part of the thread
+        val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        if (msgs.isEmpty()) col.addView(Ui.text(this, "No messages yet. Send one to whoever manages this phone, and their replies show here.", 14f, Ui.MUTED))
+        else for (m in msgs) col.addView(chatBubble(m))
+        d.add(col, 6)
+        val input = Ui.field(this, "Your message", type = android.text.InputType.TYPE_CLASS_TEXT or
+            android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES).apply { minLines = 1; maxLines = 5 }
+        d.add(input, 6)
+        d.button("Send", Ui.Kind.PRIMARY) {
+            val t = input.text.toString().trim()
+            if (t.isEmpty()) { input.error = "Type a message"; return@button }
+            addPendingChat(t)
+            io.execute {
+                Requests.queueChat(applicationContext, t); Outbox.flush(applicationContext)
+                main.post { if (!isDestroyed) { Requests.checkInSoon(applicationContext) } }
+            }
+            it.dismiss(); showMessages()           // re-open so the "sending…" bubble shows
+        }
+        d.button("Send with the app log…", Ui.Kind.GHOST) { it.dismiss(); showMessageAdmin() }   // for troubleshooting
+        d.button("Close", Ui.Kind.GHOST) { it.dismiss() }
+        d.show()
+    }
+
+    private fun chatBubble(m: ChatMsg): View {
+        val mine = m.who == "phone"
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = if (mine) android.view.Gravity.END else android.view.Gravity.START
+            setPadding(0, Ui.dp(this@MainActivity, 3), 0, Ui.dp(this@MainActivity, 3))
+        }
+        val bubble = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = Ui.rounded(if (mine) Ui.ACCENT else Ui.SEG, Ui.dp(this@MainActivity, 14).toFloat())
+            setPadding(Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 8), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 8))
+            addView(Ui.text(this@MainActivity, m.text, 15f, if (mine) android.graphics.Color.WHITE else Ui.INK))
+            val meta = (m.by?.let { "$it · " } ?: "") + (if (m.at > 0) shortDate(m.at) else "") + (if (m.pending) " · sending…" else "")
+            addView(Ui.text(this@MainActivity, meta, 11f, if (mine) android.graphics.Color.parseColor("#D7EDE4") else Ui.MUTED))
+        }
+        row.addView(bubble, LinearLayout.LayoutParams((resources.displayMetrics.widthPixels * 0.72f).toInt(), -2))
+        return row
+    }
+
     /**
-     * About this phone → Message admin: a subject, a message, and (if they choose) the app's log. Sent sealed, like a
-     * request; admin phones get a notification, and it's kept on the admin page (Phones → the phone).
+     * About this phone → "Send with app log": a subject, a message, and (if they choose) the app's log. Sent sealed,
+     * like a request; admin phones get a notification, and it's kept on the admin page (Phones → the phone).
      */
     private fun showMessageAdmin() {
         val subject = Ui.field(this, "Subject")
@@ -4864,8 +4978,8 @@ class MainActivity : Activity() {
             add(showFilters, 10)
             add(filtersTable, 6)
             // Messages to whoever manages this browser: its own section (the bottom bar keeps Copy ID and Close).
-            add(Ui.label(this@MainActivity, "Message admin"))
-            add(Ui.text(this@MainActivity, "Questions, comments, or something not working: send a message to whoever manages this browser.",
+            add(Ui.label(this@MainActivity, "Messages"))
+            add(Ui.text(this@MainActivity, "Message whoever manages this browser, and see their replies here.",
                 12.5f, Ui.MUTED), 4)
             val ctx = this@MainActivity
             // (Equal shares of the width, as tall as their words need: large text sizes wrap instead of being cut off.)
@@ -4878,9 +4992,10 @@ class MainActivity : Activity() {
                 setPadding(Ui.dp(ctx, 12), Ui.dp(ctx, 8), Ui.dp(ctx, 12), Ui.dp(ctx, 8))
                 setOnClickListener { onClick() }
             }
+            val unread = unreadMessages()
             add(LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                addView(logButton("Message admin") { showMessageAdmin() },
+                addView(logButton("Messages" + (if (unread > 0) " ($unread)" else "")) { showMessages() },
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
                 if (AdminAlerts.actingAdminPhone(this@MainActivity)) addView(logButton("Share log") { shareLog() },
                     LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { marginStart = Ui.dp(ctx, 10) })
