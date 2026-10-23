@@ -659,7 +659,7 @@ const ADMINAPP = INAPP && Q.get('app') === 'admin';
   // On GitHub Pages (OWNER.github.io/REPO/admin.html): REPO-private holds everything.
   if (location.hostname.endsWith('.github.io')) {
     C.owner = location.hostname.split('.')[0];
-    C.repo = (location.pathname.split('/')[1] || 'whitelist-browser') + '-private';
+    C.repo = (location.pathname.split('/')[1] || 'lazerlock-browser') + '-private';
   }
   if (Q.get('owner')) C.owner = Q.get('owner');
   if (Q.get('repo')) C.repo = Q.get('repo');
@@ -1112,7 +1112,7 @@ function logScreen() {
     logText(id, path).then(t => { S.logView = { file: path, text: t }; render(); }).catch(e => { S.logView = { file: path, text: 'Couldn\'t load it: ' + e.message }; render(); });
   }
   const text = S.logView.text;
-  const download = () => saveFile(new Blob([text || ''], { type: 'text/plain' }), `whitelist-browser-log-${id}-${file}`);
+  const download = () => saveFile(new Blob([text || ''], { type: 'text/plain' }), `lazerlock-log-${id}-${file}`);
   const name = (S.D.devices[id] && S.D.devices[id].name) || id;
   const from = S.sub.from;
   return h('main', { class: 'stack' }, backLink(from ? 'Messages' : name, () => from ? (S.sub = { name: 'thread', id: from.id, thread: from.thread }, S.tab = 'messages', render()) : open({ name: 'phone', id })),
@@ -1689,7 +1689,7 @@ async function exportAll() {
       d.approvalPin === 'none' ? 'none' : d.approvalPin ? 'own PIN' : 'usual', d.requestsTo ? listLabel(d.requestsTo) : 'usual', d.registered || '']));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(phones), tabName('Phones'));
     saveFile(new Blob([XLSX.write(wb, { bookType: 'xlsx', type: 'array' })], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-      `whitelist-browser-${new Date().toISOString().slice(0, 10)}.xlsx`);
+      `lazerlock-${new Date().toISOString().slice(0, 10)}.xlsx`);
     say('Downloaded: a tab for each list, and one for the phones.');
   } catch (e) { say(`Couldn't make the spreadsheet: ${e.message}`, true); }
 }
@@ -1866,7 +1866,7 @@ function signInScreen() {
     go1,
     h('button', { type: 'button', class: 'btn d', id: 'siForgot', onclick: () => { st.step = 'forgot'; st.email = email.value.trim(); render(); } }, 'Forgot password?'),
     h('details', { class: 'more' }, h('summary', null, 'Setting up for the first time?'),
-      h('p', { class: 'hint', style: 'margin:8px 0 0' }, `On GitHub, open your private repository (${C.repo || 'whitelist-browser-private'}) → Actions → `,
+      h('p', { class: 'hint', style: 'margin:8px 0 0' }, `On GitHub, open your private repository (${C.repo || 'lazerlock-browser-private'}) → Actions → `,
         h('b', null, 'Set up admin sign-in'), ' → Run workflow, and type your email. You\'ll get an email with a link to choose your password.')));
   form.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.tagName === 'INPUT') run(); });
   setTimeout(() => (email.value ? $('siPw') : email).focus(), 50);

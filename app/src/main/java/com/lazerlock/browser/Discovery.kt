@@ -21,7 +21,7 @@ object Discovery {
      */
     class Challenge(val url: String) : java.io.IOException("asked to prove it's a person")
 
-    private const val AGENT = "WhitelistBrowser/${BuildConfig.VERSION_NAME} (a family/school browser; site discovery)"
+    private const val AGENT = "LazerLock/${BuildConfig.VERSION_NAME} (a family/school browser; site discovery)"
 
     /**
      * One page of sites for [query], best first: [page] 0, 1, 2… (about 30 results a page, fewer sites). Blocking;

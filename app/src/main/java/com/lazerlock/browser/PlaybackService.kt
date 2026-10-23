@@ -27,7 +27,7 @@ class PlaybackService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     /** Android's media session: the lock screen, the media panel and headphone buttons talk to it. */
-    private fun session(): android.media.session.MediaSession = session ?: android.media.session.MediaSession(this, "WhitelistBrowser").also { s ->
+    private fun session(): android.media.session.MediaSession = session ?: android.media.session.MediaSession(this, "LazerLock").also { s ->
         s.setCallback(object : android.media.session.MediaSession.Callback() {
             override fun onPlay() = send("play")
             override fun onPause() = send("pause")
@@ -153,7 +153,7 @@ class PlaybackService : Service() {
                     }
                     val c = java.net.URL(newArt).openConnection() as java.net.HttpURLConnection
                     c.connectTimeout = 10_000; c.readTimeout = 10_000
-                    c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) WhitelistBrowser")
+                    c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android) LazerLock")
                     try { c.inputStream.use { android.graphics.BitmapFactory.decodeStream(it) } } finally { c.disconnect() }
                 }.onFailure { lastArt = "failed (${it.javaClass.simpleName}: ${it.message})" }.getOrNull()?.let { full ->
                     val scale = minOf(1f, 512f / maxOf(full.width, full.height))

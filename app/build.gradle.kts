@@ -56,7 +56,7 @@ android {
         }
     }
 
-    // Two apps from the same code: the browser (for the phones), and Whitelist Admin (just the admin page, for the
+    // Two apps from the same code: the browser (for the phones), and LazerLock Admin (just the admin page, for the
     // people who manage it). Different app IDs, so a phone can have both. Each updates itself from its own release.
     flavorDimensions += "app"
     productFlavors {

@@ -5,7 +5,7 @@ object Config {
     const val GITHUB_USERNAME = "eliezer-devv"
 
     // The repository name. Only change it if you named the repo something else.
-    const val REPO_NAME = "whitelist-browser"
+    const val REPO_NAME = "lazerlock-browser"
 
     // How often (in hours) the app looks for a new version by itself.
     const val UPDATE_CHECK_HOURS = 6

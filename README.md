@@ -101,9 +101,9 @@ Tick these off as you go (edit this file, and change `[ ]` to `[x]`).
 ## 1. One-time setup
 
 There are **two repositories**:
-- **`whitelist-browser` (public):** the app, its updates, the admin and status pages, and each phone's lists,
+- **`lazerlock-browser` (public):** the app, its updates, the admin and status pages, and each phone's lists,
   sealed so only that phone can read them (nothing readable).
-- **`whitelist-browser-private` (private, only you can see it):** the lists, the requests, every phone's name and
+- **`lazerlock-browser-private` (private, only you can see it):** the lists, the requests, every phone's name and
   details, the admin accounts, and the automation that handles it all. Section 10 explains what's visible where.
 
 Do these steps in order. On a phone, switching the browser to **desktop site** makes GitHub's settings pages
@@ -111,8 +111,8 @@ easier to use.
 
 ### Step 1: Create the public repository
 1. On github.com, tap **+** → **New repository**.
-2. Name it **`whitelist-browser`** and set it to **Public**.
-3. Upload all the files from `whitelist-browser.zip`, keeping the folder structure. GitHub's upload page skips the
+2. Name it **`lazerlock-browser`** and set it to **Public**.
+3. Upload all the files from `lazerlock-browser.zip`, keeping the folder structure. GitHub's upload page skips the
    hidden `.github` folder, so create its files by hand (**Add file** → **Create new file**, type the path, paste).
 
 ### Step 2: Turn on GitHub Pages (this publishes the lists)
@@ -128,9 +128,9 @@ The app needs a digital signature so that only your updates can be installed on 
 4. **Also save it in your password manager.** GitHub won't show it again.
 
 ### Step 4: Create the private repository
-1. **+** → **New repository**. Name it **`whitelist-browser-private`**, exactly the public one's name with
+1. **+** → **New repository**. Name it **`lazerlock-browser-private`**, exactly the public one's name with
    `-private` on the end, and set it to **Private**.
-2. Upload all the files from `whitelist-browser-private.zip`: **`devices.json`**, the **`docs`** folder (the starting
+2. Upload all the files from `lazerlock-browser-private.zip`: **`devices.json`**, the **`docs`** folder (the starting
    list) and `README.md` with **Add file** → **Upload files**. The rest are in the hidden `.github` folder, so create
    them by hand as in step 1: the two files in `.github/scripts/` (`handle-request.js`, `admin.js`) and the five in
    `.github/workflows/` (`requests.yml`, `phones.yml`, `sync.yml`, `admin.yml`, `admin-setup.yml`).
@@ -141,8 +141,8 @@ allows. When one expires, see section 6.
 
 | Token | Repository access | Permissions | Where it goes |
 |---|---|---|---|
-| **Publishing token** | only `whitelist-browser` (public) | **Contents: Read and write** | Private repo → secret `PUBLIC_REPO_TOKEN` |
-| **Requests token** | only `whitelist-browser-private` | **Issues: Read and write** | Public repo → secret `REQUESTS_TOKEN` |
+| **Publishing token** | only `lazerlock-browser` (public) | **Contents: Read and write** | Private repo → secret `PUBLIC_REPO_TOKEN` |
+| **Requests token** | only `lazerlock-browser-private` | **Issues: Read and write** | Public repo → secret `REQUESTS_TOKEN` |
 
 The publishing token lets the private repository copy the lists to the public one. The requests token is built
 into the app (and the admin page), and can only create and read issues: requests and the admin page's commands are
@@ -170,7 +170,7 @@ requests reach you as GitHub notifications: in the **GitHub** app's settings, tu
 1. **Actions** tab (public repo): a **Build APK** run takes about 5 to 10 minutes. A green tick means it worked,
    a release appears under **Releases**, and `signing/release.p12` (your locked signing key) appears in the repo.
 2. On the phone, open
-   `https://github.com/YOUR_USERNAME/whitelist-browser/releases/latest/download/whitelist-browser.apk`,
+   `https://github.com/YOUR_USERNAME/lazerlock-browser/releases/latest/download/whitelist-browser.apk`,
    allow installing from the browser when Android asks, and tap **Install**.
 3. **If Google Play Protect warns about it,** tap **More details** → **Install anyway**. If it offers to send the
    app for scanning, accept. See [Play Protect warnings](#play-protect-warnings) for why this happens.
@@ -182,7 +182,7 @@ everything, and sends the emails (invitations, "is this you signing in?", forgot
    1. [myaccount.google.com](https://myaccount.google.com) → **Security** → turn on **2-Step Verification** (if it isn't).
    2. [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords) → name it `LazerLock` →
       **Create**. Copy the 16-letter password it shows (Google shows it once).
-2. **Two secrets in the private repo** (`whitelist-browser-private`, not the public one): **Settings** → **Secrets and
+2. **Two secrets in the private repo** (`lazerlock-browser-private`, not the public one): **Settings** → **Secrets and
    variables** → **Actions** → **New repository secret**:
    - `MAIL_USER` = the full address of **that same Gmail account** (the one the app password was made in). It's the
      sender; it can also be your own sign-in email.
@@ -1024,7 +1024,7 @@ with the error. Fix the commas and quotes. (The admin page never makes these mis
 
 ## 5. The admin page
 
-`https://YOUR_USERNAME.github.io/whitelist-browser/admin.html` is a web page for answering requests and managing the
+`https://YOUR_USERNAME.github.io/lazerlock-browser/admin.html` is a web page for answering requests and managing the
 lists and phones. It's made for phones (it also works on a computer), has four tabs at the bottom, and is also built
 into the app (below). It never needs a GitHub token.
 
@@ -1227,7 +1227,7 @@ The same admin page is built into the app, so you can manage everything from the
 A separate app that's **just the admin page**, for the people who manage LazerLock (you, and helper admins)
 on their own phones. It's built from the same code, every time **Build APK** runs.
 - **Get it:** the status page's **Download the admin app**, or
-  `https://github.com/YOUR_USERNAME/whitelist-browser/releases/latest/download/whitelist-for-admins.apk`
+  `https://github.com/YOUR_USERNAME/lazerlock-browser/releases/latest/download/whitelist-for-admins.apk`
   (always the newest). It has its own icon (the tick on a shield) and name, **LazerLock Admin**, and sits next to
   the browser if both are on one phone.
 - **It opens straight to the admin page:** sign in once (email, password, the emailed link), then a PIN or your
@@ -1318,7 +1318,7 @@ except your test phones:
 **Keep in mind:**
 - **Don't rename or delete the Build APK workflow.** Its run count is the version number, so starting over would make new versions look older.
 - **The download link always gives the newest version:**
-  `https://github.com/YOUR_USERNAME/whitelist-browser/releases/latest/download/whitelist-browser.apk`
+  `https://github.com/YOUR_USERNAME/lazerlock-browser/releases/latest/download/whitelist-browser.apk`
 - **Each build makes the admin app too:** every release has both files, `whitelist-browser.apk` (the browser) and
   `whitelist-for-admins.apk` (LazerLock Admin), signed with the same key. Each app updates only from its own file. See
   [The admin app](#the-admin-app-whitelist-admin).
@@ -1363,7 +1363,7 @@ updated by a version with the same seal. This stops anyone else from pushing a f
 | Setting | Meaning | Default |
 |---|---|---|
 | `GITHUB_USERNAME` | Your GitHub username. **Must be set.** | `"YOUR_USERNAME"` |
-| `REPO_NAME` | The repository name, if you didn't use `whitelist-browser`. | `"whitelist-browser"` |
+| `REPO_NAME` | The repository name, if you didn't use `lazerlock-browser`. | `"lazerlock-browser"` |
 | `UPDATE_CHECK_HOURS` | How often the app looks for a new version by itself. | `6` |
 | `LOCK_TASK` | `true` pins the app to the screen (see section 11). | `false` |
 
@@ -1683,7 +1683,7 @@ The app, its dialogs, the home page, the blocked page and the admin page all wor
 
 ## 13. What's in the two repositories
 
-**`whitelist-browser` (public)**
+**`lazerlock-browser` (public)**
 ```
 docs/                          Published by GitHub Pages
   p/<code>.json                One per phone: its settings and lists, sealed so only that phone can read them
@@ -1732,7 +1732,7 @@ signing/release.p12            Signing key, locked by your password (created on 
 .github/workflows/pages.yml    "Publish list": publishes docs/ to GitHub Pages
 ```
 
-**`whitelist-browser-private` (private)**
+**`lazerlock-browser-private` (private)**
 ```
 docs/whitelist.json            The default public list: the real one (edit here, or on the admin page)
 docs/lists/                    The other lists; lists/archive/ keeps archived phones' lists

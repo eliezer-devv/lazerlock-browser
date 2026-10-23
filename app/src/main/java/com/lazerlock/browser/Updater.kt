@@ -22,7 +22,7 @@ object Updater {
             connectTimeout = 15_000
             readTimeout = 30_000
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "WhitelistBrowser/${BuildConfig.VERSION_NAME}")
+            setRequestProperty("User-Agent", "LazerLock/${BuildConfig.VERSION_NAME}")
         }
 
     // ---- Test versions: a phone (or admin app) set to get them updates to test builds too ----
@@ -45,7 +45,7 @@ object Updater {
         val test = appCtx?.let { testVersions(it) } ?: false
         AppLog.i("Update", "Checking $repo for an update (test=$test, this app=${if (BuildConfig.ADMIN_APP) "admin" else "browser"}, code=${BuildConfig.VERSION_CODE})")
         // The newest release holds both apps, each under its own name: each app takes only its own file
-        // (whitelist-browser.apk or whitelist-admin.apk), so neither can ever pick up the other.
+        // (lazerlock.apk or lazerlock-admin.apk), so neither can ever pick up the other.
         if (test) runCatching { newestOf(repo) }.onFailure { AppLog.w("Update", "Couldn't look for test versions: ${it.message}") }.getOrNull()?.let { return it }
         val conn = open("https://api.github.com/repos/$repo/releases/latest")
         conn.setRequestProperty("Accept", "application/vnd.github+json")
@@ -81,7 +81,7 @@ object Updater {
             val code = Regex("(\\d+)$").find(label.trim())?.value?.toIntOrNull() ?: return null
             val version = Regex("(\\d+\\.\\d+\\.\\d+)$").find(label.trim())?.value ?: "1.0.$code"
             // (The admin app's file is named so it comes after the browser's: older browsers took the first file.)
-            val want = if (BuildConfig.ADMIN_APP) listOf("whitelist-for-admins.apk", "whitelist-admin.apk") else listOf("whitelist-browser.apk")
+            val want = if (BuildConfig.ADMIN_APP) listOf("lazerlock-admin.apk", "whitelist-for-admins.apk", "whitelist-admin.apk") else listOf("lazerlock.apk", "whitelist-browser.apk")
             val assets = o.getJSONArray("assets")
             val all = (0 until assets.length()).map { assets.getJSONObject(it) }.filter { it.getString("name").endsWith(".apk") }
             val apk = want.firstNotNullOfOrNull { w -> all.firstOrNull { it.getString("name") == w } }

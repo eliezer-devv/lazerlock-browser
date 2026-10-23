@@ -328,7 +328,7 @@ object Requests {
             conn.setRequestProperty("Authorization", "Bearer ${token()}")
             conn.setRequestProperty("Accept", "application/vnd.github+json")
             conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
-            conn.setRequestProperty("User-Agent", "WhitelistBrowser/${BuildConfig.VERSION_NAME}")
+            conn.setRequestProperty("User-Agent", "LazerLock/${BuildConfig.VERSION_NAME}")
             val code0 = conn.responseCode
             TrustedTime.fromResponse(conn)
             return when (code0) {
@@ -528,7 +528,7 @@ object Requests {
         conn.setRequestProperty("Accept", "application/vnd.github+json")
         conn.setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
         conn.setRequestProperty("Content-Type", "application/json")
-        conn.setRequestProperty("User-Agent", "WhitelistBrowser/${BuildConfig.VERSION_NAME}")
+        conn.setRequestProperty("User-Agent", "LazerLock/${BuildConfig.VERSION_NAME}")
         return conn
     }
 }
