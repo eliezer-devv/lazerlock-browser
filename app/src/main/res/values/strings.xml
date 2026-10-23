@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">LazerLock</string>
+    <string name="cover_description">Covers blocked apps, and the Settings screens where this protection could be switched off (App info, Accessibility and Device admin for this app). It reads the on-screen text in Settings only to recognise those screens, and never reads what you type. Whoever manages this phone sets it up and can remove it.</string>
+    <string name="checking">Checking the list on GitHub</string>
+</resources>
