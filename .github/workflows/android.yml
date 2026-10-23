@@ -53,7 +53,7 @@ jobs:
           mkdir -p signing
           keytool -genkeypair -keystore signing/release.p12 -storetype PKCS12 -alias whitelist \
             -keyalg RSA -keysize 4096 -validity 36500 \
-            -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" -dname "CN=Whitelist Browser"
+            -storepass "$KEYSTORE_PASSWORD" -keypass "$KEYSTORE_PASSWORD" -dname "CN=LazerLock"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add signing/release.p12
@@ -126,11 +126,11 @@ jobs:
           KEY_ALIAS: whitelist
           KEY_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           REQUESTS_TOKEN: ${{ secrets.REQUESTS_TOKEN }}
-        # Two apps from the same code: the browser (for the phones) and Whitelist Admin (just the admin page).
+        # Two apps from the same code: the browser (for the phones) and LazerLock Admin (just the admin page).
         run: |
           gradle assembleRelease
-          cp app/build/outputs/apk/browser/release/app-browser-release.apk whitelist-browser.apk
-          cp app/build/outputs/apk/admin/release/app-admin-release.apk whitelist-for-admins.apk
+          cp app/build/outputs/apk/browser/release/app-browser-release.apk lazerlock.apk
+          cp app/build/outputs/apk/admin/release/app-admin-release.apk lazerlock-admin.apk
 
       - name: Publish release
         env:
@@ -138,34 +138,34 @@ jobs:
           VERSION: v1.0.${{ github.run_number }}
           EVERYONE: ${{ inputs.everyone == true }}
         run: |
-          # Both apps in the same release, each under its own name: whitelist-browser.apk (the browser) and
-          # whitelist-for-admins.apk (Whitelist Admin). Each app updates only from the file with its own name.
+          # Both apps in the same release, each under its own name: lazerlock.apk (the browser) and
+          # lazerlock-admin.apk (LazerLock Admin). Each app updates only from the file with its own name.
           # Older browsers took the FIRST app file in the release, and GitHub lists them in the order they were
           # uploaded: so the browser's always goes up first, then the admin app's. (Checked below.)
           # A test build is a pre-release: phones only ever update from the newest normal release, except those
           # with "Get test versions" on. "Re-run" of a build reuses its number: both files are uploaded again.
-          NOTES="whitelist-browser.apk: the browser (for the phones). whitelist-for-admins.apk: Whitelist Admin (the admin app)."
+          NOTES="lazerlock.apk: the browser (for the phones). lazerlock-admin.apk: LazerLock Admin (the admin app)."
           if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release delete-asset "$VERSION" whitelist-for-admins.apk --yes 2>/dev/null || true
-            gh release upload "$VERSION" whitelist-browser.apk --clobber
+            gh release delete-asset "$VERSION" lazerlock-admin.apk --yes 2>/dev/null || true
+            gh release upload "$VERSION" lazerlock.apk --clobber
           elif [ "$EVERYONE" = "true" ]; then
-            gh release create "$VERSION" whitelist-browser.apk --latest --title "Version ${VERSION#v}" --notes "Built from ${GITHUB_SHA::7}. $NOTES"
+            gh release create "$VERSION" lazerlock.apk --latest --title "Version ${VERSION#v}" --notes "Built from ${GITHUB_SHA::7}. $NOTES"
           else
-            gh release create "$VERSION" whitelist-browser.apk --prerelease --title "Test ${VERSION#v}" \
+            gh release create "$VERSION" lazerlock.apk --prerelease --title "Test ${VERSION#v}" \
               --notes "TEST BUILD from ${GITHUB_SHA::7}: only phones with \"Get test versions\" get it. When it's good: Actions > Release to everyone. $NOTES"
           fi
-          gh release upload "$VERSION" whitelist-for-admins.apk --clobber
+          gh release upload "$VERSION" lazerlock-admin.apk --clobber
           # The check: the first app file, as phones see it, must be the browser's.
           first="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$VERSION" --jq '[.assets[].name | select(endswith(".apk"))][0]')"
           echo "First app file in $VERSION: $first"
-          if [ "$first" != "whitelist-browser.apk" ]; then
+          if [ "$first" != "lazerlock.apk" ]; then
             echo "::warning::The admin app's file came first: putting it back after the browser's."
-            gh release delete-asset "$VERSION" whitelist-for-admins.apk --yes
+            gh release delete-asset "$VERSION" lazerlock-admin.apk --yes
             sleep 5
-            gh release upload "$VERSION" whitelist-for-admins.apk
+            gh release upload "$VERSION" lazerlock-admin.apk
             first="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$VERSION" --jq '[.assets[].name | select(endswith(".apk"))][0]')"
-            if [ "$first" != "whitelist-browser.apk" ]; then
-              gh release delete-asset "$VERSION" whitelist-for-admins.apk --yes
+            if [ "$first" != "lazerlock.apk" ]; then
+              gh release delete-asset "$VERSION" lazerlock-admin.apk --yes
               echo "::error::GitHub still lists the admin app first, so it was taken out of this release (older phones would pick it up). The browser is fine."
               exit 1
             fi

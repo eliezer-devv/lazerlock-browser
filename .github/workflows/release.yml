@@ -38,7 +38,7 @@ jobs:
           if [ "$(gh release view "$tag" --json isPrerelease --jq .isPrerelease)" != "true" ]; then
             echo "::notice::$tag is already released to everyone."; echo "TAG=$tag" >> "$GITHUB_ENV"; exit 0; fi
           gh release edit "$tag" --prerelease=false --latest --title "Version ${tag#v}" \
-            --notes "whitelist-browser.apk: the browser (for the phones). whitelist-for-admins.apk: Whitelist Admin (the admin app). Tested, then released to everyone."
+            --notes "lazerlock.apk: the browser (for the phones). lazerlock-admin.apk: LazerLock Admin (the admin app). Tested, then released to everyone."
           echo "TAG=$tag" >> "$GITHUB_ENV"
           echo "::notice::$tag is released to everyone: phones update within a few hours (or straight away from ⋮ > Settings > App update)."
       # The admin web page: the copy from that build becomes the released one (admin.html on the web).
