@@ -56,8 +56,34 @@
   .cbub { max-width: 80%; padding: 8px 12px; border-radius: 14px; }
   .cbub.me { align-self: flex-end; background: var(--accent); color: #fff; }
   .cbub.them { align-self: flex-start; background: var(--card); border: 1px solid var(--line); color: var(--ink); }
+  .cbub { position: relative; }
   .cbub .ctext { white-space: pre-wrap; word-break: break-word; font-size: 14.5px; }
-  .cbub .cmeta { font-size: 11px; opacity: .75; margin-top: 2px; }
+  .cbub .ctext.del { font-style: italic; opacity: .8; }
+  .cbub.gone { opacity: .85; }
+  .cbub .cmeta { font-size: 11px; opacity: .75; margin-top: 2px; display: flex; align-items: center; gap: 5px; justify-content: flex-end; }
+  .cbub .tk { font-size: 11px; letter-spacing: -1px; }
+  .cbub.me .tk { color: #CFE9FF; }
+  .cbub .tk.read { color: #6FC0FF; }
+  .cbub .cdel { position: absolute; top: 4px; right: 4px; background: none; border: 0; padding: 3px; border-radius: 8px; color: inherit; opacity: .55; cursor: pointer; }
+  .cbub .cdel:hover { opacity: 1; background: rgba(0,0,0,.08); }
+  .rchip { display: inline-flex; align-items: center; gap: 7px; max-width: 100%; margin-bottom: 6px; padding: 7px 9px; border-radius: 10px; border: 1px solid var(--line); background: var(--accent-soft); color: var(--accent-dark); text-align: left; cursor: pointer; }
+  .rchip.onme { background: rgba(255,255,255,.16); border-color: rgba(255,255,255,.35); color: #fff; }
+  .rchip .rct { font-weight: 700; font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rchip .rcs { font-size: 11px; opacity: .8; margin-left: auto; padding-left: 8px; }
+  .rcx { background: none; border: 0; color: var(--accent); font-weight: 700; font-size: 12.5px; cursor: pointer; margin-left: 8px; }
+  /* Messages inbox rows (distinct from the .mrow phone cards elsewhere). */
+  .msglist { display: flex; flex-direction: column; background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .msgrow { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 14px; border: 0; border-top: 1px solid var(--line2); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+  .msgrow:first-child { border-top: 0; }
+  .msgrow:hover { background: var(--accent-soft); }
+  .msgav { width: 34px; height: 34px; flex: none; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; font-size: 13.5px; }
+  .msgmid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .msgtop { display: flex; align-items: baseline; gap: 8px; }
+  .msgsubj { font-weight: 700; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .msgtime { font-size: 11.5px; color: var(--muted); flex: none; }
+  .msgprev { font-size: 13px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .msgprev.un { color: var(--ink); font-weight: 600; }
+  .msgtag { color: var(--accent); font-weight: 700; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #2E8B57; }
   .dot.off { background: #B4492F; }
 
@@ -1304,6 +1330,7 @@ async function loadAll(sha, opts) {
   S.connected = true;
   // Signed in on this phone: it may act as an admin phone again (clears the signed-out flag the app keeps).
   if (INAPP && window.WLBAdmin && WLBAdmin.adminSignedIn) try { WLBAdmin.adminSignedIn(); } catch {}
+  registerAdminPush();   // admin app: register its push token so phone→admin messages wake it instantly
   if (!canDo('requests') && S.tab === 'requests') S.tab = canDo('edit') ? 'sites' : seesPhones() ? 'phones' : 'settings';
   loadInbox();   // in the background; the Requests tab fills in when it arrives
   return true;
@@ -1661,8 +1688,9 @@ function render() {
   else if (S.sub) node = ({ site: siteScreen, temp: tempScreen, block: blockScreen, nomedia: noMediaScreen, import: importScreen,
     listsettings: listSettingsScreen, phone: phoneScreen, archived: archivedScreen, neverblock: neverBlockScreen, pin: pinScreen,
     log: logScreen, account: accountScreen, admins: adminsScreen, admin: adminScreen, groups: groupsScreen,
-    approvalpin: approvalPinScreen, embeds: embedsScreen, request: requestDetailsScreen, answered: answeredDetailsScreen, timer: timerScreen, browsers: browsersScreen })[S.sub.name]();
-  else node = ({ requests: requestsScreen, sites: sitesScreen, phones: phonesScreen, timers: timersScreen, settings: settingsScreen })[S.tab]();
+    approvalpin: approvalPinScreen, embeds: embedsScreen, request: requestDetailsScreen, answered: answeredDetailsScreen, timer: timerScreen, browsers: browsersScreen,
+    thread: threadScreen, newmsg: newMsgScreen })[S.sub.name]();
+  else node = ({ requests: requestsScreen, sites: sitesScreen, phones: phonesScreen, timers: timersScreen, messages: messagesScreen, settings: settingsScreen })[S.tab]();
   view.replaceChildren(node);
   const key = S.connected ? (S.sub ? 'sub:' + S.sub.name : 'tab:' + S.tab) : 'connect';
   if (key !== lastScreenKey) { window.scrollTo(0, 0); lastScreenKey = key; }
@@ -1679,7 +1707,8 @@ function renderTabs() {
   const waiting = S.requests ? S.requests.length + S.newPhones.length : 0;
   // (A mini admin sees only what they can use.)
   const tabs = [canDo('requests') ? ['requests', 'Requests', 'inbox', waiting] : null, canDo('edit') ? ['sites', 'Sites', 'globe', 0] : null,
-    seesPhones() ? ['phones', 'Phones', 'phone', 0] : null, seesPhones() ? ['timers', 'Timers', 'clock', 0] : null, ['settings', 'Settings', 'sliders', 0]].filter(Boolean);
+    seesPhones() ? ['phones', 'Phones', 'phone', 0] : null, seesPhones() ? ['timers', 'Timers', 'clock', 0] : null,
+    (seesPhones() || canDo('requests')) ? ['messages', 'Messages', 'send', messagesUnread()] : null, ['settings', 'Settings', 'sliders', 0]].filter(Boolean);
   $('tabs').replaceChildren(...tabs.map(([id, label, ic, badge]) => h('button', { type: 'button', 'aria-current': S.tab === id ? 'page' : null, onclick: () => go(id) },
     h('span', { class: 'pill' }, icon(ic, 22), badge ? h('span', { class: 'badge', 'aria-label': `${badge} waiting` }, badge) : null), label)));
 }
@@ -3942,7 +3971,7 @@ function phoneScreen() {
     phoneMediaAndSearch(d, M),
     phoneTimers(id),
     phoneBrowsers(id, d, M),
-    chatSection(id),
+    phoneMessages(id),
     h('div', { class: 'field' }, h('label', { for: 'pReq' }, 'When you approve its requests, change'), req),
     own ? [    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Approval PIN'), pinSeg,
       h('p', { class: 'hint', style: 'margin:0' }, pinMode === 'own' ? 'This phone has its own PIN.' : pinMode === 'none' ? 'Requests from this phone can\'t be approved with a PIN.'
@@ -4403,35 +4432,215 @@ function phoneBrowsers(id, d, M) {
       icon('chev', 16)));
 }
 // The two-way message thread with one phone (shows on the phone under ⋮ → Messages).
-function chatSection(id) {
-  const d = S.D.devices[id]; if (!d) return null;
-  const may = fullAdmin() || canDo('manage') || canDo('requests');
-  const when = at => { try { return new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
-  const msgs = (Array.isArray(d.chat) ? d.chat : []).slice().sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  const thread = h('div', { class: 'chat', id: 'chatThread' }, msgs.length ? msgs.map(m =>
-    h('div', { class: 'cbub ' + (m.who === 'admin' ? 'me' : 'them') },
-      h('div', { class: 'ctext' }, m.text),
-      h('div', { class: 'cmeta' }, (m.who === 'admin' ? (m.by ? m.by + ' · ' : '') : (d.name || 'Phone') + ' · ') + when(m.at))))
-    : h('p', { class: 'hint', style: 'margin:0' }, 'No messages yet.'));
-  const input = h('textarea', { class: 'inp', id: 'chatInput', rows: '2', placeholder: 'Message this phone…', style: 'resize:vertical' });
-  const send = h('button', { type: 'button', class: 'btn p', id: 'chatSend', onclick: async e => {
-    const t = input.value.trim(); if (!t) return;
-    const btn = e.currentTarget; btn.disabled = true;
-    try {
-      const r = await command({ op: 'chat', device: id, text: t });
-      if (!r.ok) throw new Error(r.error || 'It wasn\'t sent.');
-      input.value = '';
-      // Show it straight away (the server has saved it; a refresh later brings the stored copy).
-      d.chat = [...(Array.isArray(d.chat) ? d.chat : []), { who: 'admin', text: t, at: new Date().toISOString(), by: (ME && ME.name) || 'You' }].slice(-50);
-      render();
-    } catch (err) { say(err.message, true); }
-    finally { btn.disabled = false; }
-  } }, 'Send');
-  setTimeout(() => { const el = $('chatThread'); if (el) el.scrollTop = el.scrollHeight; }, 0);
-  return h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Messages'), thread,
-    may ? h('div', { style: 'display:flex;gap:8px;align-items:flex-end;margin-top:8px' }, h('div', { style: 'flex:1' }, input), send) : null,
-    h('p', { class: 'hint', style: 'margin:0' }, 'A two-way thread with this phone. It shows on the phone under ⋮ → Messages.'));
+// ================= Messages: threaded conversations with phones =================
+const whenMsg = at => { try { return new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+const parseAt = s => { const t = Date.parse(s || ''); return isNaN(t) ? 0 : t; };
+function adminInitials(name) { const w = String(name || '').trim().split(/\s+/).filter(Boolean); if (!w.length) return '?'; return (w[0][0] + (w[1] ? w[1][0] : '')).toUpperCase(); }
+function msgManage() { return fullAdmin() || canDo('manage') || canDo('requests'); }
+// A phone's threads the current admin may see, with admin-only-hidden messages/threads removed, oldest activity first.
+function visibleThreads(id) {
+  const d = S.D.devices[id]; if (!d) return [];
+  let threads = Array.isArray(d.threads) ? d.threads : [];
+  // Legacy: a pre-threads conversation (d.chat) shows as one "Messages" thread until the next message migrates it.
+  if (!threads.length && Array.isArray(d.chat) && d.chat.length)
+    threads = [{ id: 'legacy', subject: 'Messages', at: d.chat[d.chat.length - 1].at,
+      msgs: d.chat.map((m, i) => ({ id: m.id || ('legacy' + i), who: m.who === 'admin' ? 'admin' : 'phone', text: m.text, at: m.at, by: m.by })) }];
+  return threads.filter(t => t && !t.hideAdmin)
+    .map(t => ({ ...t, msgs: (t.msgs || []).filter(m => m && !m.hideAdmin) }))
+    .filter(t => (t.msgs || []).length)
+    .sort((a, b) => parseAt(a.at) - parseAt(b.at));
 }
+function threadUnreadAdmin(t) { const seen = parseAt(t.seenByAdminAt); return (t.msgs || []).filter(m => m.who === 'phone' && !m.del && parseAt(m.at) > seen).length; }
+function allThreadsFlat() {
+  const out = [];
+  for (const [id, d] of Object.entries(S.D.devices || {})) for (const t of visibleThreads(id)) out.push({ id, name: d.name || id, t });
+  return out.sort((a, b) => parseAt(b.t.at) - parseAt(a.t.at));
+}
+function messagesUnread() { try { return allThreadsFlat().reduce((n, x) => n + threadUnreadAdmin(x.t), 0); } catch { return 0; } }
+
+// The Messages tab: every phone's threads in one inbox, newest first.
+function messagesScreen() {
+  const flat = allThreadsFlat();
+  return h('main', null,
+    screenTitle('Messages', 'Conversations with every phone, newest first.'),
+    msgManage() ? h('button', { type: 'button', class: 'btn p wide', style: 'margin-bottom:14px', onclick: () => { S.msgRef = null; open({ name: 'newmsg' }); } }, icon('send', 18), 'New message') : null,
+    flat.length ? h('div', { class: 'msglist' }, ...flat.map(x => threadRowView(x.id, x.t, true)))
+      : h('div', { class: 'empty' }, h('b', null, 'No messages yet'), 'Start a conversation with a phone, and replies appear here.'));
+}
+// One conversation in a list: initials avatar, subject, phone tag, a preview, time, and an unread count.
+function threadRowView(id, t, showPhone) {
+  const d = S.D.devices[id] || {}; const msgs = t.msgs || []; const last = msgs[msgs.length - 1];
+  const unread = threadUnreadAdmin(t);
+  const prev = !last ? '' : last.del ? 'Message deleted' : (last.who === 'admin' ? 'You: ' : '') + (last.text || (last.log ? 'App log' : last.ref ? 'About a request' : 'Message'));
+  return h('button', { type: 'button', class: 'msgrow', onclick: () => open({ name: 'thread', id, thread: t.id }) },
+    h('span', { class: 'msgav' }, adminInitials(d.name || id)),
+    h('span', { class: 'msgmid' },
+      h('span', { class: 'msgtop' }, h('span', { class: 'msgsubj' }, t.subject || 'Messages'), h('span', { class: 'msgtime' }, whenMsg(t.at))),
+      h('span', { class: 'msgprev' + (unread ? ' un' : '') }, showPhone ? h('span', { class: 'msgtag' }, (d.name || id) + ' · ') : null, prev)),
+    unread ? h('span', { class: 'badge' }, String(unread)) : null);
+}
+
+// One open thread: the conversation, read receipts, and (for admins who may) a reply box with attach.
+function threadScreen() {
+  const { id, thread } = S.sub; const d = S.D.devices[id];
+  if (!d) { S.sub = null; S.tab = 'messages'; return messagesScreen(); }
+  const t = visibleThreads(id).find(x => x.id === thread);
+  if (!t) { S.sub = null; S.tab = 'messages'; return messagesScreen(); }
+  markThreadRead(id, t);
+  const msgs = (t.msgs || []).slice().sort((a, b) => parseAt(a.at) - parseAt(b.at));
+  const threadEl = h('div', { class: 'chat', id: 'chatThread' },
+    msgs.length ? msgs.map(m => bubbleView(id, t, m)) : h('p', { class: 'hint', style: 'margin:0' }, 'No messages yet.'));
+  setTimeout(() => { const el = $('chatThread'); if (el) el.scrollTop = el.scrollHeight; }, 0);
+  return h('main', null,
+    backLink('Messages', () => { S.sub = null; S.tab = 'messages'; render(); }),
+    screenTitle(t.subject || 'Messages', d.name || id),
+    threadEl,
+    msgManage() ? composeRow(id, thread) : h('p', { class: 'hint' }, 'You can read this conversation, but not reply.'));
+}
+
+// A message bubble: the referenced-request / app-log chip, the text, and (for the admin's own) delivery/read ticks.
+function bubbleView(id, t, m) {
+  const d = S.D.devices[id] || {}; const mine = m.who === 'admin';
+  const parts = [];
+  if (m.del) parts.push(h('div', { class: 'ctext del' }, 'Message deleted'));
+  else {
+    if (m.ref) parts.push(refChip(m.ref, mine));
+    if (m.log) parts.push(logChip(id, m.log, mine));
+    if (m.text) parts.push(h('div', { class: 'ctext' }, m.text));
+  }
+  const metaText = (mine ? (m.by ? m.by + ' · ' : '') : '') + whenMsg(m.at);
+  parts.push(h('div', { class: 'cmeta' }, metaText, mine && !m.del ? tickEl(d, t, m) : null));
+  if (!m.del && msgManage()) parts.push(h('button', { type: 'button', class: 'cdel', 'aria-label': 'Delete', onclick: e => { e.stopPropagation(); delMsgMenu(id, t.id, m); } }, icon('trash', 13, 2)));
+  return h('div', { class: 'cbub ' + (mine ? 'me' : 'them') + (m.del ? ' gone' : '') }, ...parts);
+}
+function tickEl(d, t, m) {
+  const read = parseAt(t.seenByPhoneAt) > 0 && parseAt(t.seenByPhoneAt) >= parseAt(m.at);
+  const delivered = parseAt(d.phoneSyncAt) > 0 && parseAt(d.phoneSyncAt) >= parseAt(m.at);
+  return h('span', { class: 'tk' + (read ? ' read' : '') }, read || delivered ? '✓✓' : '✓');
+}
+function refChip(ref, mine) {
+  return h('button', { type: 'button', class: 'rchip' + (mine ? ' onme' : ''), onclick: e => { e.stopPropagation(); openRef(ref.number); } },
+    icon('inbox', 15, 2), h('span', { class: 'rct' }, ref.subject || ('Request #' + ref.number)), h('span', { class: 'rcs' }, 'View'));
+}
+function logChip(id, log, mine) {
+  return h('button', { type: 'button', class: 'rchip' + (mine ? ' onme' : ''), onclick: e => { e.stopPropagation(); open({ name: 'log', id, file: log.file }); } },
+    icon('list', 15, 2), h('span', { class: 'rct' }, 'App log'), h('span', { class: 'rcs' }, 'Open'));
+}
+function openRef(n) {
+  if ((S.requests || []).some(i => i.number === n)) return open({ name: 'request', number: n });
+  if ((S.answeredList || []).some(i => i.number === n)) return open({ name: 'answered', number: n });
+  say('That request isn\'t in your current list.', true);
+}
+// Admin delete: for everyone (a tombstone the phone sees too) or just from the admin view.
+function delMsgMenu(id, thread, m) {
+  const forMe = () => bg({ op: 'chatdel', device: id, thread, msg: m.id, scope: 'me' }, 'Removed from your view.', () => markDelLocal(id, thread, m.id, 'me'));
+  const meBtn = h('button', { type: 'button', class: 'btn s wide', style: 'margin-top:4px', onclick: () => { forMe(); const c = $('dlgCancel'); if (c) c.click(); } }, 'Delete for me only');
+  uiDialog({ title: 'Delete this message?', text: 'Deleting for everyone removes it on the phone too, for good. “For me only” just hides it from your view.', icon: 'trash', red: true, danger: true,
+    ok: 'Delete for everyone', cancel: 'Cancel', body: [meBtn],
+    onOk: () => { bg({ op: 'chatdel', device: id, thread, msg: m.id, scope: 'all' }, 'Deleted for everyone.', () => markDelLocal(id, thread, m.id, 'all')); } });
+}
+function markDelLocal(id, thread, msgId, scope) {
+  const d = S.D.devices[id]; if (!d) return; const t = (d.threads || []).find(x => x.id === thread); if (!t) return;
+  const m = (t.msgs || []).find(x => x.id === msgId); if (!m) return;
+  if (scope === 'all') { m.del = true; delete m.text; delete m.ref; delete m.log; } else m.hideAdmin = true;
+}
+// Mark a thread read when the admin opens it: the phone's messages there show as read, silently (no "Saved" noise).
+function markThreadRead(id, t) {
+  const newest = Math.max(0, ...(t.msgs || []).filter(m => m.who === 'phone').map(m => parseAt(m.at)));
+  if (!newest || parseAt(t.seenByAdminAt) >= newest) return;
+  S.seenSent = S.seenSent || {};
+  const key = id + '|' + t.id;
+  if ((S.seenSent[key] || 0) >= newest) return;
+  S.seenSent[key] = newest;
+  t.seenByAdminAt = new Date().toISOString();                // optimistic (so unread clears and ticks update now)
+  const d = S.D.devices[id]; if (d) d.adminViewAt = new Date().toISOString();
+  setTimeout(() => { command({ op: 'chatseen', device: id, thread: t.id }).catch(e => console.log(`(carried on, chatseen) ${e && e.message}`)); }, 0);
+}
+
+// The reply box, with the current attachment chip and a "reference a request" button.
+function composeRow(id, thread) {
+  const input = h('textarea', { class: 'inp', id: 'tReply', rows: '2', placeholder: 'Reply…', style: 'resize:vertical' });
+  const send = h('button', { type: 'button', class: 'btn p', id: 'tSend', onclick: () => {
+    const text = input.value.trim(); const ref = S.msgRef || undefined;
+    if (!text && !ref) return;
+    S.msgRef = null;
+    bg({ op: 'chat', device: id, thread, text, ref }, null, () => {
+      const d = S.D.devices[id]; const t = (d.threads || []).find(x => x.id === thread);
+      if (t) { t.msgs = [...(t.msgs || []), { id: 'tmp' + Date.now(), who: 'admin', text, at: new Date().toISOString(), by: (ME && ME.name) || 'You', ...(ref ? { ref } : {}) }]; t.at = new Date().toISOString(); d.adminViewAt = new Date().toISOString(); }
+    });
+  } }, 'Send');
+  const attach = h('button', { type: 'button', class: 'btn s sm', onclick: () => attachRefMenu(id) }, icon('inbox', 16, 2), 'Reference a request');
+  return h('div', { class: 'field' }, h('div', { id: 'msgChip' }, chipInner()),
+    h('div', { style: 'margin:6px 0' }, attach),
+    h('div', { style: 'display:flex;gap:8px;align-items:flex-end' }, h('div', { style: 'flex:1' }, input), send));
+}
+function chipInner() {
+  if (!S.msgRef) return null;
+  return h('div', { class: 'rchip', style: 'max-width:100%' }, icon('inbox', 15, 2),
+    h('span', { class: 'rct' }, S.msgRef.subject || ('Request #' + S.msgRef.number)),
+    h('button', { type: 'button', class: 'rcx', onclick: () => { S.msgRef = null; refreshChip(); } }, 'Remove'));
+}
+function refreshChip() { const el = $('msgChip'); if (el) el.replaceChildren(...(chipInner() ? [chipInner()] : [])); }
+function reqPhoneId(iss) { const raw = field(iss.body, 'Phone') || ''; const m = raw.match(/\(([2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4})\)/i); return m ? m[1].toUpperCase() : null; }
+function attachRefMenu(id) {
+  const reqs = (S.requests || []).filter(iss => reqPhoneId(iss) === id);
+  const body = reqs.length ? reqs.slice(0, 30).map(iss => { const title = describe(marker(iss.body)).title;
+    return h('button', { type: 'button', class: 'btn s wide', style: 'margin-top:6px;justify-content:flex-start;text-align:left', onclick: () => { S.msgRef = { number: iss.number, subject: title }; const c = $('dlgCancel'); if (c) c.click(); refreshChip(); } }, title);
+  }) : [h('p', { class: 'hint', style: 'margin:0' }, 'No open requests from this phone right now.')];
+  uiDialog({ title: 'Reference a request', icon: 'inbox', text: 'Link one of this phone\'s open requests to your message.', body, ok: 'Done', cancel: null });
+}
+
+// Starting a new conversation: pick the phone, a subject, the first message, and an optional request reference.
+function newMsgScreen() {
+  const phones = Object.entries(S.D.devices || {}).map(([id, d]) => [id, d.name || id]).sort((a, b) => a[1].localeCompare(b[1]));
+  if (!phones.length) { S.sub = null; S.tab = 'messages'; return messagesScreen(); }
+  if (!S.newTo || !S.D.devices[S.newTo]) S.newTo = (S.sub && S.sub.id) || phones[0][0];
+  const toSel = h('select', { class: 'inp', onchange: e => { S.newTo = e.target.value; S.msgRef = null; refreshChip(); } },
+    phones.map(([id, nm]) => h('option', { value: id, selected: id === S.newTo ? 'selected' : null }, nm)));
+  const subj = h('input', { class: 'inp', id: 'nmSubj', placeholder: 'e.g. Bedtime rules' });
+  const msg = h('textarea', { class: 'inp', id: 'nmMsg', rows: '4', placeholder: 'Your message', style: 'resize:vertical' });
+  const send = h('button', { type: 'button', class: 'btn p wide', onclick: () => {
+    const id = S.newTo; const s = subj.value.trim(); const text = msg.value.trim(); const ref = S.msgRef || undefined;
+    if (!id) return say('Pick a phone.', true);
+    if (!s) return say('Type a subject.', true);
+    if (!text && !ref) return say('Type a message.', true);
+    S.msgRef = null; S.newTo = null; S.sub = null; S.tab = 'messages';
+    bg({ op: 'chat', device: id, subject: s, text, ref }, 'Message sent.');
+    render();
+  } }, 'Start the conversation');
+  return h('main', null,
+    backLink('Messages', () => { S.msgRef = null; S.newTo = null; S.sub = null; S.tab = 'messages'; render(); }),
+    screenTitle('New message', ''),
+    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'To'), toSel),
+    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Subject'), subj),
+    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Message'), msg),
+    h('div', { class: 'field' }, h('div', { id: 'msgChip' }, chipInner()),
+      h('button', { type: 'button', class: 'btn s sm', onclick: () => attachRefMenu(S.newTo) }, icon('inbox', 16, 2), 'Reference a request')),
+    send);
+}
+
+// A compact Messages section on a phone's own screen (full inbox lives in the Messages tab).
+// Admin app only: register this device's Firebase token (from the native bridge) so phone→admin messages wake it.
+function registerAdminPush() {
+  try {
+    if (!INAPP || !window.WLBAdmin || !WLBAdmin.fcmToken) return;
+    const token = WLBAdmin.fcmToken();
+    if (!token || token.length < 20) return;
+    let last = '', lastAt = 0;
+    try { last = localStorage.getItem('fcmToken') || ''; lastAt = Number(localStorage.getItem('fcmTokenAt') || 0); } catch {}
+    if (token === last && Date.now() - lastAt < 7 * 86400000) return;
+    command({ op: 'fcmtoken', token }).then(() => { try { localStorage.setItem('fcmToken', token); localStorage.setItem('fcmTokenAt', String(Date.now())); } catch {} })
+      .catch(e => console.log(`(carried on, fcmtoken) ${e && e.message}`));
+  } catch (e) { console.log(e); }
+}
+function phoneMessages(id) {
+  const ths = visibleThreads(id).slice().sort((a, b) => parseAt(b.at) - parseAt(a.at));
+  return h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Messages'),
+    ths.length ? h('div', { class: 'msglist' }, ...ths.map(t => threadRowView(id, t, false))) : h('p', { class: 'hint', style: 'margin:0' }, 'No messages yet.'),
+    msgManage() ? h('button', { type: 'button', class: 'btn s sm', style: 'margin-top:8px', onclick: () => { S.msgRef = null; open({ name: 'newmsg', id }); } }, icon('send', 16, 2), 'New message') : null,
+    h('p', { class: 'hint', style: 'margin:0' }, 'Also in the Messages tab. Shows on the phone under ⋮ → Messages.'));
+}
+
 // The Other browsers screen for one phone.
 function browsersScreen() {
   const id = S.sub.id, d = S.D.devices[id];
