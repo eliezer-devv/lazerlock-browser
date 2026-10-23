@@ -52,6 +52,12 @@
   .syncbtn:disabled { opacity: .6; cursor: default; }
   .syncbtn.spin svg { animation: wlspin .8s linear infinite; }
   @keyframes wlspin { to { transform: rotate(360deg); } }
+  .chat { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
+  .cbub { max-width: 80%; padding: 8px 12px; border-radius: 14px; }
+  .cbub.me { align-self: flex-end; background: var(--accent); color: #fff; }
+  .cbub.them { align-self: flex-start; background: var(--card); border: 1px solid var(--line); color: var(--ink); }
+  .cbub .ctext { white-space: pre-wrap; word-break: break-word; font-size: 14.5px; }
+  .cbub .cmeta { font-size: 11px; opacity: .75; margin-top: 2px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #2E8B57; }
   .dot.off { background: #B4492F; }
 
@@ -3936,6 +3942,7 @@ function phoneScreen() {
     phoneMediaAndSearch(d, M),
     phoneTimers(id),
     phoneBrowsers(id, d, M),
+    chatSection(id),
     h('div', { class: 'field' }, h('label', { for: 'pReq' }, 'When you approve its requests, change'), req),
     own ? [    h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Approval PIN'), pinSeg,
       h('p', { class: 'hint', style: 'margin:0' }, pinMode === 'own' ? 'This phone has its own PIN.' : pinMode === 'none' ? 'Requests from this phone can\'t be approved with a PIN.'
@@ -4394,6 +4401,36 @@ function phoneBrowsers(id, d, M) {
       h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, 'Block other browsers'),
         h('span', { class: 'dom' }, browsersSummary(id, d))),
       icon('chev', 16)));
+}
+// The two-way message thread with one phone (shows on the phone under ⋮ → Messages).
+function chatSection(id) {
+  const d = S.D.devices[id]; if (!d) return null;
+  const may = fullAdmin() || canDo('manage') || canDo('requests');
+  const when = at => { try { return new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return ''; } };
+  const msgs = (Array.isArray(d.chat) ? d.chat : []).slice().sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const thread = h('div', { class: 'chat', id: 'chatThread' }, msgs.length ? msgs.map(m =>
+    h('div', { class: 'cbub ' + (m.who === 'admin' ? 'me' : 'them') },
+      h('div', { class: 'ctext' }, m.text),
+      h('div', { class: 'cmeta' }, (m.who === 'admin' ? (m.by ? m.by + ' · ' : '') : (d.name || 'Phone') + ' · ') + when(m.at))))
+    : h('p', { class: 'hint', style: 'margin:0' }, 'No messages yet.'));
+  const input = h('textarea', { class: 'inp', id: 'chatInput', rows: '2', placeholder: 'Message this phone…', style: 'resize:vertical' });
+  const send = h('button', { type: 'button', class: 'btn p', id: 'chatSend', onclick: async e => {
+    const t = input.value.trim(); if (!t) return;
+    const btn = e.currentTarget; btn.disabled = true;
+    try {
+      const r = await command({ op: 'chat', device: id, text: t });
+      if (!r.ok) throw new Error(r.error || 'It wasn\'t sent.');
+      input.value = '';
+      // Show it straight away (the server has saved it; a refresh later brings the stored copy).
+      d.chat = [...(Array.isArray(d.chat) ? d.chat : []), { who: 'admin', text: t, at: new Date().toISOString(), by: (ME && ME.name) || 'You' }].slice(-50);
+      render();
+    } catch (err) { say(err.message, true); }
+    finally { btn.disabled = false; }
+  } }, 'Send');
+  setTimeout(() => { const el = $('chatThread'); if (el) el.scrollTop = el.scrollHeight; }, 0);
+  return h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Messages'), thread,
+    may ? h('div', { style: 'display:flex;gap:8px;align-items:flex-end;margin-top:8px' }, h('div', { style: 'flex:1' }, input), send) : null,
+    h('p', { class: 'hint', style: 'margin:0' }, 'A two-way thread with this phone. It shows on the phone under ⋮ → Messages.'));
 }
 // The Other browsers screen for one phone.
 function browsersScreen() {
