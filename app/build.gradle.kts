@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Push notifications (Firebase Cloud Messaging) are OPTIONAL. The google-services plugin only runs if you've added
+// google-services.json (from the Firebase console) — placed in app/ or in app/src/browser/ and app/src/admin/. Without
+// it the app still builds and works, just without instant push (it falls back to the background check). See FCM-SETUP.md.
+val hasGoogleServices = file("google-services.json").exists() ||
+    file("src/browser/google-services.json").exists() || file("src/admin/google-services.json").exists()
+if (hasGoogleServices) apply(plugin = "com.google.gms.google-services")
+
 // Each GitHub Actions build gets a higher number, which the in-app updater compares.
 val buildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 
@@ -85,4 +92,8 @@ dependencies {
     // Translating pages on the phone (Google ML Kit): the page's text never leaves the phone.
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
+    // Firebase Cloud Messaging for instant push. Inert unless google-services.json is present (see above); the app
+    // feature-detects Firebase at runtime (Fcm.available) and falls back to the background check when it isn't set up.
+    implementation(platform("com.google.firebase:firebase-bom:33.5.1"))
+    implementation("com.google.firebase:firebase-messaging")
 }
