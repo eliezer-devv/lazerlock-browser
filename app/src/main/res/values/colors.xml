@@ -1,16 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- LazerLock palette: electric-blue accent on deep blue-black, drawn from the logo. -->
-    <color name="bar">#0E1D33</color>          <!-- the top toolbar / status / nav (deep blue-black) -->
-    <color name="field">#1C2535</color>
-    <color name="ink">#E9EEF6</color>
-    <color name="muted">#9AA7B8</color>
+    <!-- LazerLock palette v2. The live toolbar/status colour is set at runtime from Ui.BAR (blue in light, dark in
+         dark); these values are the launch/fallback and the native theme accents. -->
+    <color name="bar">#111A2B</color>          <!-- launch window / status fallback (dark, matches the splash) -->
+    <color name="field">#1A2432</color>
+    <color name="ink">#EAF1FA</color>
+    <color name="muted">#93A2B8</color>
     <color name="bad">#E5604A</color>
-    <color name="update">#2E9BFF</color>        <!-- the "update available" banner -->
-    <color name="accent">#0B74E0</color>
-    <color name="text">#0E1726</color>
-    <color name="paper">#EEF2F8</color>
-    <color name="accent_dark">#2E9BFF</color>
-    <color name="text_dark">#E9EEF6</color>
-    <color name="splash_bg">#080B12</color>      <!-- native launch splash (icon on near-black, matching the logo) -->
+    <color name="update">#0E6FE0</color>        <!-- the "update available" banner -->
+    <color name="accent">#0E6FE0</color>
+    <color name="text">#0F1A2A</color>
+    <color name="paper">#F4F7FC</color>
+    <color name="accent_dark">#3B9EFF</color>
+    <color name="text_dark">#EAF1FA</color>
+    <color name="splash_bg">#080B12</color>      <!-- native launch splash (icon on near-black) -->
 </resources>
