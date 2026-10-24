@@ -12,9 +12,12 @@
         <item name="android:statusBarColor">@color/bar</item>
         <item name="android:navigationBarColor">@color/bar</item>
         <item name="android:windowBackground">@color/bar</item>
-        <!-- Native launch splash (Android 12+): the LazerLock icon on near-black. No custom animation. -->
-        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/splash_bg</item>
-        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@mipmap/ic_launcher</item>
+        <!-- Native launch splash (Android 12+): the animated LazerLock mark on brand navy, with the wordmark
+             branding image at the bottom. Older Android shows the static launcher icon. -->
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/lazerlock_navy</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/splash_icon_animated</item>
+        <item name="android:windowSplashScreenAnimationDuration" tools:targetApi="31">1000</item>
+        <item name="android:windowSplashScreenBrandingImage" tools:targetApi="31">@drawable/splash_branding</item>
     </style>
 
     <!-- Dark (⋮ → Appearance, or the phone's own setting): the same, on a dark base. -->
@@ -27,8 +30,10 @@
         <item name="android:statusBarColor">@color/bar</item>
         <item name="android:navigationBarColor">@color/bar</item>
         <item name="android:windowBackground">@color/bar</item>
-        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/splash_bg</item>
-        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@mipmap/ic_launcher</item>
+        <item name="android:windowSplashScreenBackground" tools:targetApi="31">@color/lazerlock_navy</item>
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/splash_icon_animated</item>
+        <item name="android:windowSplashScreenAnimationDuration" tools:targetApi="31">1000</item>
+        <item name="android:windowSplashScreenBrandingImage" tools:targetApi="31">@drawable/splash_branding</item>
     </style>
 
     <style name="ToolButton">
