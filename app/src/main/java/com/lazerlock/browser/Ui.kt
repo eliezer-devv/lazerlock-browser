@@ -93,9 +93,9 @@ object Ui {
             INK = c(0xFF0F1A2A); INK2 = c(0xFF33425A); MUTED = c(0xFF5B6B82); HINT = c(0xFF8B99AD)
             LINE = c(0xFFE4EAF2); LINE2 = c(0xFFEEF2F9); FIELD_LINE = c(0xFFCBD6E6)
             PAPER = c(0xFFF4F7FC); PAGE = c(0xFFF4F7FC); CARD = c(0xFFFFFFFF); SEG = c(0xFFE8EEF7)
-            ACCENT = c(0xFF0E6FE0); ACCENT_TEXT = c(0xFF0A58B8); SOFT = c(0xFFE6F0FD); OUTLINE = c(0xFFC7D6EC)
+            ACCENT = c(0xFF1A5CB8); ACCENT_TEXT = c(0xFF0A4C9E); SOFT = c(0xFFE6F0FD); OUTLINE = c(0xFFC7D6EC)
             AMBER_BG = c(0xFFFBEFD5); AMBER_INK = c(0xFF6B4700); RED_BG = c(0xFFF7E3DE); RED_INK = c(0xFF8E3322)
-            DANGER = c(0xFFC0392B); TRACK_OFF = c(0xFFBFC9D6); HANDLE = c(0xFFCDD6E2); BAR = c(0xFF0E6FE0); CHIP_OFF = c(0xFFE3EAF3)
+            DANGER = c(0xFFC0392B); TRACK_OFF = c(0xFFBFC9D6); HANDLE = c(0xFFCDD6E2); BAR = c(0xFF1A5CB8); CHIP_OFF = c(0xFFE3EAF3)
         } else {
             // LazerLock dark (v2): deep near-black with clearly lifted cards and a brighter accent that glows.
             INK = c(0xFFEAF1FA); INK2 = c(0xFFC4D0E0); MUTED = c(0xFF93A2B8); HINT = c(0xFF74859B)
