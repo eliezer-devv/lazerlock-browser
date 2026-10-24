@@ -641,7 +641,8 @@ class MainActivity : Activity() {
             displayZoomControls = false
             useWideViewPort = true                  // lets a desktop site lay out at desktop width
         }
-        if (phoneAgent.isEmpty() || web.settings.userAgentString.contains("Android")) phoneAgent = web.settings.userAgentString
+        if (phoneAgent.isEmpty() || web.settings.userAgentString.contains("Android")) phoneAgent = chromeUa(web.settings.userAgentString)
+        web.settings.userAgentString = phoneAgent        // introduce the browser as plain Chrome everywhere, not an embedded WebView (Google sign-in refuses "; wv")
         registerDesktopScripts()
         // Long-pressing a link or a picture: a menu (Android's browser engine shows none). Elsewhere, Android's own text
         // selection, with Copy, Share and Translate.
@@ -1046,6 +1047,15 @@ class MainActivity : Activity() {
     private fun desktopSites(): Set<String> = desktopPrefs.getStringSet("sites", emptySet()) ?: emptySet()
     private fun siteKeyOf(url: String?): String? = url?.let { Uri.parse(it).host }?.lowercase()?.removePrefix("www.")?.takeIf { it.isNotBlank() }
     private fun isDesktop(url: String?): Boolean = siteKeyOf(url)?.let { k -> desktopSites().any { k == it || k.endsWith(".$it") } } ?: false
+
+    /** A plain Chrome user-agent built from the WebView's own, dropping the "; wv", "Version/4.0" and device
+     *  "Build/…" markers that give away an embedded WebView. Sites that refuse embedded browsers — notably Google
+     *  sign-in — then treat the browser as ordinary Chrome and let the sign-in finish. */
+    private fun chromeUa(ua: String): String =
+        ua.replace(Regex("\\s*Build/[^;)]+"), "")        // the device build id (Chrome's UA carries none)
+            .replace("; wv)", ")").replace(" wv)", ")")  // the WebView marker
+            .replace("Version/4.0 ", "")                 // the WebView "Version/4.0" token
+            .replace(Regex("\\s{2,}"), " ").trim()
 
     /** How a desktop browser introduces itself (the phone's own, without "Android" and "Mobile"). */
     private fun desktopAgent(): String {
