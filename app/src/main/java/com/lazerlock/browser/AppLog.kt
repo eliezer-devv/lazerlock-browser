@@ -26,6 +26,10 @@ object AppLog {
         val engine = runCatching { androidx.webkit.WebViewCompat.getCurrentWebViewPackage(ctx)?.let { "${it.packageName} ${it.versionName}" } }.getOrNull()
         i("App", "Started: version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) on Android ${Build.VERSION.RELEASE} " +
             "(SDK ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}; browser engine: ${engine ?: "unknown"}")
+        // The WebView's user-agent. Some sites (notably Google sign-in) refuse an embedded WebView, which they
+        // recognise by the "; wv" marker in this string — logged once so a blank sign-in can be told apart from
+        // an ordinary blocked page.
+        runCatching { android.webkit.WebSettings.getDefaultUserAgent(ctx) }.getOrNull()?.let { i("App", "Browser user-agent: $it") }
     }
 
     fun i(area: String, text: String) = write("  ", area, text)
@@ -39,6 +43,22 @@ object AppLog {
 
     /** A site's name from an address (the log never keeps full addresses). */
     fun site(url: String?): String = url?.let { runCatching { android.net.Uri.parse(it).host }.getOrNull() }?.removePrefix("www.") ?: "(none)"
+
+    /** Like [site], but keeps the path and a redacted query — for diagnosing redirects and error pages (for
+     *  example a Google "disallowed_useragent" sign-in rejection). Query values are replaced with • except a few
+     *  safe diagnostic keys, so codes, tokens and search terms are never written. Used only for errors, redirects
+     *  and blocks, never for ordinary page opens. */
+    fun path(url: String?): String {
+        if (url == null) return "(none)"
+        return runCatching {
+            val u = android.net.Uri.parse(url)
+            val host = (u.host ?: return@runCatching site(url)).removePrefix("www.")
+            val safe = setOf("error", "error_description", "error_subtype", "error_code", "reason", "type", "prompt")
+            val q = u.queryParameterNames.takeIf { it.isNotEmpty() }
+                ?.joinToString("&") { k -> if (k in safe) "$k=${u.getQueryParameter(k)}" else "$k=•" }
+            host + u.path.orEmpty() + (if (q != null) "?$q" else "")
+        }.getOrNull() ?: site(url)
+    }
 
     @Synchronized private fun write(level: String, area: String, text: String) {
         val f = file ?: return

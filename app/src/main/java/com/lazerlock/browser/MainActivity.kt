@@ -653,10 +653,10 @@ class MainActivity : Activity() {
 
         web.webViewClient = object : WebViewClient() {
             override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: android.webkit.WebResourceError?) {
-                if (request?.isForMainFrame == true) AppLog.w("Page", "Couldn't open ${AppLog.site(request.url.toString())}: ${error?.description} (${error?.errorCode})")
+                if (request?.isForMainFrame == true) AppLog.w("Page", "Couldn't open ${AppLog.path(request.url.toString())}: ${error?.description} (${error?.errorCode})")
             }
             override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, response: WebResourceResponse?) {
-                if (request?.isForMainFrame == true) AppLog.w("Page", "${AppLog.site(request.url.toString())} answered ${response?.statusCode} ${response?.reasonPhrase}")
+                if (request?.isForMainFrame == true) AppLog.w("Page", "${AppLog.path(request.url.toString())} answered ${response?.statusCode} ${response?.reasonPhrase}")
             }
 
             // Links, form posts, JS navigation and server redirects.
@@ -718,6 +718,7 @@ class MainActivity : Activity() {
                     ExternalLinks.Kind.WEB -> Unit
                 }
                 if (request.isForMainFrame) {
+                    if (request.isRedirect) AppLog.i("Page", "↳ redirect: ${AppLog.path(url)}")   // the auth/redirect chain, so a dead-ended sign-in is visible
                     if (request.hasGesture() && !request.isRedirect) trail.clear() // a new tap: a new route
                     if (trail.lastOrNull() != url) trail += url
                     while (trail.size > 20) trail.removeAt(0)
@@ -748,7 +749,7 @@ class MainActivity : Activity() {
                         return true
                     }
                 }
-                if (request.isForMainFrame) showBlocked(url) else request.url.host?.let { noteBlockedFrame(it, url) }
+                if (request.isForMainFrame) { AppLog.w("Page", "Blocked (not on the list): ${AppLog.path(url)}"); showBlocked(url) } else request.url.host?.let { noteBlockedFrame(it, url) }
                 return true
             }
 
