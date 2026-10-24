@@ -4,6 +4,7 @@ import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.DownloadManager
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -160,6 +161,9 @@ class MainActivity : Activity() {
     private val siteChoices = mutableMapOf<String, Boolean>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Branded launch splash: on Android 12+ the platform plays it; core-splashscreen also shows it on
+        // Android 11 and older. Hands back to the app's theme (postSplashScreenTheme) right after.
+        installSplashScreen()
         // Light or dark: the phone's own setting, unless chosen in ⋮ → Appearance.
         Ui.applyTheme(this)
         setTheme(if (Ui.dark) R.style.AppThemeDark else R.style.AppTheme)

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 12+ : the animated LazerLock mark (1s) on brand navy, with the wordmark branding image at the
+         bottom. Same Theme.LazerLock.Starting name as the base file, so the launcher activities pick this up
+         automatically on API 31+. -->
+    <style name="Theme.LazerLock.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/lazerlock_navy</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_icon_animated</item>
+        <item name="windowSplashScreenAnimationDuration">1000</item>
+        <item name="android:windowSplashScreenBrandingImage">@drawable/splash_branding</item>
+        <item name="postSplashScreenTheme">@style/AppTheme</item>
+    </style>
+</resources>

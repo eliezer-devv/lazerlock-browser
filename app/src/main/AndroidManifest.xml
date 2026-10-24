@@ -70,6 +70,7 @@
 
         <activity
             android:name=".MainActivity"
+            android:theme="@style/Theme.LazerLock.Starting"
             android:exported="true"
             android:launchMode="singleTask"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode"
@@ -133,6 +134,7 @@
         <!-- The admin page inside the app: opened by tapping the name at the top 7 times. -->
         <activity
             android:name=".AdminActivity"
+            android:theme="@style/Theme.LazerLock.Starting"
             android:exported="false"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|uiMode"
             android:windowSoftInputMode="adjustResize" />

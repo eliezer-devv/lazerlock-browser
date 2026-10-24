@@ -3,6 +3,7 @@ package com.lazerlock.browser
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
@@ -111,6 +112,7 @@ class AdminActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()                       // branded launch splash, incl. Android 11 and older (core-splashscreen)
         Ui.applyTheme(this)                         // the same light or dark as the rest of the app
         setTheme(if (Ui.dark) R.style.AppThemeDark else R.style.AppTheme)
         super.onCreate(savedInstanceState)
