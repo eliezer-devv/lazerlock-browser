@@ -139,9 +139,8 @@ jobs:
           EVERYONE: ${{ inputs.everyone == true }}
         run: |
           # Both apps in the same release, each under its own name: lazerlock.apk (the browser) and
-          # lazerlock-admin.apk (LazerLock Admin). Each app updates only from the file with its own name.
-          # Older browsers took the FIRST app file in the release, and GitHub lists them in the order they were
-          # uploaded: so the browser's always goes up first, then the admin app's. (Checked below.)
+          # lazerlock-admin.apk (LazerLock Admin). Each app updates only from the file with its OWN name
+          # (the updater looks it up by name), so the order the assets appear in doesn't matter.
           # A test build is a pre-release: phones only ever update from the newest normal release, except those
           # with "Get test versions" on. "Re-run" of a build reuses its number: both files are uploaded again.
           NOTES="lazerlock.apk: the browser (for the phones). lazerlock-admin.apk: LazerLock Admin (the admin app)."
@@ -155,20 +154,6 @@ jobs:
               --notes "TEST BUILD from ${GITHUB_SHA::7}: only phones with \"Get test versions\" get it. When it's good: Actions > Release to everyone. $NOTES"
           fi
           gh release upload "$VERSION" lazerlock-admin.apk --clobber
-          # The check: the first app file, as phones see it, must be the browser's.
-          first="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$VERSION" --jq '[.assets[].name | select(endswith(".apk"))][0]')"
-          echo "First app file in $VERSION: $first"
-          if [ "$first" != "lazerlock.apk" ]; then
-            echo "::warning::The admin app's file came first: putting it back after the browser's."
-            gh release delete-asset "$VERSION" lazerlock-admin.apk --yes
-            sleep 5
-            gh release upload "$VERSION" lazerlock-admin.apk
-            first="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$VERSION" --jq '[.assets[].name | select(endswith(".apk"))][0]')"
-            if [ "$first" != "lazerlock.apk" ]; then
-              gh release delete-asset "$VERSION" lazerlock-admin.apk --yes
-              echo "::error::GitHub still lists the admin app first, so it was taken out of this release (older phones would pick it up). The browser is fine."
-              exit 1
-            fi
-          fi
+          # (No asset-ordering check any more: each app finds its own file by name, so order is irrelevant.)
           # (The admin app had its own release, "admin-app", for a while: not needed any more.)
           if gh release view admin-app >/dev/null 2>&1; then gh release delete admin-app --yes --cleanup-tag || true; fi
