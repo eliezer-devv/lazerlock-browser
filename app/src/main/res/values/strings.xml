@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">LazerLock Browser</string>
+    <!-- Short home-screen label (launchers cut off long names at ~10-12 chars). Used as the launcher activity's
+         label, so the icon reads "LazerLock" while "LazerLock Browser" stays everywhere else (Settings, Play Store).
+         The admin flavor overrides this with "LL Admin". -->
+    <string name="app_name_short">LazerLock</string>
     <string name="cover_description">Covers blocked apps, and the Settings screens where this protection could be switched off (App info, Accessibility and Device admin for this app). It reads the on-screen text in Settings only to recognise those screens, and never reads what you type. Whoever manages this phone sets it up and can remove it.</string>
     <string name="checking">Checking the list on GitHub</string>
 </resources>
