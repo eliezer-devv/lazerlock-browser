@@ -89,21 +89,21 @@ object Ui {
     private fun palette(night: Boolean) {
         dark = night
         if (!night) {
-            // LazerLock light: cool greys with an electric-blue accent (deeper on white so text stays legible).
-            INK = c(0xFF0E1726); INK2 = c(0xFF334155); MUTED = c(0xFF5A6B80); HINT = c(0xFF8A97A8)
-            LINE = c(0xFFE2E8F1); LINE2 = c(0xFFEDF1F7); FIELD_LINE = c(0xFFCFD9E6)
-            PAPER = c(0xFFEEF2F8); PAGE = c(0xFFEEF2F8); CARD = c(0xFFFFFFFF); SEG = c(0xFFE6ECF4)
-            ACCENT = c(0xFF0B74E0); ACCENT_TEXT = c(0xFF0A62BE); SOFT = c(0xFFE3EEFC); OUTLINE = c(0xFFC9D8EC)
+            // LazerLock light (v2): cool whites, blue accent, and a BLUE top bar (same family as the accent).
+            INK = c(0xFF0F1A2A); INK2 = c(0xFF33425A); MUTED = c(0xFF5B6B82); HINT = c(0xFF8B99AD)
+            LINE = c(0xFFE4EAF2); LINE2 = c(0xFFEEF2F9); FIELD_LINE = c(0xFFCBD6E6)
+            PAPER = c(0xFFF4F7FC); PAGE = c(0xFFF4F7FC); CARD = c(0xFFFFFFFF); SEG = c(0xFFE8EEF7)
+            ACCENT = c(0xFF0E6FE0); ACCENT_TEXT = c(0xFF0A58B8); SOFT = c(0xFFE6F0FD); OUTLINE = c(0xFFC7D6EC)
             AMBER_BG = c(0xFFFBEFD5); AMBER_INK = c(0xFF6B4700); RED_BG = c(0xFFF7E3DE); RED_INK = c(0xFF8E3322)
-            DANGER = c(0xFFC0392B); TRACK_OFF = c(0xFFBFC7D2); HANDLE = c(0xFFCDD4DE); BAR = c(0xFF0E1D33); CHIP_OFF = c(0xFFE1E7F0)
+            DANGER = c(0xFFC0392B); TRACK_OFF = c(0xFFBFC9D6); HANDLE = c(0xFFCDD6E2); BAR = c(0xFF0E6FE0); CHIP_OFF = c(0xFFE3EAF3)
         } else {
-            // LazerLock dark: the signature look — electric blue glowing on deep blue-black.
-            INK = c(0xFFE9EEF6); INK2 = c(0xFFC6D2E0); MUTED = c(0xFF94A3B5); HINT = c(0xFF76859A)
-            LINE = c(0xFF26303F); LINE2 = c(0xFF1F2937); FIELD_LINE = c(0xFF2A3850)
-            PAPER = c(0xFF0F1826); PAGE = c(0xFF080B12); CARD = c(0xFF141A24); SEG = c(0xFF1C2535)
-            ACCENT = c(0xFF2E9BFF); ACCENT_TEXT = c(0xFF7FC0FF); SOFT = c(0xFF16263A); OUTLINE = c(0xFF30405A)
+            // LazerLock dark (v2): deep near-black with clearly lifted cards and a brighter accent that glows.
+            INK = c(0xFFEAF1FA); INK2 = c(0xFFC4D0E0); MUTED = c(0xFF93A2B8); HINT = c(0xFF74859B)
+            LINE = c(0xFF232D3D); LINE2 = c(0xFF1A2432); FIELD_LINE = c(0xFF2B3747)
+            PAPER = c(0xFF0E1524); PAGE = c(0xFF0A0F1A); CARD = c(0xFF141B28); SEG = c(0xFF1A2432)
+            ACCENT = c(0xFF3B9EFF); ACCENT_TEXT = c(0xFF8CC4FF); SOFT = c(0xFF15263B); OUTLINE = c(0xFF2E3B4E)
             AMBER_BG = c(0xFF3A2E18); AMBER_INK = c(0xFFF5D08A); RED_BG = c(0xFF3A241F); RED_INK = c(0xFFF7B4A7)
-            DANGER = c(0xFFE5604A); TRACK_OFF = c(0xFF46566B); HANDLE = c(0xFF46566B); BAR = c(0xFF0B1626); CHIP_OFF = c(0xFF2A3648)
+            DANGER = c(0xFFE5604A); TRACK_OFF = c(0xFF46566B); HANDLE = c(0xFF46566B); BAR = c(0xFF111A2B); CHIP_OFF = c(0xFF243041)
         }
     }
 
