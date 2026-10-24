@@ -89,21 +89,21 @@ object Ui {
     private fun palette(night: Boolean) {
         dark = night
         if (!night) {
-            // LazerLock light (v2): cool whites, blue accent, and a BLUE top bar (same family as the accent).
-            INK = c(0xFF0F1A2A); INK2 = c(0xFF33425A); MUTED = c(0xFF5B6B82); HINT = c(0xFF8B99AD)
-            LINE = c(0xFFE4EAF2); LINE2 = c(0xFFEEF2F9); FIELD_LINE = c(0xFFCBD6E6)
-            PAPER = c(0xFFF4F7FC); PAGE = c(0xFFF4F7FC); CARD = c(0xFFFFFFFF); SEG = c(0xFFE8EEF7)
-            ACCENT = c(0xFF1A5CB8); ACCENT_TEXT = c(0xFF0A4C9E); SOFT = c(0xFFE6F0FD); OUTLINE = c(0xFFC7D6EC)
+            // Original theme (light): warm off-white paper, deep teal-green accent, and a teal top bar.
+            INK = c(0xFF1C2B2D); INK2 = c(0xFF3E4B49); MUTED = c(0xFF5B6B69); HINT = c(0xFF8A9491)
+            LINE = c(0xFFE7E3DB); LINE2 = c(0xFFEFECE5); FIELD_LINE = c(0xFFD5D1C8)
+            PAPER = c(0xFFF5F3EE); PAGE = c(0xFFF5F3EE); CARD = c(0xFFFFFFFF); SEG = c(0xFFEAE7E0)
+            ACCENT = c(0xFF1F5F55); ACCENT_TEXT = c(0xFF1F5F55); SOFT = c(0xFFE1EEEA); OUTLINE = c(0xFFCFDDD8)
             AMBER_BG = c(0xFFFBEFD5); AMBER_INK = c(0xFF6B4700); RED_BG = c(0xFFF7E3DE); RED_INK = c(0xFF8E3322)
-            DANGER = c(0xFFC0392B); TRACK_OFF = c(0xFFBFC9D6); HANDLE = c(0xFFCDD6E2); BAR = c(0xFF1A5CB8); CHIP_OFF = c(0xFFE3EAF3)
+            DANGER = c(0xFFA33A2A); TRACK_OFF = c(0xFFBFBAB0); HANDLE = c(0xFFCFCBC2); BAR = c(0xFF1F3A3D); CHIP_OFF = c(0xFFE3DFD6)
         } else {
-            // LazerLock dark (v2): deep near-black with clearly lifted cards and a brighter accent that glows.
-            INK = c(0xFFEAF1FA); INK2 = c(0xFFC4D0E0); MUTED = c(0xFF93A2B8); HINT = c(0xFF74859B)
-            LINE = c(0xFF232D3D); LINE2 = c(0xFF1A2432); FIELD_LINE = c(0xFF2B3747)
-            PAPER = c(0xFF0E1524); PAGE = c(0xFF0A0F1A); CARD = c(0xFF141B28); SEG = c(0xFF1A2432)
-            ACCENT = c(0xFF3B9EFF); ACCENT_TEXT = c(0xFF8CC4FF); SOFT = c(0xFF15263B); OUTLINE = c(0xFF2E3B4E)
-            AMBER_BG = c(0xFF3A2E18); AMBER_INK = c(0xFFF5D08A); RED_BG = c(0xFF3A241F); RED_INK = c(0xFFF7B4A7)
-            DANGER = c(0xFFE5604A); TRACK_OFF = c(0xFF46566B); HANDLE = c(0xFF46566B); BAR = c(0xFF111A2B); CHIP_OFF = c(0xFF243041)
+            // Original theme (dark): deep teal-grey surfaces, lifted cards, and a soft green accent.
+            INK = c(0xFFECF2F0); INK2 = c(0xFFD2DDDA); MUTED = c(0xFFAEBFBB); HINT = c(0xFF8EA19D)
+            LINE = c(0xFF3D4E4F); LINE2 = c(0xFF364748); FIELD_LINE = c(0xFF4A5D5E)
+            PAPER = c(0xFF273536); PAGE = c(0xFF1F2B2C); CARD = c(0xFF304041); SEG = c(0xFF364748)
+            ACCENT = c(0xFF3D8F7E); ACCENT_TEXT = c(0xFF9BE3C2); SOFT = c(0xFF2C4A44); OUTLINE = c(0xFF4A5D5E)
+            AMBER_BG = c(0xFF4A3B20); AMBER_INK = c(0xFFF5D08A); RED_BG = c(0xFF4A2C28); RED_INK = c(0xFFF7B4A7)
+            DANGER = c(0xFFC4553F); TRACK_OFF = c(0xFF56696A); HANDLE = c(0xFF56696A); BAR = c(0xFF1A3134); CHIP_OFF = c(0xFF425455)
         }
     }
 
