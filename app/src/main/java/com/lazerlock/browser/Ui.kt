@@ -606,6 +606,12 @@ object Ui {
 
         fun show(): AppDialog {
             if (activity.isFinishing) return this
+            // More than two buttons never fit in one row (the last gets cut off), so stack them full-width instead.
+            if (buttons.childCount > 2) {
+                buttons.orientation = LinearLayout.VERTICAL
+                for (i in 0 until buttons.childCount) buttons.getChildAt(i).layoutParams =
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(ctx, 50)).apply { if (i > 0) topMargin = Ui.dp(ctx, 10) }
+            }
             dialog.setOnDismissListener {
                 if (showing === this) showing = null
                 dismissAction?.invoke()
