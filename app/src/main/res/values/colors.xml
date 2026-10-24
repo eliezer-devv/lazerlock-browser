@@ -7,8 +7,8 @@
     <color name="ink">#EAF1FA</color>
     <color name="muted">#93A2B8</color>
     <color name="bad">#E5604A</color>
-    <color name="update">#0E6FE0</color>        <!-- the "update available" banner -->
-    <color name="accent">#0E6FE0</color>
+    <color name="update">#1A5CB8</color>        <!-- the "update available" banner -->
+    <color name="accent">#1A5CB8</color>
     <color name="text">#0F1A2A</color>
     <color name="paper">#F4F7FC</color>
     <color name="accent_dark">#3B9EFF</color>
