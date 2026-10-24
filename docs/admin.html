@@ -46,7 +46,7 @@
   body.unsaved #app.sub { padding-bottom: 100px; }
   .top { display: flex; align-items: center; justify-content: space-between; padding: calc(16px + env(safe-area-inset-top, 0px)) 20px 4px; }
   .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; }
-  .brand .mark { width: 26px; height: 26px; border-radius: 8px; background: var(--accent); color: #fff; display: grid; place-items: center; }
+  .brand .mark { width: 28px; height: 28px; border-radius: 8px; object-fit: contain; }
   .conn { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); background: none; border: 0; padding: 6px; }
   .syncbtn { display: inline-flex; align-items: center; justify-content: center; color: var(--accent-text); background: none; border: 0; padding: 6px; cursor: pointer; border-radius: 10px; }
   .syncbtn:disabled { opacity: .6; cursor: default; }
@@ -475,7 +475,7 @@
 <body>
 <div id="app">
   <header class="top">
-    <div class="brand"><span class="mark" id="markIcon"></span>LazerLock</div>
+    <div class="brand"><img class="mark" id="markIcon" src="icon.png" alt="">LazerLock</div>
     <button type="button" class="syncbtn" id="syncTop" hidden aria-label="Sync now" title="Sync now"></button>
     <span style="display:flex;align-items:center;gap:4px">
       <button type="button" class="conn" id="connBtn" hidden><span class="dot" id="connDot"></span><span id="connText">Connected</span></button>
@@ -1743,7 +1743,6 @@ function renderTabs() {
   $('tabs').replaceChildren(...tabs.map(([id, label, ic, badge]) => h('button', { type: 'button', 'aria-current': S.tab === id ? 'page' : null, onclick: () => go(id) },
     h('span', { class: 'pill' }, icon(ic, 22), badge ? h('span', { class: 'badge', 'aria-label': `${badge} waiting` }, badge) : null), label)));
 }
-$('markIcon').append(icon('check', 16, 2.4));
 $('syncTop').append(icon('sync', 20));
 $('syncTop').onclick = () => syncNow($('syncTop'));
 $('connBtn').onclick = () => go('settings');
