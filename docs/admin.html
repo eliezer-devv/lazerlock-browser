@@ -20,11 +20,11 @@
 <style>
   :root {
     color-scheme: light;
-    --bg: #EEF2F8; --card: #FFFFFF; --ink: #0E1726; --ink2: #334155; --muted: #5A6B80; --faint: #8A97A8;
-    --line: #E2E8F1; --line2: #EDF1F7; --field: #CFD9E6;
-    --accent: #0B74E0; --accent-dark: #0A5BB0; --accent-soft: #E3EEFC; --mint: #2E9BFF;
+    --bg: #F4F7FC; --card: #FFFFFF; --ink: #0F1A2A; --ink2: #33425A; --muted: #5B6B82; --faint: #8B99AD;
+    --line: #E4EAF2; --line2: #EEF2F9; --field: #CBD6E6;
+    --accent: #0E6FE0; --accent-dark: #0A58B8; --accent-soft: #E6F0FD; --mint: #1B86FF;
     --amber: #FBEFD5; --amber-line: #EFD9A6; --amber-ink: #5C3D00;
-    --red: #C0392B; --red-soft: #F7E3DE; --chipoff: #E1E7F0; --danger: #C0392B;
+    --red: #C0392B; --red-soft: #F7E3DE; --chipoff: #E3EAF3; --danger: #C0392B;
     --display: 'Bricolage Grotesque', Figtree, system-ui, sans-serif;
     --body: Figtree, system-ui, -apple-system, 'Segoe UI', sans-serif;
     --mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
@@ -190,8 +190,8 @@
   .fromto { display: flex; align-items: center; gap: 8px; min-height: 46px; border-top: 1px solid var(--line2); font-size: 14px; }
   .fromto:first-child { border-top: 0; }
   .fromto b { flex: 1; } .fromto .was { color: var(--muted); } .fromto .now { font-weight: 700; }
-  :root[data-theme="dark"] .mtag { background: #26303F; }
-  :root[data-theme="dark"] .explain { background: #15243A; color: #CFE0F2; }
+  :root[data-theme="dark"] .mtag { background: #1A2432; }
+  :root[data-theme="dark"] .explain { background: #14263F; color: #CFE0F2; }
   .title h1 { overflow-wrap: anywhere; }         /* a long address in a title wraps instead of widening the page */
   .kc { flex: 1 1 4.5rem; min-width: 0; min-height: 42px; border-radius: 11px; border: 1px solid var(--line); background: var(--card); color: var(--ink2); font-weight: 700; font-size: 14px; }
   .kc[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
@@ -401,10 +401,10 @@
 
   /* ---------- Dark ----------
      Inside the app: the app's choice (?theme=dark). On the web: the device's own setting. */
-  :root[data-theme="dark"] { --bg: #0F1826; --card: #141A24; --ink: #E9EEF6; --ink2: #C6D2E0; --muted: #94A3B5; --faint: #76859A;
-    --line: #26303F; --line2: #1F2937; --field: #2A3850; --accent: #2E9BFF; --accent-dark: #1E7BE0; --accent-soft: #16263A;
-    --mint: #7FC0FF; --amber: #3A2E18; --amber-line: #6A5530; --amber-ink: #F5D08A; --red: #F7B4A7; --red-soft: #3A241F;
-    --chipoff: #2A3648; --danger: #E5604A;
+  :root[data-theme="dark"] { --bg: #0A0F1A; --card: #141B28; --ink: #EAF1FA; --ink2: #C4D0E0; --muted: #93A2B8; --faint: #74859B;
+    --line: #232D3D; --line2: #1A2432; --field: #2B3747; --accent: #3B9EFF; --accent-dark: #2E86EC; --accent-soft: #15263B;
+    --mint: #8CC4FF; --amber: #3A2E18; --amber-line: #6A5530; --amber-ink: #F5D08A; --red: #F7B4A7; --red-soft: #3A241F;
+    --chipoff: #243041; --danger: #E5604A;
     color-scheme: dark; }
   :root[data-theme="dark"] a, :root[data-theme="dark"] .back, :root[data-theme="dark"] .done, :root[data-theme="dark"] details.more > summary, :root[data-theme="dark"] .chip.teal, :root[data-theme="dark"] .av, :root[data-theme="dark"] .pick[aria-pressed="true"],
   :root[data-theme="dark"] #tabs button[aria-current="page"] { color: var(--mint); }
@@ -415,8 +415,8 @@
   :root[data-theme="dark"] .pick[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--mint); }
   :root[data-theme="dark"] .lc.add, :root[data-theme="dark"] .lc.addtxt { background: transparent; border-color: #56696A; }
   :root[data-theme="dark"] .listrow .lc.add { background: color-mix(in srgb, var(--bg) 60%, transparent); }
-  :root[data-theme="dark"] .seg, :root[data-theme="dark"] .chip, :root[data-theme="dark"] .av.grey { background: #26303F; }
-  :root[data-theme="dark"] .seg button[aria-pressed="true"] { background: #3A4A5E; color: var(--ink); }
+  :root[data-theme="dark"] .seg, :root[data-theme="dark"] .chip, :root[data-theme="dark"] .av.grey { background: #1A2432; }
+  :root[data-theme="dark"] .seg button[aria-pressed="true"] { background: #2B3747; color: var(--ink); }
   :root[data-theme="dark"] .chip.amber { color: var(--amber-ink); }
   :root[data-theme="dark"] .chip.red { color: var(--red); }
   :root[data-theme="dark"] .sw { background: #364748; }
