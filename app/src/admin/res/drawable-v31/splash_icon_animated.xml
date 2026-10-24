@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt">
+  <aapt:attr name="android:drawable">
+    <vector android:width="288dp" android:height="288dp" android:viewportWidth="108" android:viewportHeight="108">
+  <group android:name="mark" android:translateX="2" android:translateY="-2.2">
+    <group android:name="behind">
+      <clip-path android:name="knockout" android:pathData="M0,0 L0,108 L108,108 L108,0 Z M64.85 63.95 A0.375 0.375 0 0 1 65.015 63.639 L65.015 63.525 A0.485 0.485 0 0 1 65.985 63.525 L65.985 63.639 A0.375 0.375 0 0 1 66.15 63.95 L66.15 64.3 A0.375 0.375 0 0 1 65.775 64.675 L65.225 64.675 A0.375 0.375 0 0 1 64.85 64.3Z"/>
+      <group android:name="ring_back_group" android:rotation="-18" android:pivotX="52" android:pivotY="53"><path android:name="ring_back" android:trimPathEnd="0" android:pathData="M81 53A29 8.5 0 0 0 23 53" android:strokeWidth="2.2" android:strokeAlpha="0.5" android:strokeLineCap="round" android:fillColor="#00000000"><aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="23" android:startY="0" android:endX="81" android:endY="0"><item android:offset="0" android:color="#FF46E8FF"/><item android:offset="1" android:color="#FF3B5BFF"/></gradient></aapt:attr></path></group>
+      <path android:name="globe" android:trimPathEnd="0" android:pathData="M35 53A17 17 0 1 1 69 53A17 17 0 1 1 35 53ZM45 53A7 17 0 1 1 59 53A7 17 0 1 1 45 53ZM35 53H69" android:strokeColor="#FF121A3A" android:strokeWidth="2.2" android:fillColor="#00000000"/>
+      <group android:name="ring_front_group" android:rotation="-18" android:pivotX="52" android:pivotY="53"><path android:name="ring_gap" android:trimPathEnd="0" android:pathData="M23 53A29 8.5 0 0 0 81 53" android:strokeColor="#FFF0F3FC" android:strokeWidth="5" android:fillColor="#00000000"/><path android:name="ring_front" android:trimPathEnd="0" android:pathData="M23 53A29 8.5 0 0 0 81 53" android:strokeWidth="2.2" android:strokeLineCap="round" android:fillColor="#00000000"><aapt:attr name="android:strokeColor"><gradient android:type="linear" android:startX="23" android:startY="0" android:endX="81" android:endY="0"><item android:offset="0" android:color="#FF46E8FF"/><item android:offset="1" android:color="#FF3B5BFF"/></gradient></aapt:attr></path></group>
+    </group>
+    <group android:name="lock" android:scaleX="0" android:scaleY="0" android:pivotX="65.5" android:pivotY="64">
+      <path android:name="shackle" android:pathData="M60 58v-3.5a5.5 5.5 0 0 1 11 0V58" android:strokeColor="#FF121A3A" android:strokeWidth="3.4" android:fillColor="#00000000"/>
+      <path android:name="body" android:pathData="M60 57.4H71A5 5 0 0 1 76 62.4V69.4A5 5 0 0 1 71 74.4H60A5 5 0 0 1 55 69.4V62.4A5 5 0 0 1 60 57.4Z M65.5 62.7 L66.339 61.683 L67.146 61.927 L67.278 63.239 L67.763 63.637 L69.075 63.511 L69.473 64.254 L68.639 65.276 L68.7 65.9 L69.717 66.739 L69.473 67.546 L68.161 67.678 L67.763 68.163 L67.889 69.475 L67.146 69.873 L66.124 69.039 L65.5 69.1 L64.661 70.117 L63.854 69.873 L63.722 68.561 L63.237 68.163 L61.925 68.289 L61.527 67.546 L62.361 66.524 L62.3 65.9 L61.283 65.061 L61.527 64.254 L62.839 64.122 L63.237 63.637 L63.111 62.325 L63.854 61.927 L64.876 62.761ZM64.15 65.9A1.35 1.35 0 1 1 66.85 65.9A1.35 1.35 0 1 1 64.15 65.9Z" android:fillColor="#FF121A3A" android:fillType="evenOdd"/>
+    </group>
+    <group android:name="comet" android:scaleX="0" android:scaleY="0" android:pivotX="28.4" android:pivotY="64.5"><path android:pathData="M25 64.5A3.4 3.4 0 1 1 31.8 64.5A3.4 3.4 0 1 1 25 64.5Z" android:fillColor="#3346E8FF"/><path android:pathData="M25.9 64.5A2.5 2.5 0 1 1 30.9 64.5A2.5 2.5 0 1 1 25.9 64.5Z" android:fillColor="#6646E8FF"/><path android:name="comet_core" android:pathData="M26.8 64.5A1.6 1.6 0 1 1 30 64.5A1.6 1.6 0 1 1 26.8 64.5Z" android:fillColor="#FFFFFFFF"/></group>
+  </group>
+</vector>
+  </aapt:attr>
+  <target android:name="globe">
+    <aapt:attr name="android:animation">
+      <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="520" android:startOffset="0" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+    </aapt:attr>
+  </target>
+  <target android:name="ring_back">
+    <aapt:attr name="android:animation">
+      <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="320" android:startOffset="120" android:interpolator="@android:interpolator/linear"/>
+    </aapt:attr>
+  </target>
+  <target android:name="ring_front">
+    <aapt:attr name="android:animation">
+      <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="320" android:startOffset="440" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+    </aapt:attr>
+  </target>
+  <target android:name="ring_gap">
+    <aapt:attr name="android:animation">
+      <objectAnimator android:propertyName="trimPathEnd" android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="320" android:startOffset="440" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+    </aapt:attr>
+  </target>
+  <target android:name="lock">
+    <aapt:attr name="android:animation">
+      <set><objectAnimator android:propertyName="scaleX" android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="420" android:startOffset="330" android:interpolator="@android:interpolator/overshoot"/>
+<objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="420" android:startOffset="330" android:interpolator="@android:interpolator/overshoot"/></set>
+    </aapt:attr>
+  </target>
+  <target android:name="knockout">
+    <aapt:attr name="android:animation">
+      <objectAnimator android:propertyName="pathData" android:valueFrom="M0,0 L0,108 L108,108 L108,0 Z M64.85 63.95 A0.375 0.375 0 0 1 65.015 63.639 L65.015 63.525 A0.485 0.485 0 0 1 65.985 63.525 L65.985 63.639 A0.375 0.375 0 0 1 66.15 63.95 L66.15 64.3 A0.375 0.375 0 0 1 65.775 64.675 L65.225 64.675 A0.375 0.375 0 0 1 64.85 64.3Z" android:valueTo="M0,0 L0,108 L108,108 L108,0 Z M52.5 63A7.5 7.5 0 0 1 55.8 56.79L55.8 54.5A9.7 9.7 0 0 1 75.2 54.5L75.2 56.79A7.5 7.5 0 0 1 78.5 63L78.5 70A7.5 7.5 0 0 1 71 77.5L60 77.5A7.5 7.5 0 0 1 52.5 70Z" android:valueType="pathType" android:duration="300" android:startOffset="330" android:interpolator="@android:interpolator/fast_out_slow_in"/>
+    </aapt:attr>
+  </target>
+  <target android:name="comet">
+    <aapt:attr name="android:animation">
+      <set><objectAnimator android:propertyName="scaleX" android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="260" android:startOffset="700" android:interpolator="@android:interpolator/overshoot"/>
+<objectAnimator android:propertyName="scaleY" android:valueFrom="0" android:valueTo="1" android:valueType="floatType" android:duration="260" android:startOffset="700" android:interpolator="@android:interpolator/overshoot"/></set>
+    </aapt:attr>
+  </target>
+</animated-vector>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Admin flavor only. The launch splash reads its background from @color/lazerlock_navy (set in the shared
+         themes). The admin brand uses a light splash (#F0F3FC) instead of the browser's navy, so we override just
+         that colour here — this file exists only in the admin flavor, so the browser keeps its navy splash.
+         The admin app's top bar still comes from @color/bar / Ui.BAR, so only the splash background changes. -->
+    <color name="lazerlock_navy">#FFF0F3FC</color>
+</resources>
