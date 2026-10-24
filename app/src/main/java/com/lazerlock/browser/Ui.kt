@@ -89,21 +89,21 @@ object Ui {
     private fun palette(night: Boolean) {
         dark = night
         if (!night) {
-            // Original theme (light): warm off-white paper, deep teal-green accent, and a teal top bar.
-            INK = c(0xFF1C2B2D); INK2 = c(0xFF3E4B49); MUTED = c(0xFF5B6B69); HINT = c(0xFF8A9491)
-            LINE = c(0xFFE7E3DB); LINE2 = c(0xFFEFECE5); FIELD_LINE = c(0xFFD5D1C8)
-            PAPER = c(0xFFF5F3EE); PAGE = c(0xFFF5F3EE); CARD = c(0xFFFFFFFF); SEG = c(0xFFEAE7E0)
-            ACCENT = c(0xFF1F5F55); ACCENT_TEXT = c(0xFF1F5F55); SOFT = c(0xFFE1EEEA); OUTLINE = c(0xFFCFDDD8)
+            // Laser (light): cool blue-white paper, electric laser-blue accent, brand navy top bar.
+            INK = c(0xFF121A3A); INK2 = c(0xFF35406A); MUTED = c(0xFF5B6680); HINT = c(0xFF8A93AD)
+            LINE = c(0xFFE3E8F4); LINE2 = c(0xFFEEF1F9); FIELD_LINE = c(0xFFCBD4E8)
+            PAPER = c(0xFFF4F7FD); PAGE = c(0xFFF4F7FD); CARD = c(0xFFFFFFFF); SEG = c(0xFFE8EDF7)
+            ACCENT = c(0xFF3B5BFF); ACCENT_TEXT = c(0xFF2A3FD0); SOFT = c(0xFFE7ECFF); OUTLINE = c(0xFFC6D0F7)
             AMBER_BG = c(0xFFFBEFD5); AMBER_INK = c(0xFF6B4700); RED_BG = c(0xFFF7E3DE); RED_INK = c(0xFF8E3322)
-            DANGER = c(0xFFA33A2A); TRACK_OFF = c(0xFFBFBAB0); HANDLE = c(0xFFCFCBC2); BAR = c(0xFF1F3A3D); CHIP_OFF = c(0xFFE3DFD6)
+            DANGER = c(0xFFC0392B); TRACK_OFF = c(0xFFC2CADD); HANDLE = c(0xFFCFD6E6); BAR = c(0xFF0A1026); CHIP_OFF = c(0xFFE6EAF4)
         } else {
-            // Original theme (dark): deep teal-grey surfaces, lifted cards, and a soft green accent.
-            INK = c(0xFFECF2F0); INK2 = c(0xFFD2DDDA); MUTED = c(0xFFAEBFBB); HINT = c(0xFF8EA19D)
-            LINE = c(0xFF3D4E4F); LINE2 = c(0xFF364748); FIELD_LINE = c(0xFF4A5D5E)
-            PAPER = c(0xFF273536); PAGE = c(0xFF1F2B2C); CARD = c(0xFF304041); SEG = c(0xFF364748)
-            ACCENT = c(0xFF3D8F7E); ACCENT_TEXT = c(0xFF9BE3C2); SOFT = c(0xFF2C4A44); OUTLINE = c(0xFF4A5D5E)
-            AMBER_BG = c(0xFF4A3B20); AMBER_INK = c(0xFFF5D08A); RED_BG = c(0xFF4A2C28); RED_INK = c(0xFFF7B4A7)
-            DANGER = c(0xFFC4553F); TRACK_OFF = c(0xFF56696A); HANDLE = c(0xFF56696A); BAR = c(0xFF1A3134); CHIP_OFF = c(0xFF425455)
+            // Laser (dark): deep navy surfaces, lifted cards, and a brighter laser-blue accent that glows.
+            INK = c(0xFFEAF0FB); INK2 = c(0xFFC4CFE4); MUTED = c(0xFF93A0BC); HINT = c(0xFF727F9B)
+            LINE = c(0xFF27304A); LINE2 = c(0xFF1E2740); FIELD_LINE = c(0xFF2E3A56)
+            PAPER = c(0xFF0E1526); PAGE = c(0xFF0A0F1E); CARD = c(0xFF151C30); SEG = c(0xFF1A2238)
+            ACCENT = c(0xFF4E7BFF); ACCENT_TEXT = c(0xFFA9C3FF); SOFT = c(0xFF1A2440); OUTLINE = c(0xFF2E3B5E)
+            AMBER_BG = c(0xFF3A2E18); AMBER_INK = c(0xFFF5D08A); RED_BG = c(0xFF3A241F); RED_INK = c(0xFFF7B4A7)
+            DANGER = c(0xFFE5604A); TRACK_OFF = c(0xFF44506B); HANDLE = c(0xFF44506B); BAR = c(0xFF0A1026); CHIP_OFF = c(0xFF222C44)
         }
     }
 

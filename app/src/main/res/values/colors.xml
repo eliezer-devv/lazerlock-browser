@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Original theme (teal / green). The live toolbar/status colour is set at runtime from Ui.BAR; these values
-         are the launch/fallback and the native theme accents. -->
-    <color name="bar">#1F3A3D</color>           <!-- launch window / status fallback (teal, matches the splash) -->
-    <color name="field">#2B4C50</color>
-    <color name="ink">#E8F1EF</color>
-    <color name="muted">#9CB8B4</color>
+    <!-- Laser theme (brand navy + laser blue). The live toolbar/status colour is set at runtime from Ui.BAR;
+         these values are the launch/fallback and the native theme accents. -->
+    <color name="bar">#0A1026</color>           <!-- launch window / status fallback (brand navy) -->
+    <color name="field">#1A2238</color>
+    <color name="ink">#EAF0FB</color>
+    <color name="muted">#93A0BC</color>
     <color name="bad">#F07A6A</color>
-    <color name="update">#7FD1A8</color>         <!-- the "update available" banner -->
-    <color name="accent">#1F5F55</color>
-    <color name="text">#1C2B2D</color>
-    <color name="paper">#F5F3EE</color>
-    <color name="accent_dark">#7FD1A8</color>
-    <color name="text_dark">#E6EEEC</color>
-    <color name="splash_bg">#1F3A3D</color>      <!-- native launch splash (icon on the original teal) -->
+    <color name="update">#3B5BFF</color>         <!-- the "update available" banner -->
+    <color name="accent">#3B5BFF</color>
+    <color name="text">#121A3A</color>
+    <color name="paper">#F4F7FD</color>
+    <color name="accent_dark">#5B8CFF</color>
+    <color name="text_dark">#EAF0FB</color>
+    <color name="splash_bg">#0A1026</color>      <!-- (now also the brand navy; the splash itself uses @color/lazerlock_navy) -->
 </resources>
