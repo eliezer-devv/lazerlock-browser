@@ -62,7 +62,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.9'
+          gradle-version: '8.11.1'
           # Builds are occasional, so no caching: this also keeps clear of the separate licence
           # terms that setup-gradle v6 applies to its caching component.
           cache-disabled: true
@@ -129,8 +129,18 @@ jobs:
         # Two apps from the same code: the browser (for the phones) and LazerLock Admin (just the admin page).
         run: |
           gradle assembleRelease
-          cp app/build/outputs/apk/browser/release/app-browser-release.apk lazerlock-browser.apk
-          cp app/build/outputs/apk/admin/release/app-admin-release.apk lazerlock-browser-admin.apk
+          b=app/build/outputs/apk/browser/release/app-browser-release.apk
+          a=app/build/outputs/apk/admin/release/app-admin-release.apk
+          # If signing didn't apply, Gradle writes "...-release-unsigned.apk" instead and these are missing.
+          # Stop with a clear message (and a list of what WAS produced) rather than a silent green build.
+          if [ ! -f "$b" ] || [ ! -f "$a" ]; then
+            echo "::error::assembleRelease didn't produce the signed APKs. APKs found under app/build/outputs/apk:"
+            find app/build/outputs/apk -name '*.apk' -printf '  %p (%s bytes)\n' 2>/dev/null || true
+            exit 1
+          fi
+          cp "$b" lazerlock-browser.apk
+          cp "$a" lazerlock-browser-admin.apk
+          ls -la lazerlock-browser.apk lazerlock-browser-admin.apk
 
       - name: Publish release
         env:
@@ -144,16 +154,31 @@ jobs:
           # A test build is a pre-release: phones only ever update from the newest normal release, except those
           # with "Get test versions" on. "Re-run" of a build reuses its number: both files are uploaded again.
           NOTES="lazerlock-browser.apk: the browser (for the phones). lazerlock-browser-admin.apk: LazerLock Admin (the admin app)."
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            gh release delete-asset "$VERSION" lazerlock-browser-admin.apk --yes 2>/dev/null || true
-            gh release upload "$VERSION" lazerlock-browser.apk --clobber
-          elif [ "$EVERYONE" = "true" ]; then
-            gh release create "$VERSION" lazerlock-browser.apk --latest --title "Version ${VERSION#v}" --notes "Built from ${GITHUB_SHA::7}. $NOTES"
-          else
-            gh release create "$VERSION" lazerlock-browser.apk --prerelease --title "Test ${VERSION#v}" \
-              --notes "TEST BUILD from ${GITHUB_SHA::7}: only phones with \"Get test versions\" get it. When it's good: Actions > Release to everyone. $NOTES"
+
+          # Safety net: both APKs must be here, or stop with a clear message instead of a silent green build.
+          ls -la lazerlock-browser.apk lazerlock-browser-admin.apk
+          for f in lazerlock-browser.apk lazerlock-browser-admin.apk; do
+            if [ ! -s "$f" ]; then echo "::error::$f is missing or empty — nothing to publish."; exit 1; fi
+          done
+
+          # Make sure the release exists (create it the first time; a re-run of the same build reuses it).
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            if [ "$EVERYONE" = "true" ]; then
+              gh release create "$VERSION" --latest --title "Version ${VERSION#v}" \
+                --notes "Built from ${GITHUB_SHA::7}. $NOTES"
+            else
+              gh release create "$VERSION" --prerelease --title "Test ${VERSION#v}" \
+                --notes "TEST BUILD from ${GITHUB_SHA::7}: only phones with \"Get test versions\" get it. When it's good: Actions > Release to everyone. $NOTES"
+            fi
           fi
-          gh release upload "$VERSION" lazerlock-browser-admin.apk --clobber
-          # (No asset-ordering check any more: each app finds its own file by name, so order is irrelevant.)
+
+          # Upload (or replace) BOTH apks in one call. --clobber overwrites them on a re-run.
+          gh release upload "$VERSION" lazerlock-browser.apk lazerlock-browser-admin.apk --clobber
+
+          # Print exactly what ended up on the release, so the log can never hide an empty one.
+          echo "Published release: $(gh release view "$VERSION" --json url --jq .url)"
+          echo "Assets now on the release:"
+          gh release view "$VERSION" --json assets --jq '.assets[].name'
+
           # (The admin app had its own release, "admin-app", for a while: not needed any more.)
           if gh release view admin-app >/dev/null 2>&1; then gh release delete admin-app --yes --cleanup-tag || true; fi
