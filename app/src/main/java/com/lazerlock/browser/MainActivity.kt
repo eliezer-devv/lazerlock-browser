@@ -643,6 +643,7 @@ class MainActivity : Activity() {
         }
         if (phoneAgent.isEmpty() || web.settings.userAgentString.contains("Android")) phoneAgent = chromeUa(web.settings.userAgentString)
         web.settings.userAgentString = phoneAgent        // introduce the browser as plain Chrome everywhere, not an embedded WebView (Google sign-in refuses "; wv")
+        AppLog.i("App", "Browser user-agent in use: $phoneAgent")   // the one the app actually sends (not the WebView default)
         registerDesktopScripts()
         // Long-pressing a link or a picture: a menu (Android's browser engine shows none). Elsewhere, Android's own text
         // selection, with Copy, Share and Translate.
@@ -650,6 +651,9 @@ class MainActivity : Activity() {
         // Sound keeps playing in the background: on every page, before its own scripts (see PlaybackService).
         if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
             runCatching { androidx.webkit.WebViewCompat.addDocumentStartJavaScript(web, PlaybackService.PAGE_SCRIPT, setOf("*")) }
+            // Diagnostic (temporary): reports pop-up windows, window.close and cross-window messages via the [wlb]
+            // console channel — host+path only, never the query — to show how a sign-in hands its result back.
+            runCatching { androidx.webkit.WebViewCompat.addDocumentStartJavaScript(web, DIAG_SCRIPT, setOf("*")) }
         }
 
         web.webViewClient = object : WebViewClient() {
@@ -1068,6 +1072,18 @@ class MainActivity : Activity() {
      * setting says (responsive sites choose their layout by width, not by who's asking), and answers "is this a
      * phone?" and "touch points?" like a desktop. As Chrome's "Desktop site" does.
      */
+    /** Diagnostic only: logs pop-up windows, window.close and incoming postMessages (host + path, no query) so a
+     *  sign-in that hands its result back through a second window can be seen. Remove once the sign-in is sorted. */
+    private val DIAG_SCRIPT = """
+(function () {
+  if (window.__wlbDiag) return; window.__wlbDiag = true;
+  function loc(u) { try { var x = new URL(u, location.href); return x.host + x.pathname; } catch (e) { return '(url)'; } }
+  try { var o = window.open; window.open = function (u) { try { console.log('[wlb] window.open -> ' + loc(u)); } catch (e) {} return o.apply(this, arguments); }; } catch (e) {}
+  try { var c = window.close; window.close = function () { try { console.log('[wlb] window.close'); } catch (e) {} return c.apply(this, arguments); }; } catch (e) {}
+  try { addEventListener('message', function (ev) { try { console.log('[wlb] message from ' + (ev.origin || '?')); } catch (e) {} }, true); } catch (e) {}
+})();
+"""
+
     private val DESKTOP_SCRIPT = """
 (function () {
   if (window.__wlbDesk) return; window.__wlbDesk = true;

@@ -53,7 +53,8 @@ object AppLog {
         return runCatching {
             val u = android.net.Uri.parse(url)
             val host = (u.host ?: return@runCatching site(url)).removePrefix("www.")
-            val safe = setOf("error", "error_description", "error_subtype", "error_code", "reason", "type", "prompt")
+            val safe = setOf("error", "error_description", "error_subtype", "error_code", "reason", "type", "prompt",
+                "response_mode", "response_type", "gsiwebsdk", "o2v", "display", "service")   // how an OAuth flow hands its result back
             val q = u.queryParameterNames.takeIf { it.isNotEmpty() }
                 ?.joinToString("&") { k -> if (k in safe) "$k=${u.getQueryParameter(k)}" else "$k=•" }
             host + u.path.orEmpty() + (if (q != null) "?$q" else "")
