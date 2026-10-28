@@ -8,10 +8,10 @@
 //
 // These values are NOT secret (they only identify your Firebase project to the browser).
 self.FIREBASE_WEB = {
-  apiKey: "",
-  authDomain: "",
-  projectId: "",
-  messagingSenderId: "",
-  appId: "",
-  vapidKey: ""
+  apiKey: "AIzaSyCB33xq9cW6Y-zVllg7PTGfc7cpS-hOd60",
+  authDomain: "lazerlock-browser.firebaseapp.com",
+  projectId: "lazerlock-browser",
+  messagingSenderId: "380909673708",
+  appId: "1:380909673708:web:d6fd586d97e9742d2f19c9",
+  vapidKey: "BDkCeOpN0q1KMePEtX-q4x7VWyTgzaIJBu8s1b0dM9d07LY_6Dk9BqjhVEBTcG56jbXuhzlMacZNDp-tDJJc60E"
 };
