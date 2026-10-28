@@ -2764,9 +2764,7 @@ function requestCard(issue) {
     allow && req.media !== 'on' && !frames.length && blockedByDef.length ? h('div', { class: 'kinds', 'data-group': 'open' }, openChips) : null,
     allow && req.media !== 'on' && !frames.length && openByDef.length ? h('div', { class: 'flabel klabel' }, 'Block', defTag(openByDef, 'open')) : null,
     allow && req.media !== 'on' && !frames.length && openByDef.length ? h('div', { class: 'kinds', 'data-group': 'block' }, kindChips) : null,
-    actions, panels,
-    issue._again ? null : h('button', { type: 'button', class: 'btn d details', style: 'align-self:center', onclick: () => open({ name: 'request', number: issue.number }) },
-      'All the details', icon('chev', 16))].filter(Boolean)); // skip lines that don't apply
+    actions, panels].filter(Boolean)); // (the "All the details" button was removed — the request row opens its details)
   return card;
 }
 // ---------- an answered request: all the details, and changing the answer ----------

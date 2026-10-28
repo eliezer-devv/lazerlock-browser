@@ -112,7 +112,9 @@ class AdminActivity : Activity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()                       // branded launch splash, incl. Android 11 and older (core-splashscreen)
+        val splash = installSplashScreen()          // branded launch splash, incl. Android 11 and older (core-splashscreen)
+        val splashStart = android.os.SystemClock.elapsedRealtime()
+        splash.setKeepOnScreenCondition { android.os.SystemClock.elapsedRealtime() - splashStart < 1400 }
         Ui.applyTheme(this)                         // the same light or dark as the rest of the app
         setTheme(if (Ui.dark) R.style.AppThemeDark else R.style.AppTheme)
         super.onCreate(savedInstanceState)

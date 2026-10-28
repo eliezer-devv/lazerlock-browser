@@ -108,7 +108,7 @@ object MediaBlock {
   }
   var style = document.createElement('style');
   style.textContent =
-    '.wlb-ph{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;max-width:100%;' +
+    '.wlb-ph{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;max-width:min(100%, calc(100vw - 16px));' +
     'min-height:40px;padding:6px 10px;margin:2px 0;border:1px dashed #8aa9a4;border-radius:8px;background:#eef4f2;' +
     'color:#1f3a3d;font:13px/1.3 system-ui,sans-serif;text-align:center;cursor:pointer;overflow:hidden}' +
     // Videos off: a video player stays out of sight until it's known to have no picture (then it's sound).
@@ -233,11 +233,14 @@ object MediaBlock {
       }
       if (tag === 'audio' || tag === 'iframe') { takeOff(el, tag === 'audio' ? 'sound' : 'video'); return; }
       // Photos.
+      var rect = el.getBoundingClientRect();     // the width the image actually took, so the placeholder fits the same slot
       var s = size(el);
-      var known = s[0] >= 48; // a real size to copy; otherwise a small placeholder
+      var w = rect.width >= 48 ? Math.round(rect.width) : (s[0] >= 48 ? s[0] : 0);   // not the full natural width, which can overflow the page
+      var h = rect.width >= 48 ? Math.round(rect.height) : (s[1] >= 48 ? s[1] : 0);
+      var known = w >= 48; // a real size to copy; otherwise a small placeholder
       el.style.setProperty('display', 'none', 'important');
       if (isIcon(el)) return;
-      var ph = placeholder('photo', known ? s[0] : 0, known ? s[1] : 0, srcOf(el));
+      var ph = placeholder('photo', known ? w : 0, known ? h : 0, srcOf(el));
       el.__wlbPh = ph;
       if (el.parentNode) el.parentNode.insertBefore(ph, el);
     });

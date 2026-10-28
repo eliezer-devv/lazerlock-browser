@@ -162,8 +162,11 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Branded launch splash: on Android 12+ the platform plays it; core-splashscreen also shows it on
-        // Android 11 and older. Hands back to the app's theme (postSplashScreenTheme) right after.
-        installSplashScreen()
+        // Android 11 and older. Hands back to the app's theme (postSplashScreenTheme) right after. Held on screen
+        // ~1.4s so the short animation isn't cut off when the app loads quickly.
+        val splash = installSplashScreen()
+        val splashStart = android.os.SystemClock.elapsedRealtime()
+        splash.setKeepOnScreenCondition { android.os.SystemClock.elapsedRealtime() - splashStart < 1400 }
         // Light or dark: the phone's own setting, unless chosen in ⋮ → Appearance.
         Ui.applyTheme(this)
         setTheme(if (Ui.dark) R.style.AppThemeDark else R.style.AppTheme)
@@ -185,6 +188,7 @@ class MainActivity : Activity() {
         var taps = 0
         var firstTap = 0L
         pageTitle.setOnClickListener {
+            showFullTitle()                       // a tap shows the full address
             val now = android.os.SystemClock.elapsedRealtime()
             if (now - firstTap > 4000) { firstTap = now; taps = 0 }
             if (++taps >= 7) {
@@ -1563,7 +1567,7 @@ class MainActivity : Activity() {
             findViewById<View>(R.id.listCheck).visibility = View.GONE
         }
         // Holding the site's name shows it in full (the top bar cuts long names short).
-        pageTitle.setOnLongClickListener { showFullTitle(); true }
+        pageTitle.setOnLongClickListener { copyUrl(); true }     // a long-press copies the address
         findViewById<View>(R.id.home).setOnClickListener { goHome() }
         findViewById<View>(R.id.menu).setOnClickListener { showMenu(it) }
         // The slim line: tapping it does what it's about (try the list again, or ask for photos, videos, sound).
@@ -1610,27 +1614,40 @@ class MainActivity : Activity() {
     }
 
     /** A small bubble under the top bar with the open site's full name (the page's title, and its site). */
+    private var titlePopup: android.widget.PopupWindow? = null
+
+    /** Tapping the name on the top bar: a pop-up with the full address (and the page title above it, for context). */
     private fun showFullTitle() {
         val cur = web.url ?: return
         if (HomePage.isOwn(cur) || cur.startsWith(BLOCKED_PAGE)) return
-        val full = web.title?.takeIf { it.isNotBlank() && !it.startsWith("http") } ?: return
-        val host = Uri.parse(cur).host?.removePrefix("www.") ?: ""
+        runCatching { titlePopup?.dismiss() }            // don't stack pop-ups on repeated taps
+        val title = web.title?.takeIf { it.isNotBlank() && !it.startsWith("http") }
         val box = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             background = Ui.rounded(if (Ui.dark) Ui.CARD else Ui.INK, Ui.dp(this@MainActivity, 12).toFloat())
             setPadding(Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 10), Ui.dp(this@MainActivity, 12), Ui.dp(this@MainActivity, 10))
             elevation = Ui.dp(this@MainActivity, 8).toFloat()
             val fg = if (Ui.dark) Ui.INK else android.graphics.Color.WHITE
-            addView(Ui.text(this@MainActivity, full, 14.5f, fg, "bold"))
-            addView(Ui.text(this@MainActivity, host, 12.5f, if (Ui.dark) Ui.MUTED else 0xFFB9C9C6.toInt()))
+            val muted = if (Ui.dark) Ui.MUTED else 0xFFB9C9C6.toInt()
+            if (title != null) addView(Ui.text(this@MainActivity, title, 12.5f, muted))
+            addView(Ui.text(this@MainActivity, cur, 14f, fg, "bold"))   // the full address
         }
         val width = minOf(resources.displayMetrics.widthPixels - Ui.dp(this, 24), Ui.dp(this, 420))
         val pop = android.widget.PopupWindow(box, width, LinearLayout.LayoutParams.WRAP_CONTENT, true).apply {
             isOutsideTouchable = true
             elevation = Ui.dp(this@MainActivity, 8).toFloat()
         }
+        titlePopup = pop
         pop.showAsDropDown(pageTitle, 0, Ui.dp(this, 6))
         main.postDelayed({ if (pop.isShowing) pop.dismiss() }, 4000)
+    }
+
+    /** Copies the open page's address. */
+    private fun copyUrl() {
+        val cur = web.url ?: return
+        if (HomePage.isOwn(cur) || cur.startsWith(BLOCKED_PAGE)) return
+        runCatching { getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("Link", cur)) }
+            .onSuccess { toast("Link copied") }.onFailure { toast("Couldn't copy the link") }
     }
 
     private fun ago(t: Long): String {
@@ -1736,10 +1753,7 @@ class MainActivity : Activity() {
             item(R.drawable.ic_d_desktop, "Desktop site", if (isDesktop(cur)) "On" else null) { toggleDesktop() }
             if (translatedFrom != null) item(R.drawable.ic_d_translate, "Show original") { showOriginal() }
             else item(R.drawable.ic_d_translate, "Translate page") { showTranslate() }
-            item(R.drawable.ic_d_copy, "Copy link") {
-                runCatching { getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(android.content.ClipData.newPlainText("Link", cur)) }
-                    .onSuccess { toast("Link copied") }.onFailure { toast("Couldn't copy the link") }
-            }
+            // (Copying the address moved to a long-press on the name in the top bar.)
             asked = true
         }
         if (asked) divider()
@@ -2955,7 +2969,7 @@ class MainActivity : Activity() {
         val text = findViewById<TextView>(R.id.translateBarText)
         val action = findViewById<TextView>(R.id.translateBarAction)
         when {
-            downloadingLang == from -> { text.text = "Getting ${PageTranslate.name(from)} ready to translate…"; action.visibility = View.GONE }
+            downloadingLang == from -> { text.text = "Downloading the ${PageTranslate.name(from)} language pack…"; action.visibility = View.GONE }
             translatedFrom != null -> { text.text = "Translated from ${PageTranslate.name(from)}"; action.text = "Show original"; action.visibility = View.VISIBLE }
             else -> { text.text = "This page is in ${PageTranslate.name(from)}"; action.text = "Translate"; action.visibility = View.VISIBLE }
         }
