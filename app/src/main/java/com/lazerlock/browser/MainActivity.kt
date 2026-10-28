@@ -651,9 +651,6 @@ class MainActivity : Activity() {
         // Sound keeps playing in the background: on every page, before its own scripts (see PlaybackService).
         if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
             runCatching { androidx.webkit.WebViewCompat.addDocumentStartJavaScript(web, PlaybackService.PAGE_SCRIPT, setOf("*")) }
-            // Diagnostic (temporary): reports pop-up windows, window.close and cross-window messages via the [wlb]
-            // console channel — host+path only, never the query — to show how a sign-in hands its result back.
-            runCatching { androidx.webkit.WebViewCompat.addDocumentStartJavaScript(web, DIAG_SCRIPT, setOf("*")) }
         }
 
         web.webViewClient = object : WebViewClient() {
@@ -931,16 +928,49 @@ class MainActivity : Activity() {
                     userAgentString = phoneAgent                         // the same Chrome user-agent as the main view
                 }
                 val dialog = android.app.Dialog(this@MainActivity, android.R.style.Theme_Material_Light_NoActionBar)
-                dialog.setContentView(popup)
+                // A thin header so the person can see which site they're signing in to, and close it.
+                val host = Ui.text(this@MainActivity, "Signing in…", 14f, android.graphics.Color.WHITE, "bold").apply {
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.START
+                }
+                val closeBtn = ImageButton(this@MainActivity).apply {
+                    setImageResource(R.drawable.ic_d_x)
+                    setColorFilter(android.graphics.Color.WHITE)
+                    background = null
+                    val q = Ui.dp(this@MainActivity, 10); setPadding(q, q, q, q)
+                    contentDescription = "Close"
+                    setOnClickListener { runCatching { dialog.dismiss() } }
+                }
+                val bar = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    setBackgroundColor(Ui.BAR)
+                    setPadding(Ui.dp(this@MainActivity, 14), Ui.dp(this@MainActivity, 4), Ui.dp(this@MainActivity, 4), Ui.dp(this@MainActivity, 4))
+                    addView(host); addView(closeBtn)
+                }
+                val box = LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setBackgroundColor(Ui.PAGE)
+                    addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+                    addView(popup, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+                }
+                dialog.setContentView(box)
                 dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                dialog.setOnDismissListener { runCatching { popup.destroy() } }   // back button or close: tidy up
+                dialog.setOnDismissListener { runCatching { (popup.parent as? ViewGroup)?.removeView(popup); popup.destroy() } }   // back button or close: tidy up
                 var decided = false
                 popup.webViewClient = object : WebViewClient() {
                     override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
-                        if (!decided && !url.isNullOrEmpty() && url != "about:blank") {
-                            decided = true
-                            if (isAuthUrl(url)) { runCatching { dialog.show() }; AppLog.i("Page", "Sign-in window: ${AppLog.site(url)}") }
-                            else { popup.stopLoading(); runCatching { navigate(url) }; runCatching { dialog.dismiss() } }   // an ordinary new-window link: main view, as before
+                        if (!url.isNullOrEmpty() && url != "about:blank") {
+                            host.text = AppLog.site(url)                 // show the real domain being signed in to
+                            if (!decided) {
+                                decided = true
+                                if (isAuthUrl(url)) { runCatching { dialog.show() }; AppLog.i("Page", "Sign-in window: ${AppLog.site(url)}") }
+                                else {                                   // an ordinary new-window link: open it in the main view, as before
+                                    popup.stopLoading(); runCatching { navigate(url) }
+                                    runCatching { (popup.parent as? ViewGroup)?.removeView(popup); popup.destroy() }
+                                }
+                            }
                         }
                     }
                     override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
@@ -957,12 +987,7 @@ class MainActivity : Activity() {
                 }
                 popup.webChromeClient = object : WebChromeClient() {
                     override fun onCloseWindow(w: WebView?) { AppLog.i("Page", "Sign-in window closed (result handed back)"); runCatching { dialog.dismiss() } }
-                    override fun onConsoleMessage(m: android.webkit.ConsoleMessage?): Boolean {
-                        if (m != null && m.message().startsWith("[wlb] ")) AppLog.i("Page", "sign-in: ${m.message().removePrefix("[wlb] ").take(200)}")
-                        return true
-                    }
                 }
-                runCatching { androidx.webkit.WebViewCompat.addDocumentStartJavaScript(popup, DIAG_SCRIPT, setOf("*")) }   // diagnostic: see the pop-up's window.close/messages too
                 (resultMsg.obj as WebView.WebViewTransport).webView = popup
                 resultMsg.sendToTarget()
                 return true
@@ -1135,18 +1160,6 @@ class MainActivity : Activity() {
      * setting says (responsive sites choose their layout by width, not by who's asking), and answers "is this a
      * phone?" and "touch points?" like a desktop. As Chrome's "Desktop site" does.
      */
-    /** Diagnostic only: logs pop-up windows, window.close and incoming postMessages (host + path, no query) so a
-     *  sign-in that hands its result back through a second window can be seen. Remove once the sign-in is sorted. */
-    private val DIAG_SCRIPT = """
-(function () {
-  if (window.__wlbDiag) return; window.__wlbDiag = true;
-  function loc(u) { try { var x = new URL(u, location.href); return x.host + x.pathname; } catch (e) { return '(url)'; } }
-  try { var o = window.open; window.open = function (u) { try { console.log('[wlb] window.open -> ' + loc(u)); } catch (e) {} return o.apply(this, arguments); }; } catch (e) {}
-  try { var c = window.close; window.close = function () { try { console.log('[wlb] window.close'); } catch (e) {} return c.apply(this, arguments); }; } catch (e) {}
-  try { addEventListener('message', function (ev) { try { console.log('[wlb] message from ' + (ev.origin || '?')); } catch (e) {} }, true); } catch (e) {}
-})();
-"""
-
     private val DESKTOP_SCRIPT = """
 (function () {
   if (window.__wlbDesk) return; window.__wlbDesk = true;

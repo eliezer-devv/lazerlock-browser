@@ -26,10 +26,6 @@ object AppLog {
         val engine = runCatching { androidx.webkit.WebViewCompat.getCurrentWebViewPackage(ctx)?.let { "${it.packageName} ${it.versionName}" } }.getOrNull()
         i("App", "Started: version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) on Android ${Build.VERSION.RELEASE} " +
             "(SDK ${Build.VERSION.SDK_INT}), ${Build.MANUFACTURER} ${Build.MODEL}; browser engine: ${engine ?: "unknown"}")
-        // The WebView's user-agent. Some sites (notably Google sign-in) refuse an embedded WebView, which they
-        // recognise by the "; wv" marker in this string — logged once so a blank sign-in can be told apart from
-        // an ordinary blocked page.
-        runCatching { android.webkit.WebSettings.getDefaultUserAgent(ctx) }.getOrNull()?.let { i("App", "Browser user-agent: $it") }
     }
 
     fun i(area: String, text: String) = write("  ", area, text)
