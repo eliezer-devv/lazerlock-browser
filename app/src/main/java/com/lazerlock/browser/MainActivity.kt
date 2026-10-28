@@ -2815,6 +2815,7 @@ class MainActivity : Activity() {
             "Admin phone: " + (if (!AdminAlerts.actingAdminPhone(this)) (if (AdminAlerts.isAdminPhone()) "flagged, but the admin is signed out here" else "no") else "yes; phone notifications " +
                 (if (AdminAlerts.wanted(this)) "on" else "off") + "; Android " + (if (AdminAlerts.allowed(this)) "allows them" else "doesn't allow them") +
                 "; last check: " + AdminAlerts.lastCheck(this)),
+            "Push (Firebase): " + (if (Fcm.available(this)) ("on" + (if (Fcm.token(this).isNotEmpty()) ", token registered" else ", waiting for a token")) else "not set up — using the ~15-minute background check"),
             "Desktop sites: ${desktopSites().joinToString().ifEmpty { "none" }}",
             "Waiting to send: ${Outbox.count(this)}" + (Outbox.lastProblem?.let { " ($it)" } ?: "")
         ).joinToString("\n") { "  $it" }
