@@ -1434,9 +1434,10 @@ here, but together they make Play Protect cautious.
   app's package name, `com.lazerlock.browser`.
 
 ### The app's package name
-Android identifies the app by its package name, `com.lazerlock.browser` (in `app/build.gradle.kts`).
-People never see it.
-- **Don't change it.** A different package name is a different app: phones can't update across it, and every
+Android identifies each app by its package name (in `app/build.gradle.kts`). People never see it.
+- The **browser** is `com.lazerlock.browser`.
+- The **admin app** (LazerLock Admin) is `com.lazerlock.browser.admin` — a separate app that installs beside the browser.
+- **Don't change them.** A different package name is a different app: phones can't update across it, and every
   phone would need uninstalling and installing again.
 
 ### The top bar and Settings
