@@ -634,7 +634,7 @@ class MainActivity : Activity() {
             domStorageEnabled = true
             allowFileAccess = false
             allowContentAccess = false
-            setSupportMultipleWindows(false)        // target=_blank opens in this view, and gets checked
+            setSupportMultipleWindows(true)         // real pop-up windows for sign-ins (window.open); ordinary target=_blank is still sent to the main view (see onCreateWindow)
             javaScriptCanOpenWindowsAutomatically = false
             setGeolocationEnabled(true)
             builtInZoomControls = true
@@ -915,6 +915,59 @@ class MainActivity : Activity() {
                 return true
             }
 
+            // A pop-up window opened by a tap (window.open) — how "Continue with Google" and most OAuth sign-ins
+            // work: the sign-in runs in its own window and hands the result back to the opener (the main page) when
+            // it closes. Give sign-ins a real pop-up so that hand-back works; keep the main page open underneath.
+            // Ordinary target=_blank links are sent to the main view instead, exactly as before (full ad/media
+            // checks). The pop-up still only loads sites that are on the list.
+            override fun onCreateWindow(view: WebView?, isDialog: Boolean, isUserGesture: Boolean, resultMsg: android.os.Message?): Boolean {
+                if (resultMsg == null || !isUserGesture) return false     // only from a real tap: no pop-up spam
+                val popup = WebView(this@MainActivity)
+                popup.settings.apply {
+                    javaScriptEnabled = true
+                    domStorageEnabled = true
+                    javaScriptCanOpenWindowsAutomatically = true
+                    setSupportMultipleWindows(true)
+                    userAgentString = phoneAgent                         // the same Chrome user-agent as the main view
+                }
+                val dialog = android.app.Dialog(this@MainActivity, android.R.style.Theme_Material_Light_NoActionBar)
+                dialog.setContentView(popup)
+                dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                dialog.setOnDismissListener { runCatching { popup.destroy() } }   // back button or close: tidy up
+                var decided = false
+                popup.webViewClient = object : WebViewClient() {
+                    override fun onPageStarted(v: WebView?, url: String?, favicon: Bitmap?) {
+                        if (!decided && !url.isNullOrEmpty() && url != "about:blank") {
+                            decided = true
+                            if (isAuthUrl(url)) { runCatching { dialog.show() }; AppLog.i("Page", "Sign-in window: ${AppLog.site(url)}") }
+                            else { popup.stopLoading(); runCatching { navigate(url) }; runCatching { dialog.dismiss() } }   // an ordinary new-window link: main view, as before
+                        }
+                    }
+                    override fun shouldOverrideUrlLoading(v: WebView?, req: WebResourceRequest?): Boolean {
+                        val u = req?.url?.toString() ?: return false
+                        if (u.startsWith("http") && !Whitelist.isAllowed(u, req.isForMainFrame)) {
+                            if (req.isForMainFrame) { AppLog.w("Page", "Sign-in window blocked (not on the list): ${AppLog.path(u)}"); runCatching { dialog.dismiss() } }
+                            return true
+                        }
+                        return false
+                    }
+                    override fun onReceivedError(v: WebView?, req: WebResourceRequest?, e: android.webkit.WebResourceError?) {
+                        if (req?.isForMainFrame == true) AppLog.w("Page", "Sign-in window couldn't open ${AppLog.path(req.url.toString())}: ${e?.description} (${e?.errorCode})")
+                    }
+                }
+                popup.webChromeClient = object : WebChromeClient() {
+                    override fun onCloseWindow(w: WebView?) { AppLog.i("Page", "Sign-in window closed (result handed back)"); runCatching { dialog.dismiss() } }
+                    override fun onConsoleMessage(m: android.webkit.ConsoleMessage?): Boolean {
+                        if (m != null && m.message().startsWith("[wlb] ")) AppLog.i("Page", "sign-in: ${m.message().removePrefix("[wlb] ").take(200)}")
+                        return true
+                    }
+                }
+                runCatching { androidx.webkit.WebViewCompat.addDocumentStartJavaScript(popup, DIAG_SCRIPT, setOf("*")) }   // diagnostic: see the pop-up's window.close/messages too
+                (resultMsg.obj as WebView.WebViewTransport).webView = popup
+                resultMsg.sendToTarget()
+                return true
+            }
+
             override fun onProgressChanged(view: WebView?, newProgress: Int) {
                 if (HomePage.isHome(view?.url) && newProgress < 100) return          // the home page opens at once
                 showLoading(newProgress)
@@ -1060,6 +1113,16 @@ class MainActivity : Activity() {
             .replace("; wv)", ")").replace(" wv)", ")")  // the WebView marker
             .replace("Version/4.0 ", "")                 // the WebView "Version/4.0" token
             .replace(Regex("\\s{2,}"), " ").trim()
+
+    /** A sign-in / OAuth pop-up URL that deserves a real pop-up window (vs an ordinary target=_blank link, which
+     *  is sent to the main view). Recognised by the usual OAuth paths and the big identity providers' hosts. */
+    private fun isAuthUrl(url: String): Boolean {
+        val host = runCatching { Uri.parse(url).host }.getOrNull()?.removePrefix("www.")?.lowercase() ?: return false
+        val l = url.lowercase()
+        return l.contains("oauth") || l.contains("/signin") || l.contains("/login") || l.contains("/auth") ||
+            host == "accounts.google.com" || host == "appleid.apple.com" ||
+            host == "login.microsoftonline.com" || host == "login.live.com" || host == "facebook.com"
+    }
 
     /** How a desktop browser introduces itself (the phone's own, without "Android" and "Mobile"). */
     private fun desktopAgent(): String {
