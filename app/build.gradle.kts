@@ -66,7 +66,7 @@ android {
         }
         create("admin") {
             dimension = "app"
-            applicationId = "com.lazerlock.admin"   // its own id (not a suffix), so it installs beside the browser
+            applicationId = "com.lazerlock.browser.admin"   // its own id (installs beside the browser); code/namespace stays com.lazerlock.browser
             buildConfigField("Boolean", "ADMIN_APP", "true")
         }
     }
