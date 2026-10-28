@@ -1,0 +1,82 @@
+name: Clean up releases
+
+# One-off tidy-up of the Releases page. Two things, in one pass:
+#
+#   1. Delete the old pre-rebrand "Whitelist Browser" releases outright (tag included). These are the releases
+#      whose only APKs are whitelist-*.apk (whitelist-browser.apk / whitelist-for-admins.apk) and which carry no
+#      lazerlock-*.apk at all. Every LazerLock release is kept.
+#
+#   2. On the releases that are kept, remove the leftover compatibility-alias APKs (lazerlock.apk,
+#      lazerlock-admin.apk, whitelist-admin.apk, whitelist-browser.apk, whitelist-for-admins.apk), leaving just
+#      lazerlock-browser.apk and lazerlock-browser-admin.apk.
+#
+# Run it from the Actions tab (Clean up releases > Run workflow). Safe to run more than once. It only deletes a
+# release that has NO lazerlock APK, and only strips an alias when the current lazerlock-browser*.apk is present,
+# so it can never remove a current build or strip a release bare. Phones update from the newest release's
+# lazerlock-browser.apk, which is always kept.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove old releases and alias APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          # Snapshot every release first, so deleting as we go can't disturb the paging.
+          : > /tmp/rels.ndjson
+          page=1
+          while : ; do
+            batch=$(gh api "repos/${GH_REPO}/releases?per_page=100&page=${page}")
+            n=$(echo "$batch" | jq 'length')
+            [ "$n" -eq 0 ] && break
+            echo "$batch" | jq -c '.[]' >> /tmp/rels.ndjson
+            page=$((page+1))
+          done
+          echo "Found $(wc -l < /tmp/rels.ndjson) releases."
+
+          deleted=0 ; stripped=0
+          while read -r rel; do
+            tag=$(echo "$rel" | jq -r '.tag_name')
+            id=$(echo "$rel" | jq -r '.id')
+            names=$(echo "$rel" | jq -r '.assets[].name')
+            has_lazer=no ; echo "$names" | grep -q '^lazerlock' && has_lazer=yes
+            has_white=no ; echo "$names" | grep -q '^whitelist' && has_white=yes
+
+            # 1. An old whitelist-branded release (no lazerlock APK at all): delete it and its tag.
+            if [ "$has_white" = yes ] && [ "$has_lazer" = no ]; then
+              echo "Deleting old release $tag"
+              if gh api -X DELETE "repos/${GH_REPO}/releases/${id}" >/dev/null ; then
+                gh api -X DELETE "repos/${GH_REPO}/git/refs/tags/${tag}" >/dev/null 2>&1 || true
+                deleted=$((deleted+1))
+              else
+                echo "  (could not delete $tag)"
+              fi
+              continue
+            fi
+
+            # 2. A kept release: strip the alias APKs, keeping the two current ones.
+            has_browser=no ; echo "$names" | grep -Fxq "lazerlock-browser.apk" && has_browser=yes
+            has_admin=no   ; echo "$names" | grep -Fxq "lazerlock-browser-admin.apk" && has_admin=yes
+            del=""
+            [ "$has_browser" = yes ] && del="$del lazerlock.apk whitelist-browser.apk"
+            [ "$has_admin"   = yes ] && del="$del lazerlock-admin.apk whitelist-for-admins.apk whitelist-admin.apk"
+            for name in $del; do
+              aid=$(echo "$rel" | jq -r --arg n "$name" '.assets[] | select(.name==$n) | .id')
+              if [ -n "$aid" ] && [ "$aid" != "null" ]; then
+                echo "$tag: removing $name"
+                gh api -X DELETE "repos/${GH_REPO}/releases/assets/${aid}" >/dev/null \
+                  && stripped=$((stripped+1)) || echo "  (could not remove $name)"
+              fi
+            done
+          done < /tmp/rels.ndjson
+
+          echo "Finished. Deleted ${deleted} old releases; removed ${stripped} alias APKs."
+          echo "Kept releases now carry only lazerlock-browser.apk and lazerlock-browser-admin.apk."

@@ -140,15 +140,7 @@ jobs:
           fi
           cp "$b" lazerlock-browser.apk
           cp "$a" lazerlock-browser-admin.apk
-          # Compatibility aliases. A phone already installed looks for the update file by the name ITS OWN (older)
-          # build knows — e.g. a 1.0.187 phone looks for "lazerlock.apk", not the current "lazerlock-browser.apk".
-          # So publish the browser's APK under every name any shipped browser build looks for, and the admin's APK
-          # under every admin name. That way a phone from before a rename still finds and installs its update.
-          # (Safe: browser names and admin names never overlap, so neither app can pick up the other's file.)
-          # Trim the oldest "whitelist-*" names once no phone that old is left in the field.
-          for n in lazerlock.apk whitelist-browser.apk; do cp "$b" "$n"; done
-          for n in lazerlock-admin.apk whitelist-for-admins.apk whitelist-admin.apk; do cp "$a" "$n"; done
-          ls -la *.apk
+          ls -la lazerlock-browser.apk lazerlock-browser-admin.apk
 
       - name: Publish release
         env:
@@ -156,15 +148,13 @@ jobs:
           VERSION: v1.0.${{ github.run_number }}
           EVERYONE: ${{ inputs.everyone == true }}
         run: |
-          # Both apps go in the same release. The browser's APK is published under every name a shipped browser
-          # build looks for, and the admin's under every admin name, so a phone from before a rename still finds
-          # its update. Each app only ever takes a file with ITS OWN name, so asset order doesn't matter.
+          # Both apps go in the same release, each under its own name: lazerlock-browser.apk (the browser) and
+          # lazerlock-browser-admin.apk (the admin app). Each app updates from the file with its OWN name.
           # A test build is a pre-release: phones only ever update from the newest normal release, except those
           # with "Get test versions" on. "Re-run" of a build reuses its number: the files are uploaded again.
-          NOTES="lazerlock-browser.apk: the browser (for the phones). lazerlock-browser-admin.apk: LazerLock Admin (the admin app). The other files are the same two apps under older names, so phones from before a rename still update."
-          # New name first, older names after. Browser APK → all browser names; admin APK → all admin names.
-          BROWSER_APKS="lazerlock-browser.apk lazerlock.apk whitelist-browser.apk"
-          ADMIN_APKS="lazerlock-browser-admin.apk lazerlock-admin.apk whitelist-for-admins.apk whitelist-admin.apk"
+          NOTES="lazerlock-browser.apk: the browser (for the phones). lazerlock-browser-admin.apk: LazerLock Admin (the admin app)."
+          BROWSER_APKS="lazerlock-browser.apk"
+          ADMIN_APKS="lazerlock-browser-admin.apk"
 
           # Safety net: the canonical files must be here, or stop with a clear message instead of a silent green build.
           for f in lazerlock-browser.apk lazerlock-browser-admin.apk; do
