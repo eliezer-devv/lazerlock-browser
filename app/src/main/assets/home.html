@@ -16,9 +16,14 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 Figtree, system-ui, sans-serif;
     -webkit-tap-highlight-color: transparent; }
-  main { max-width: 40rem; margin: 0 auto; padding: 1.4rem 1rem 6rem; }
-  .hello { font: 700 1.35rem/1.2 'Bricolage Grotesque', Figtree, sans-serif; margin: 0 .25rem 1.1rem; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 1.3rem .5rem; }
+  main { max-width: 40rem; margin: 0 auto; padding: 1.5rem 1.1rem 6rem; }
+  /* "Airy minimal": a small brand lockup, a bold greeting, roomy tiles. */
+  .brand { display: flex; align-items: center; gap: .5rem; margin: 0 .25rem .7rem; color: var(--ink); }
+  .brand svg { flex: none; }
+  .brand .wm { font: 800 1.02rem/1 'Bricolage Grotesque', Figtree, sans-serif; letter-spacing: .005em; }
+  .brand .wm b { color: var(--accent); font-weight: 800; }
+  .hello { font: 800 1.5rem/1.1 'Bricolage Grotesque', Figtree, sans-serif; letter-spacing: -.01em; margin: 0 .25rem 1rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 1.7rem .5rem; }
   a.tile { display: flex; flex-direction: column; align-items: center; gap: .5rem; text-decoration: none; color: inherit; }
   .icon { position: relative; width: 60px; height: 60px; border-radius: 18px; background: var(--tile); border: 1px solid var(--edge);
     display: grid; place-items: center; box-shadow: 0 1px 2px rgba(28, 43, 45, .06); }
@@ -54,8 +59,10 @@
     background: linear-gradient(to top, var(--bg) 0%, var(--bg) 62%, transparent 100%); }
   .askbar[hidden] { display: none; }
   .ask { display: flex; align-items: center; justify-content: center; gap: .45rem; width: max-content; max-width: 100%;
-    background: var(--accent); color: #fff; font-weight: 700; text-decoration: none; padding: .8rem 1.3rem;
-    border-radius: 999px; min-height: 48px; box-shadow: 0 8px 22px -6px rgba(16, 28, 29, .5); }
+    background: var(--accent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent));
+    color: #fff; font-weight: 700; text-decoration: none; padding: .85rem 1.4rem;
+    border-radius: 999px; min-height: 48px; box-shadow: 0 10px 26px -8px color-mix(in srgb, var(--accent) 55%, transparent); }
   .ask svg { flex: none; }
   [hidden] { display: none !important; }
   /* A timer on now: a line on top ("Homework time until 18:00 · Ask for time"); "nothing opens": a full screen. */
@@ -114,6 +121,7 @@
 </head>
 <body>
 <main>
+  <div class="brand"><svg width="26" height="26" viewBox="0 0 108 108" fill="none" aria-hidden="true"><defs><linearGradient id="blz" x1="23" y1="0" x2="81" y2="0" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#46E8FF"/><stop offset="1" stop-color="#3B5BFF"/></linearGradient><clipPath id="blc" clipPathUnits="userSpaceOnUse"><path d="M0,0 L0,108 L108,108 L108,0 Z M52.5 63A7.5 7.5 0 0 1 55.8 56.79L55.8 54.5A9.7 9.7 0 0 1 75.2 54.5L75.2 56.79A7.5 7.5 0 0 1 78.5 63L78.5 70A7.5 7.5 0 0 1 71 77.5L60 77.5A7.5 7.5 0 0 1 52.5 70Z" fill-rule="evenodd"/></clipPath></defs><g transform="translate(2,-2.2)"><g clip-path="url(#blc)"><g transform="rotate(-18 52 53)"><path d="M81 53A29 8.5 0 0 0 23 53" fill="none" stroke="url(#blz)" stroke-width="2.4" stroke-opacity=".5" stroke-linecap="round"/></g><path d="M35 53A17 17 0 1 1 69 53A17 17 0 1 1 35 53ZM45 53A7 17 0 1 1 59 53A7 17 0 1 1 45 53ZM35 53H69" fill="none" stroke="currentColor" stroke-width="2.4"/><g transform="rotate(-18 52 53)"><path d="M23 53A29 8.5 0 0 0 81 53" fill="none" stroke="url(#blz)" stroke-width="2.4" stroke-linecap="round"/></g></g><path d="M60 58v-3.5a5.5 5.5 0 0 1 11 0V58" fill="none" stroke="currentColor" stroke-width="3.4"/><path d="M60 57.4H71A5 5 0 0 1 76 62.4V69.4A5 5 0 0 1 71 74.4H60A5 5 0 0 1 55 69.4V62.4A5 5 0 0 1 60 57.4Z M64.6 66.59A2 2 0 1 1 66.4 66.59L66.4 68.5A0.9 0.9 0 0 1 64.6 68.5Z" fill="currentColor" fill-rule="evenodd"/><path d="M26.8 64.5A1.6 1.6 0 1 1 30 64.5A1.6 1.6 0 1 1 26.8 64.5Z" fill="url(#blz)"/></g></svg><span class="wm">Lazer<b>Lock</b></span></div>
   <div class="timerline" id="timerline" hidden><span id="timertext"></span><a id="timerask" href="#">Ask for time</a></div>
   <div class="timerfull" id="timerfull" hidden>
     <span class="moon" aria-hidden="true"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
