@@ -12,8 +12,11 @@ object SearchBar {
     /** The placeholder text. Change it here and both pages update. */
     const val PLACEHOLDER = "Search"
 
-    private const val ICON =
+    // The magnifier sits on the LEFT (muted, inside the box); the arrow is the submit button on the RIGHT.
+    private const val MAGNIFIER =
         "<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.2\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-4-4\"/></svg>"
+    private const val ARROW =
+        "<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14M13 6l6 6-6 6\"/></svg>"
 
     private fun esc(s: String) =
         s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
@@ -21,14 +24,15 @@ object SearchBar {
     /** The search box markup. [value] prefills the field; [autofocus] drops the cursor in it. */
     fun form(value: String = "", autofocus: Boolean = false): String =
         "<form class=\"search\" id=\"search\" action=\"/search/\" method=\"get\" role=\"search\">" +
+            MAGNIFIER +
             "<input type=\"search\" name=\"q\" value=\"${esc(value)}\" placeholder=\"$PLACEHOLDER\" aria-label=\"Search\" autocomplete=\"off\" enterkeyhint=\"search\"" +
             (if (autofocus) " autofocus" else "") + ">" +
-            "<button class=\"go\" type=\"submit\" aria-label=\"Search\">$ICON</button></form>"
+            "<button class=\"go\" type=\"submit\" aria-label=\"Search\">$ARROW</button></form>"
 
     /** The one set of styles for the box (the "spotlight" look). Uses the page's palette tokens, so it follows the theme. */
     val CSS = """
-  .search { display: flex; align-items: center; gap: .7rem; min-height: 58px; border-radius: 18px; background: var(--tile);
-    border: 1.5px solid var(--edge); padding: 0 .5rem 0 1.15rem; margin: 0; box-shadow: 0 8px 20px -10px rgba(16, 28, 29, .28);
+  .search { display: flex; align-items: center; gap: .6rem; min-height: 58px; border-radius: 18px; background: var(--tile);
+    border: 1.5px solid var(--edge); padding: 0 .5rem 0 .95rem; margin: 0; box-shadow: 0 8px 20px -10px rgba(16, 28, 29, .28);
     transition: border-color .15s, box-shadow .15s; }
   .search > svg { flex: none; color: var(--muted); }
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 48px; }
