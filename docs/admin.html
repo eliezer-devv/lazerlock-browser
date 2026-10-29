@@ -484,7 +484,7 @@
   </header>
   <div id="view"></div>
 </div>
-<div id="savebar" hidden><span id="saveText">Changes not saved yet</span><div style="display:flex;gap:6px"><button type="button" class="undo" id="undoBtn">Undo</button><button type="button" class="save" id="saveBtn">Save</button></div></div>
+<div id="savebar" hidden><span id="saveText">Saving your changes…</span><div style="display:flex;gap:6px"><button type="button" class="undo" id="undoBtn">Undo</button><button type="button" class="save" id="saveBtn">Save</button></div></div>
 <nav id="tabs" aria-label="Sections" hidden></nav>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <button type="button" id="syncPill" hidden></button>
@@ -679,8 +679,12 @@ window.wlBack = () => {
   if (shade) { const cancel = shade.querySelector('#dlgCancel'); if (cancel) cancel.click(); else shade.remove(); return true; }
   if (S.connected && S.sub) { back(); return true; }
   // Back on the top screen with unsaved changes: our own themed dialog (not the system one), then close if confirmed.
-  if (S.connected && (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length)) {
-    uiConfirmDanger('Leave without saving?', 'Your changes haven\'t been saved yet.', 'Leave', 'warn').then(ok => { if (ok) closeAdmin(); });
+  if (S.connected && S.saveBlocked) {     // changes that can't be saved yet (an invalid entry): closing would lose them
+    uiConfirmDanger('Leave without saving?', `Some changes can’t be saved yet (${S.saveError || 'check the entries'}).`, 'Leave', 'warn').then(ok => { if (ok) closeAdmin(); });
+    return true;
+  }
+  if (S.connected && (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length)) {   // changes save themselves: flush, let the queue finish, then close
+    flushAndClose();
     return true;
   }
   return false;
@@ -1343,9 +1347,9 @@ function phonesUsing(name) {
 const canEditList = n => fullAdmin() || (canDo('edit') && !isPublicList(n) && !(S.D.default || []).includes(n));
 function markList() {
   if (!canEditList(S.current)) { say(`You can look at ${listLabel(S.current)}, but not change it.`, true); openList(S.current).then(render); return; }
-  S.listDirty = true; renderSaveBar();
+  S.listDirty = true; S.saveError = null; S.saveBlocked = false; scheduleAutoSave(true); renderSaveBar();
 }
-function markDevices() { S.devDirty = true; renderSaveBar(); }
+function markDevices() { S.devDirty = true; S.saveError = null; S.saveBlocked = false; scheduleAutoSave(true); renderSaveBar(); }
 
 // ---------- loading ----------
 // Everything this admin sees, at the newest version (or [sha]). False: this device is signed out.
@@ -1409,12 +1413,17 @@ const uiConfirm = (title, text, ok = 'OK', opts = {}) => uiDialog({ title, text,
 const uiConfirmDanger = (title, text, ok, ic = 'trash') => uiDialog({ title, text, ok, danger: true, red: true, icon: ic });
 
 // ---------- saving ----------
-async function saveAll() {
+async function saveAll(auto = false) {
   $('saveBtn').disabled = true;
+  const did = S.listDirty || S.devDirty;   // was there anything to commit? (feeds the adaptive-batching counter)
   try {
     if (S.listDirty) {
       const out = fromModel(S.L);
-      if (out.error) { say(out.error, true); return; }
+      if (out.error) {               // the list isn't valid yet (e.g. a half-typed entry): hold the changes rather than nag on every keystroke
+        S.saveError = out.error; S.saveBlocked = true;
+        if (!auto) say(out.error, true);
+        return;
+      }
       S.listSha = await putJson(listPathOf(S.current), out.data, S.listSha, `Update ${S.current} list from admin page`);
       S.L = toModel(out.data);
       S.listDirty = false;
@@ -1424,10 +1433,44 @@ async function saveAll() {
       S.devicesSha = await putJson('devices.json', S.D, S.devicesSha, 'Update phones and settings');
       S.devDirty = false;
     }
-    say('Saving. GitHub saves it within a minute, and phones pick it up a few minutes after.');
+    S.saveError = null; S.saveBlocked = false;
+    if (did) noteSave();                      // one more recent commit, for the adaptive batching
+    say(auto ? 'Saved ✓ · phones pick it up within a few minutes.'
+             : 'Saving. GitHub saves it within a minute, and phones pick it up a few minutes after.');
     render();
-  } catch (e) { say(e.message, true); }
+  } catch (e) { S.saveError = e.message; S.saveBlocked = false; if (!auto) say(e.message, true); }
   finally { $('saveBtn').disabled = false; renderSaveBar(); }
+}
+// Auto-save: a change commits itself a short moment after the last edit — no Save button to press. The small delay
+// batches a burst of edits (toggles, typing) into one save instead of one per keystroke.
+let autoSaveTimer = null, autoSaving = false;
+// Adaptive batching: the wait before a change commits grows when saves are coming thick and fast, so a busy spell
+// folds many edits into fewer commits (fewer GitHub Actions runs), then eases back to snappy once things calm down.
+// It only paces THIS admin's edits — phones' own check-ins are separate traffic it can't control.
+let saveTimes = [];
+const SAVE_WINDOW = 120000;                        // judge "how busy" over the last 2 minutes
+function noteSave() { const now = Date.now(); saveTimes.push(now); saveTimes = saveTimes.filter(t => now - t < SAVE_WINDOW); }
+function autoSaveDelay() {
+  const now = Date.now(), n = saveTimes.filter(t => now - t < SAVE_WINDOW).length;   // recent commits
+  return n < 5 ? 1200 : n < 10 ? 3000 : n < 18 ? 6000 : 12000;   // calm → snappy; very busy → batch hard (max 12s)
+}
+// reset=true (a fresh edit) restarts the delay, so a burst of edits batches into one save. reset=false (a plain
+// re-render, or coming back online with changes still pending) only starts a timer if none is already running, so
+// frequent re-renders can't keep pushing the save off, and an edit made while briefly offline still saves on reconnect.
+function scheduleAutoSave(reset = true) {
+  if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty)) return;
+  if (autoSaveTimer != null) { if (!reset) return; clearTimeout(autoSaveTimer); }
+  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, autoSaveDelay());
+}
+async function runAutoSave() {
+  if (autoSaving || !S.connected || !(S.listDirty || S.devDirty)) return;
+  autoSaving = true;
+  try { await saveAll(true); }
+  finally {
+    autoSaving = false;
+    if ((S.listDirty || S.devDirty) && !S.saveBlocked && !S.saveError) scheduleAutoSave(true);  // edits landed during the save: catch them
+    else if (S.saveError && !S.saveBlocked) autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 5000);  // a transient send problem: try again shortly
+  }
 }
 async function undoAll() {
   if (!(await uiConfirm('Undo all unsaved changes?', 'Everything since your last Save goes back to how it was.', 'Undo', { icon: 'warn' }))) return;
@@ -1439,20 +1482,40 @@ async function undoAll() {
   } catch (e) { say(e.message, true); }
 }
 function renderSaveBar() {
-  const n = (S.listDirty ? 1 : 0) + (S.devDirty ? 1 : 0);
-  $('savebar').hidden = !n || !S.connected;
-  document.body.classList.toggle('unsaved', !!n && S.connected);
-  $('saveText').textContent = S.listDirty && S.devDirty ? `Changes to ${listLabel(S.current)} and phones not saved yet`
-    : S.listDirty ? `Changes to ${listLabel(S.current)} not saved yet` : 'Changes to phones not saved yet';
+  const pending = !!(S.listDirty || S.devDirty);
+  const show = (pending || S.saveError) && S.connected;
+  $('savebar').hidden = !show;
+  document.body.classList.toggle('unsaved', show);
+  if (!show) return;
+  if (S.saveError) {                         // a save that didn't go through: say so, and offer to try again
+    $('saveText').textContent = 'Couldn’t save — ' + S.saveError;
+    $('undoBtn').hidden = true;
+    $('saveBtn').hidden = false; $('saveBtn').textContent = 'Retry'; $('saveBtn').disabled = false;
+  } else {                                   // changes are saving themselves — no button to press
+    $('saveText').textContent = 'Saving your changes…';
+    $('undoBtn').hidden = true; $('saveBtn').hidden = true;
+    scheduleAutoSave(false);
+  }
 }
-$('saveBtn').onclick = saveAll;
+$('saveBtn').onclick = () => { S.saveBlocked = false; S.saveError = null; saveAll(false); };
 $('undoBtn').onclick = undoAll;
 if (!INAPP) window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.sending || QUEUE.ops.length || CMDQ.sending) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- lists ----------
 // Unsaved changes to the open list: ask before leaving them.
-const discardListChanges = async () => !S.listDirty ||
-  uiConfirmDanger('Discard unsaved changes?', `Your changes to ${listLabel(S.current)} haven't been saved.`, 'Discard', 'warn');
+// Changes save themselves, so before leaving we just flush whatever's still pending. Only changes that can't be
+// saved yet (an invalid entry) still ask, since leaving really would drop them.
+async function flushSave() { clearTimeout(autoSaveTimer); if ((S.listDirty || S.devDirty) && !S.saveBlocked) await saveAll(true); }
+async function flushAndClose() {
+  await flushSave();
+  for (let i = 0; i < 50 && (QUEUE.busy || QUEUE.ops.length || (typeof CMDQ !== 'undefined' && CMDQ.sending)); i++) await new Promise(r => setTimeout(r, 100));
+  closeAdmin();
+}
+const discardListChanges = async () => {
+  if (!S.listDirty) return true;
+  if (S.saveBlocked) return uiConfirmDanger('Discard unsaved changes?', `Your changes to ${listLabel(S.current)} can’t be saved yet (${S.saveError || 'check the entries'}). Leave and discard them?`, 'Discard', 'warn');
+  await flushSave(); return true;
+};
 async function switchList(name) {
   if (name === S.current) return;
   if (!(await discardListChanges())) return;
@@ -1480,7 +1543,7 @@ async function newList() {
   S.L = toModel({ sites: [], block: [] });
   markList();
   render();
-  say(`New list "${listLabel(name)}". Add sites and tap Save, then give it to phones under Phones.`);
+  say(`New list "${listLabel(name)}". Add sites, then give it to phones under Phones.`);
 }
 async function deleteList() {
   const name = S.current;
@@ -3204,7 +3267,7 @@ function sitesScreen() {
   const live = L.temporary.filter(t => tempEnd(t) > Date.now());
   const temps = live.map(t => h('div', { class: 'tempcard' }, icon('clock', 22),
     h('span', { class: 'grow' }, h('b', null, t.entry), h('span', { class: 'small' }, `${t.what === 'media' ? 'Photos, videos and sound on' : t.what === 'photos' ? 'Photos on' : t.what === 'videos' ? 'Videos on' : t.what === 'sound' ? 'Sound on' : 'Open'} ${tempLeft(t)}${t.unfiltered ? ', despite a filter' : ''}`)),
-    h('button', { type: 'button', onclick: () => { L.temporary = L.temporary.filter(x => x !== t); markList(); render(); say(`${t.entry} will close when you tap Save.`); } }, 'End now')));
+    h('button', { type: 'button', onclick: () => { L.temporary = L.temporary.filter(x => x !== t); markList(); render(); say(`${t.entry} will close in a few minutes.`); } }, 'End now')));
   const rows = L.sites.map((s, i) => h('button', { type: 'button', class: 'row siterow', onclick: () => open({ name: 'site', index: i }) },
     h('span', { class: 'tile', style: `color:${tileColor(s.domain)}` }, (s.name || s.domain || '?').replace(/^www\./, '')[0].toUpperCase()),
     h('span', { class: 'grow' }, h('span', { style: 'display:flex;align-items:baseline;gap:6px;min-width:0' },
@@ -3282,7 +3345,7 @@ function siteScreen() {
     say(`${isNew ? 'Added' : 'Updated'} ${site.name || dom}. Tap Save to apply it.`);
   };
   const remove = async () => {
-    if (!(await uiConfirmDanger(`Remove ${d.name || d.domain}?`, `It comes off ${listLabel(S.current)} when you tap Save.`, 'Remove'))) return;
+    if (!(await uiConfirmDanger(`Remove ${d.name || d.domain}?`, `It comes off ${listLabel(S.current)} in a few minutes.`, 'Remove'))) return;
     S.L.sites.splice(sub.index, 1); markList(); back();
   };
   const letter = (d.name || d.domain || '?').replace(/^www\./, '')[0] || '?';
@@ -3468,7 +3531,7 @@ function embedsScreen() {
     const raw = from.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('?')[0].split('#')[0].replace(/\/+$/, '');
     const f1 = raw.includes('/') ? (/^[a-z0-9.-]+\.[a-z]{2,}\//.test(raw) ? raw : '') : (normalize(raw) || '').replace(/^www\./, '');
     if (!s1 || !f1 || hasPath(s1)) return say('Type a site, e.g. bbc.co.uk, and what may show in it: a site like player.vimeo.com, or one part like youtube.com/embed/abc.', true);
-    save({ ...E, [s1]: [...(E[s1] || []), f1] }); say(`Content from ${f1} can show on ${s1} once you tap Save.`);
+    save({ ...E, [s1]: [...(E[s1] || []), f1] }); say(`Content from ${f1} can show on ${s1} in a few minutes.`);
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites'),
     screenTitle('Embedded content allowed', `In ${listLabel(S.current)}`),
@@ -3566,7 +3629,7 @@ function importScreen() {
         if (i >= 0) { S.L.sites[i] = { ...S.L.sites[i], ...s, passThrough: S.L.sites[i].passThrough }; updated++; } else { S.L.sites.push(s); added++; }
       }
       markList(); back();
-      say(`${plural(added, 'site')} added${updated ? `, ${updated} updated` : ''}${bad.length ? `. Skipped: ${bad.slice(0, 5).join(', ')}` : ''}. Check them, then tap Save.`);
+      say(`${plural(added, 'site')} added${updated ? `, ${updated} updated` : ''}${bad.length ? `. Skipped: ${bad.slice(0, 5).join(', ')}` : ''}. They save automatically.`);
     } catch (e) { say(e.message, true); }
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites'),
@@ -3961,13 +4024,13 @@ function phoneScreen() {
     d.blockedLists = [...new Set([...(d.lists || []), ...(d.blockedLists || [])])];
     d.lists = []; d.blocked = true;
     markDevices(); render();
-    say(`${d.name || id} will be blocked when you tap Save.`);
+    say(`${d.name || id} will be blocked in a few minutes.`);
   };
   const unblock = () => {
     d.lists = [...new Set([...(d.lists || []), ...(d.blockedLists || []).filter(l => S.lists.includes(l))])];
     delete d.blocked; delete d.blockedLists;
     markDevices(); render();
-    say(`${d.name || id} will be unblocked when you tap Save.`);
+    say(`${d.name || id} will be unblocked in a few minutes.`);
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Phones'),
     h('div', { style: 'display:flex;align-items:center;gap:14px;padding:0 4px' }, h('span', { class: 'av big' }, (d.name || '?')[0].toUpperCase()),
