@@ -166,7 +166,7 @@ class MainActivity : Activity() {
         // ~1.4s so the short animation isn't cut off when the app loads quickly.
         val splash = installSplashScreen()
         val splashStart = android.os.SystemClock.elapsedRealtime()
-        splash.setKeepOnScreenCondition { android.os.SystemClock.elapsedRealtime() - splashStart < 1400 }
+        splash.setKeepOnScreenCondition { android.os.SystemClock.elapsedRealtime() - splashStart < 1200 }
         // Light or dark: the phone's own setting, unless chosen in ⋮ → Appearance.
         Ui.applyTheme(this)
         setTheme(if (Ui.dark) R.style.AppThemeDark else R.style.AppTheme)
