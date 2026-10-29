@@ -32,7 +32,7 @@ object SearchBar {
     /** The one set of styles for the box (the "spotlight" look). Uses the page's palette tokens, so it follows the theme. */
     val CSS = """
   .search { display: flex; align-items: center; gap: .6rem; min-height: 58px; border-radius: 18px; background: var(--tile);
-    border: 1.5px solid var(--edge); padding: 0 .5rem 0 .95rem; margin: 0; box-shadow: 0 8px 20px -10px rgba(16, 28, 29, .28);
+    border: 1.5px solid var(--edge); padding: 0 .5rem 0 .95rem; margin: 0; box-shadow: 0 8px 20px -10px rgba(10, 16, 38, .28);
     transition: border-color .15s, box-shadow .15s; }
   .search > svg { flex: none; color: var(--muted); }
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 48px; }

@@ -194,6 +194,15 @@ object Ui {
         if (strokePx > 0) setStroke(strokePx, stroke)
     }
 
+    /** Like [rounded], but with a touch ripple on top (so a button clearly reacts to a tap). [ripple] is the ripple
+     *  colour (translucent); the default is a soft accent for light surfaces — pass a translucent white on filled ones. */
+    fun pressable(color: Int, radiusPx: Float, stroke: Int = 0, strokePx: Int = 0,
+                  ripple: Int = (ACCENT and 0xFFFFFF) or 0x40000000): android.graphics.drawable.Drawable {
+        val base = rounded(color, radiusPx, stroke, strokePx)
+        val mask = rounded(Color.WHITE, radiusPx)
+        return android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(ripple), base, mask)
+    }
+
     fun text(ctx: Context, s: CharSequence, sp: Float = 15f, color: Int = INK, weight: String = "body"): TextView =
         TextView(ctx).apply {
             text = s

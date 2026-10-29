@@ -109,8 +109,8 @@ object MediaBlock {
   var style = document.createElement('style');
   style.textContent =
     '.wlb-ph{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;max-width:100%;' +
-    'min-height:40px;padding:6px 10px;margin:2px 0;border:1px dashed #8aa9a4;border-radius:8px;background:#eef4f2;' +
-    'color:#1f3a3d;font:13px/1.3 system-ui,sans-serif;text-align:center;cursor:pointer;overflow:hidden}' +
+    'min-height:40px;padding:6px 10px;margin:2px 0;border:1px dashed #9FB0D6;border-radius:8px;background:#EEF2FB;' +
+    'color:#121A3A;font:13px/1.3 system-ui,sans-serif;text-align:center;cursor:pointer;overflow:hidden}' +
     // Videos off: a video player stays out of sight until it's known to have no picture (then it's sound).
     (off.videos ? 'object,embed{display:none!important}video:not([data-wlb-ok]){visibility:hidden!important}' : '') +
     (off.photos ? '*{background-image:none!important}' : '');
@@ -205,7 +205,7 @@ object MediaBlock {
     var ask = document.createElement('a');
     ask.textContent = 'Ask for videos';
     ask.href = 'wlb://ask-media?kind=videos' + (srcOf(el) ? '&src=' + encodeURIComponent(srcOf(el)) : '');
-    ask.style.cssText = 'pointer-events:auto;color:#1f5f55;font-weight:700;text-decoration:underline';
+    ask.style.cssText = 'pointer-events:auto;color:#3B5BFF;font-weight:700;text-decoration:underline';
     tag.appendChild(t); tag.appendChild(ask);
     if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
     host.appendChild(tag);

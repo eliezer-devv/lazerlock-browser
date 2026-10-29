@@ -63,7 +63,7 @@ object PinScreen {
             else {
                 setTextColor(Ui.INK)
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-                background = Ui.rounded(Ui.CARD, dp(33).toFloat(), Ui.OUTLINE, dp(1))
+                background = Ui.pressable(Ui.CARD, dp(33).toFloat(), Ui.OUTLINE, dp(1))
                 setOnClickListener { press(label) }
             }
         }
@@ -72,8 +72,8 @@ object PinScreen {
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 15f)
             minHeight = dp(50); minimumHeight = dp(50)
             val px = dp(22); setPadding(px, 0, px, 0)
-            if (primary) { background = Ui.rounded(Ui.ACCENT, dp(25).toFloat()); setTextColor(Color.WHITE) }
-            else { background = Ui.rounded(Ui.CARD, dp(25).toFloat(), Ui.OUTLINE, dp(1)); setTextColor(Ui.ACCENT_TEXT) }
+            if (primary) { background = Ui.pressable(Ui.ACCENT, dp(25).toFloat(), ripple = 0x55FFFFFF); setTextColor(Color.WHITE) }
+            else { background = Ui.pressable(Ui.CARD, dp(25).toFloat(), Ui.OUTLINE, dp(1)); setTextColor(Ui.ACCENT_TEXT) }
             setOnClickListener { onTap() }
         }
         // The two bottom-corner keys: ⌫ (undo, bottom-left) and → (enter, bottom-right, the primary action).
@@ -81,8 +81,8 @@ object PinScreen {
             text = label; isAllCaps = false; textSize = 22f
             minWidth = 0; minHeight = 0; setPadding(0, 0, 0, 0); stateListAnimator = null
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            if (primary) { background = Ui.rounded(Ui.ACCENT, dp(33).toFloat()); setTextColor(Color.WHITE) }
-            else { background = Ui.rounded(Ui.CARD, dp(33).toFloat(), Ui.OUTLINE, dp(1)); setTextColor(Ui.INK) }
+            if (primary) { background = Ui.pressable(Ui.ACCENT, dp(33).toFloat(), ripple = 0x55FFFFFF); setTextColor(Color.WHITE) }
+            else { background = Ui.pressable(Ui.CARD, dp(33).toFloat(), Ui.OUTLINE, dp(1)); setTextColor(Ui.INK) }
             setOnClickListener { onTap() }
         }
 

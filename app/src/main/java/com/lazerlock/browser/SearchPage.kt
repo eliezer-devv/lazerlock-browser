@@ -114,7 +114,7 @@ object SearchPage {
 <title>{{title}}</title>
 <style>
   @font-face { font-family: 'Figtree'; src: url('/home/fonts/Figtree.ttf') format('truetype'); font-weight: 300 900; font-display: swap; }
-  :root { --bg: #F5F3EE; --ink: #1C2B2D; --muted: #5B6B69; --tile: #FFFFFF; --edge: #E7E3DB; --accent: #1F5F55; --accent-text: #1F5F55; --soft: #E1EEEA; }
+  :root { --bg: #F4F7FD; --ink: #121A3A; --muted: #5B6680; --tile: #FFFFFF; --edge: #E3E8F4; --accent: #3B5BFF; --accent-text: #3B5BFF; --soft: #E7ECFF; }
   :root[data-theme="dark"] { color-scheme: dark; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 Figtree, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
