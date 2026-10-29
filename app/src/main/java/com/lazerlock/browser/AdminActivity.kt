@@ -77,22 +77,29 @@ class AdminActivity : Activity() {
         return bm.canAuthenticate() == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS
     }
 
-    private fun askBiometric(done: (Boolean) -> Unit) {
-        if (!canUseBiometric() || android.os.Build.VERSION.SDK_INT < 29) { done(false); return }
+    private fun askBiometric(done: (Boolean, Boolean) -> Unit) {
+        if (!canUseBiometric() || android.os.Build.VERSION.SDK_INT < 29) { done(false, false); return }
         val executor = mainExecutor
         var answered = false
-        val once = { ok: Boolean -> if (!answered) { answered = true; done(ok) } }
+        val once = { ok: Boolean, cancelled: Boolean -> if (!answered) { answered = true; done(ok, cancelled) } }
         val prompt = android.hardware.biometrics.BiometricPrompt.Builder(this)
             .setTitle("Open the admin")
             .setSubtitle("Use your fingerprint (or face)")
-            .setNegativeButton("Cancel", executor) { _, _ -> once(false) }
+            .setNegativeButton("Cancel", executor) { _, _ -> once(false, true) }
             .build()
         runCatching {
             prompt.authenticate(android.os.CancellationSignal(), executor, object : android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
-                override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?) { once(true) }
-                override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) { once(false) }
+                override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?) { once(true, false) }
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
+                    // Dismissing the prompt (Cancel, Back, or the system cancelling it) is not a failed match — flag it
+                    // as a cancel so the admin page stays quiet instead of saying "Not recognised".
+                    val cancelled = errorCode == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED ||
+                        errorCode == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_NEGATIVE_BUTTON ||
+                        errorCode == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_CANCELED
+                    once(false, cancelled)
+                }
             })
-        }.onFailure { once(false) }
+        }.onFailure { once(false, false) }
     }
 
     /** A link from an admin email (#confirm=…, #invite=…, #reset=…), opened in the app: the page handles it. */
@@ -233,7 +240,7 @@ class AdminActivity : Activity() {
 
             /** Asks for the fingerprint; the page hears back through window.wlBioDone(true or false). */
             @android.webkit.JavascriptInterface
-            fun biometric() { runOnUiThread { askBiometric { ok -> web.evaluateJavascript("window.wlBioDone && window.wlBioDone($ok)", null) } } }
+            fun biometric() { runOnUiThread { askBiometric { ok, cancelled -> web.evaluateJavascript("window.wlBioDone && window.wlBioDone($ok, $cancelled)", null) } } }
         }, "WLBAdmin")
         web.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
