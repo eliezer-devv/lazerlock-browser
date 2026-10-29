@@ -85,13 +85,20 @@
   /* A solid strip that stays pinned at the top, so tiles scroll underneath it (not showing through). */
   .searchwrap { position: sticky; top: 0; z-index: 12; background: var(--bg); padding: .5rem 0 .9rem; box-shadow: 0 10px 10px -8px var(--bg); }
   .searchwrap[hidden] { display: none; }
-  .search { display: flex; align-items: center; gap: .6rem; min-height: 54px; border-radius: 27px; background: var(--tile);
-    border: 1px solid var(--edge); padding: 0 .4rem 0 1.1rem; margin: 0; box-shadow: 0 2px 8px -4px rgba(16, 28, 29, .3); }
+  /* Spotlight search: a prominent, modern squircle field with a laser-blue action button. Independent of the rest
+     of the home page — it only shows when text search is on for this phone. */
+  .search { display: flex; align-items: center; gap: .7rem; min-height: 58px; border-radius: 18px; background: var(--tile);
+    border: 1.5px solid var(--edge); padding: 0 .5rem 0 1.15rem; margin: 0; box-shadow: 0 8px 20px -10px rgba(16, 28, 29, .28);
+    transition: border-color .15s, box-shadow .15s; }
   .search > svg { flex: none; color: var(--muted); }
   .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 48px; }
   .search input::placeholder { color: var(--muted); }
-  .search:focus-within { border-color: var(--accent); }
-  .search .go { flex: none; width: 46px; height: 46px; border-radius: 999px; border: 0; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+  .search:focus-within { border-color: var(--accent); box-shadow: 0 10px 24px -10px color-mix(in srgb, var(--accent) 45%, transparent); }
+  .search .go { flex: none; width: 44px; height: 44px; border-radius: 13px; border: 0; color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+    background: var(--accent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 82%, white), var(--accent));
+    box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--accent) 65%, transparent); }
+  .search .go:active { filter: brightness(.95); }
   .search .go svg { color: #fff; }
   .search[hidden] { display: none; }
   /* Folders: small versions of the first four tiles; drop a tile on another to make one. */
@@ -127,7 +134,7 @@
   </div>
   <div class="searchwrap" id="searchwrap" hidden>
     <form class="search" id="search" action="/search/" method="get" role="search">
-      <input type="search" name="q" placeholder="Search" aria-label="Search" autocomplete="off" enterkeyhint="search">
+      <input type="search" name="q" placeholder="Search the web safely" aria-label="Search" autocomplete="off" enterkeyhint="search">
       <button class="go" type="submit" aria-label="Search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg></button>
     </form>
   </div>
