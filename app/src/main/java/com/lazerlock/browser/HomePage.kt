@@ -26,7 +26,9 @@ object HomePage {
                     // The app's own colours right now (light, dark, or the phone's), so the page always matches.
                     .replaceFirst("</head>", "<style>:root,:root[data-theme=\"dark\"]{--bg:${Ui.hex(Ui.PAGE)};--ink:${Ui.hex(Ui.INK)};" +
                         "--muted:${Ui.hex(Ui.MUTED)};--tile:${Ui.hex(Ui.CARD)};--edge:${Ui.hex(Ui.LINE)};--accent:${Ui.hex(Ui.ACCENT)};" +
-                        "--accent-text:${Ui.hex(Ui.ACCENT_TEXT)};--soft:${Ui.hex(Ui.SOFT)}}</style></head>")
+                        "--accent-text:${Ui.hex(Ui.ACCENT_TEXT)};--soft:${Ui.hex(Ui.SOFT)}}" + SearchBar.CSS + "</style></head>")
+                    // The one shared search box (same on the results page); its {{searchbar}} slot sits in the home page.
+                    .replace("{{searchbar}}", SearchBar.form())
                 WebResourceResponse("text/html", "utf-8", 200, "OK", headers, ByteArrayInputStream(html.toByteArray()))
             }
             // The app's fonts (packed in at build time), so the home page matches the rest of the app.

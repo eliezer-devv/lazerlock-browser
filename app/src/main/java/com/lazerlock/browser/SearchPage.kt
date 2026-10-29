@@ -35,10 +35,7 @@ object SearchPage {
         val pages = (uri.getQueryParameter("p")?.toIntOrNull() ?: 0).coerceIn(0, MAX_PAGES)
         val s = Whitelist.state
         val body = StringBuilder()
-        body.append("<form class=\"search\" action=\"/search/\" method=\"get\" role=\"search\">")
-            .append("<input type=\"search\" name=\"q\" value=\"${esc(q)}\" placeholder=\"Search\" aria-label=\"Search\" autocomplete=\"off\" enterkeyhint=\"search\"")
-            .append(if (q.isEmpty()) " autofocus" else "").append(">")
-            .append("<button class=\"go\" type=\"submit\" aria-label=\"Search\">").append(ICON_SEARCH).append("</button></form>")
+        body.append(SearchBar.form(q, q.isEmpty()))     // the one shared search box (same as the home page)
         when {
             !Whitelist.searchOn() && s.search -> body.append("<p class=\"note\">Search is off during ${esc(Timers.activeNow().firstOrNull { it.search == "off" }?.name ?: "a timer")}.</p>")
             !Whitelist.searchOn() -> body.append("<p class=\"note\">Search isn't turned on for this phone. You can ask for it: ⋮ → Ask for search.</p>")
@@ -84,7 +81,7 @@ object SearchPage {
             .replaceFirst("<html lang=\"en\">", "<html lang=\"en\" data-theme=\"${if (Ui.dark) "dark" else "light"}\">")
             .replaceFirst("</head>", "<style>:root,:root[data-theme=\"dark\"]{--bg:${Ui.hex(Ui.PAGE)};--ink:${Ui.hex(Ui.INK)};" +
                 "--muted:${Ui.hex(Ui.MUTED)};--tile:${Ui.hex(Ui.CARD)};--edge:${Ui.hex(Ui.LINE)};--accent:${Ui.hex(Ui.ACCENT)};" +
-                "--accent-text:${Ui.hex(Ui.ACCENT_TEXT)};--soft:${Ui.hex(Ui.SOFT)}}</style></head>")
+                "--accent-text:${Ui.hex(Ui.ACCENT_TEXT)};--soft:${Ui.hex(Ui.SOFT)}}" + SearchBar.CSS + "</style></head>")
         return WebResourceResponse("text/html", "utf-8", 200, "OK", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(html.toByteArray()))
     }
 
@@ -109,8 +106,6 @@ object SearchPage {
     /** A safety ceiling on how many result pages to page through (words-only results rarely approach this). */
     private const val MAX_PAGES = 25
 
-    private const val ICON_SEARCH = "<svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-4-4\"/></svg>"
-
     private val PAGE = """<!doctype html>
 <html lang="en">
 <head>
@@ -124,12 +119,7 @@ object SearchPage {
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 Figtree, system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
   main { max-width: 40rem; margin: 0 auto; padding: .9rem 1rem 3rem; display: flex; flex-direction: column; gap: .7rem; }
-  .search { display: flex; align-items: center; gap: .6rem; min-height: 52px; border-radius: 26px; background: var(--tile); border: 1px solid var(--edge); padding: 0 .4rem 0 1.1rem; }
-  .search > svg { flex: none; color: var(--muted); }
-  .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 16px Figtree, system-ui, sans-serif; min-height: 44px; }
-  .search:focus-within { border-color: var(--accent); }
-  .search .go { flex: none; width: 46px; height: 46px; border-radius: 999px; border: 0; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
-  .search .go svg { color: #fff; }
+  /* The search box (.search) styles come from SearchBar.CSS, injected at serve time — the same box as the home page. */
   .pageline { text-align: center; color: var(--muted); font-size: .82rem; font-weight: 600; margin: .1rem 0 .3rem; }
   .pager { display: flex; justify-content: center; align-items: center; gap: .4rem; margin: .5rem 0 .2rem; flex-wrap: wrap; }
   .pager .pg { min-width: 40px; height: 40px; padding: 0 .55rem; border-radius: 11px; border: 1px solid var(--edge); background: var(--tile); color: var(--muted); font-weight: 600; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; }
