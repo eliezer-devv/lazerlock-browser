@@ -171,9 +171,15 @@
   .pubtag { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
     background: #E3ECF5; color: #2F5D8A; white-space: nowrap; }
   .kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+  /* Select-and-approve: the tick box on a request row, the selected state, and the sticky action bar. */
+  .chk { flex: none; width: 22px; height: 22px; border-radius: 7px; border: 2px solid var(--field); display: grid; place-items: center; color: #fff; }
+  .chk.on { background: var(--accent); border-color: var(--accent); }
+  .row.sel { background: var(--accent-soft); }
+  .selbar { position: sticky; bottom: 8px; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 9px 10px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 20px -8px rgba(10, 16, 38, .35); }
   /* Photos, videos and sound: Open / Blocked (and Default) */
-  .seg.ob { flex: none; gap: 2px; padding: 3px; }
-  .seg.ob button { flex: none; padding: 0 14px; min-height: 38px; }
+  .seg.ob { flex: none; gap: 2px; padding: 3px; align-self: flex-start; }
+  .seg.ob button { flex: none; padding: 0 11px; min-height: 34px; font-size: 13px; }
   .seg.ob button[aria-pressed="true"][data-v="open"] { background: var(--accent); color: #fff; }
   .seg.ob button[aria-pressed="true"][data-v="blocked"] { background: var(--danger); color: #fff; }
   .seg.ob button:disabled { opacity: .55; }
@@ -2637,8 +2643,19 @@ function requestsScreen() {
   if (S.inboxError) kids.push(h('div', { class: 'card' }, h('p', { class: 'warn' }, S.inboxError)));
   // Waiting requests: each a compact row (like an answered one) — tap to open its details and answer.
   if (reqs && reqs.length) {
-    kids.push(h('h2', { class: 'sec' }, 'Waiting'));
+    const eligible = reqs.filter(bulkOK);
+    if (eligible.length < 1) S.selMode = false;
+    kids.push(h('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px' },
+      h('h2', { class: 'sec', style: 'margin:0' }, 'Waiting'),
+      eligible.length > 1 ? h('button', { type: 'button', class: 'btn s sm', id: 'selToggle', onclick: () => { S.selMode = !S.selMode; S.selected = new Set(); render(); } }, S.selMode ? 'Done' : 'Select') : null));
     kids.push(h('div', { class: 'group' }, reqs.map(waitingRow)));
+    if (S.selMode) {
+      const n = selSet().size, allOn = n === eligible.length;
+      kids.push(h('div', { class: 'selbar' },
+        h('button', { type: 'button', class: 'btn s sm', onclick: () => { S.selected = allOn ? new Set() : new Set(eligible.map(i => i.number)); render(); } }, allOn ? 'None' : 'All'),
+        h('span', { class: 'grow small', style: 'text-align:center' }, n ? `${plural(n, 'request')} selected` : 'Tap the ones to approve'),
+        h('button', { type: 'button', class: 'btn p sm', disabled: !n, onclick: approveSelected }, n ? `Approve ${n}` : 'Approve')));
+    }
   }
   else if (reqs && !S.inboxError) kids.push(h('div', { class: 'empty' }, h('b', null, 'All caught up'), 'New requests from phones appear here.'));
   if (S.newPhones.length) {
@@ -2673,11 +2690,57 @@ function requestsScreen() {
   return h('main', { class: 'stack' }, kids);
 }
 const possessive = n => /^the /.test(n) ? `${n}'s` : `${n}'${/s$/i.test(n) ? '' : 's'}`;
-// A waiting request, as a compact row: tap it to open the details and answer there.
+const phoneName = issue => field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
+// Straightforward "open the site" requests can be approved in a batch from the list. Anything that wants a closer look
+// — a block, turning media back on, embedded content, a filtered site, or a settings/timer/browser request — is left
+// to be opened and answered on its own.
+function bulkOK(issue) {
+  const req = marker(issue.body);
+  if (!req || typeof req !== 'object') return false;
+  if (['timer', 'browser', 'unprotect', 'uncoverlists', 'mediaDefault', 'search'].includes(req.type)) return false;
+  if (req.action === 'block' || req.media === 'on' || !req.domain) return false;
+  if (Array.isArray(req.frames) && req.frames.length) return false;
+  if (Array.isArray(req.filtered) && req.filtered.some(f => ['adult', 'gambling', 'malware'].includes(f))) return false;
+  return !!S.D.devices[String(req.device || '').toUpperCase()];   // a known phone, so its own list is a safe target
+}
+const selSet = () => (S.selected instanceof Set ? S.selected : (S.selected = new Set()));
+// Approve every selected request at once: each is sent as a plain "approve" to the phone's own list, and they ride out
+// together in one save. Requests needing a closer look were never selectable, so this stays safe.
+async function approveSelected() {
+  const nums = [...selSet()];
+  const list = (S.requests || []).filter(i => nums.includes(i.number) && bulkOK(i));
+  if (!list.length) return;
+  if (!(await uiConfirm(`Approve ${plural(list.length, 'request')}?`, 'Each opens the site as asked, added to that phone\'s own list. It saves automatically.', 'Approve all', { icon: 'check' }))) return;
+  list.forEach(issue => {
+    const req = marker(issue.body);
+    reply(issue.number, 'approve own', false);
+    S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
+    S.answered.unshift({ title: describe(req).title, label: `Approved, in their own list · ${phoneName(issue)}` });
+  });
+  const done = new Set(list.map(i => i.number));
+  S.requests = (S.requests || []).filter(i => !done.has(i.number));
+  S.selMode = false; S.selected = new Set();
+  render();
+  say(`Approved ${plural(list.length, 'request')}. GitHub does them within a minute, and the phones are told a few minutes after.`);
+}
+// A waiting request, as a compact row: tap it to open the details and answer there. In select mode, the eligible ones
+// tap to tick/untick instead (the rest still open as usual).
 function waitingRow(issue) {
   const req = marker(issue.body);
   const { title } = describe(req);
-  const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
+  const phone = phoneName(issue);
+  if (S.selMode) {
+    const ok = bulkOK(issue), sel = selSet().has(issue.number);
+    return h('button', { type: 'button', class: 'row tap' + (sel ? ' sel' : ''), 'data-n': issue.number, onclick: () => {
+        if (!ok) return open({ name: 'request', number: issue.number });
+        const s = selSet(); if (s.has(issue.number)) s.delete(issue.number); else s.add(issue.number); render();
+      } },
+      ok ? h('span', { class: 'chk' + (sel ? ' on' : '') }, sel ? icon('check', 14, 3) : null)
+         : h('span', { class: 'ic', style: 'color:var(--accent)' }, icon('clock', 20, 2.2)),
+      h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, title),
+        h('span', { class: 'dom' }, ok ? `${phone} · ${ago(issue.created_at)}` : `${phone} · open to answer`)),
+      ok ? null : icon('chev', 16));
+  }
   return h('button', { type: 'button', class: 'row tap', 'data-n': issue.number, onclick: () => open({ name: 'request', number: issue.number }) },
     h('span', { class: 'ic', style: 'color:var(--accent)' }, icon('clock', 20, 2.2)),
     h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, title),
@@ -3301,7 +3364,7 @@ function sitesScreen() {
     // the list-wide overviews in List settings.)
     h('div', { class: 'group' },
       moreRow('clock', 'Open something temporarily', null, () => open({ name: 'temp' }), 'openTemp'),
-      moreRow('ban', 'Always blocked', L.block.length, () => open({ name: 'block' }), 'openBlock'),
+      moreRow('ban', 'Blocked & limited pages', new Set([...L.block, ...L.noPhotoPages, ...L.noVideoPages, ...L.noSoundPages, ...(L.photosOn || []), ...(L.videosOn || []), ...(L.soundOn || []), ...(L.mediaAllow || [])]).size || null, () => open({ name: 'nomedia' }), 'openBlock'),
       moreRow('gear', 'List settings', null, () => open({ name: 'listsettings' }), 'openListSettings')));
 }
 
@@ -3400,28 +3463,12 @@ function siteScreen() {
 }
 
 // The small photos/videos/sound row on the site screen: one Open/Blocked/Default choice for all three at once, with a
-// "Set each" disclosure that opens the full per-part control and this site's always-blocked pages. Stays on this one
-// screen (no navigating away) so a half-typed new site is never lost.
+// "Set each" disclosure that opens the full per-part control. Stays on this one screen (no navigating away) so a
+// half-typed new site is never lost. (Always-blocked pages live together on one page — Sites → Blocked & limited pages.)
 function siteMediaCompact(d, isNew) {
   const agg = MKINDS.map(([k]) => { const K = capFirst(k); return d['no' + K] ? 'blocked' : d['on' + K] ? 'open' : 'default'; });
   const uniform = agg.every(v => v === agg[0]) ? agg[0] : 'mixed';
   const setAll = nv => { MKINDS.forEach(([k]) => { const K = capFirst(k); d['no' + K] = nv === 'blocked'; d['on' + K] = nv === 'open'; }); render(); };
-  const dom = (normalize(d.domain) || '').replace(/^www\./, '');
-  // This site's always-blocked pages (the subset of the list's "always blocked" that's on this site).
-  const mine = dom ? S.L.block.filter(b => pageOnSite(b, dom, d.subdomains)) : [];
-  const ta = h('textarea', { class: 'inp', id: 'sBlockHere', rows: 3, placeholder: dom ? `${dom}/forum` : 'e.g. example.com/forum',
-    autocapitalize: 'off', spellcheck: 'false', style: 'min-height:72px;padding-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:13px' }, mine.join('\n'));
-  const saveBlk = () => {
-    const lines = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
-    const bad = lines.filter(l => !blockEntry(l));
-    if (bad.length) { ta.classList.add('bad'); return say(`These don't look like page addresses: ${bad.join(', ')}`, true); }
-    ta.classList.remove('bad');
-    const cleaned = lines.map(l => blockEntry(l));
-    const others = S.L.block.filter(b => !(dom && pageOnSite(b, dom, d.subdomains)));   // keep entries for other sites
-    const next = [...new Set([...others, ...cleaned])];
-    if (next.join('\n') !== S.L.block.join('\n')) { S.L.block = next; markList(); say('Always-blocked pages updated. It saves automatically.'); }
-  };
-  ta.addEventListener('change', saveBlk);
   return h('div', { class: 'stack', style: 'gap:8px' },
     // Label and note on their own lines (full width), the segment below — so the text isn't squeezed next to the buttons.
     h('div', { class: 'mrow' },
@@ -3429,12 +3476,8 @@ function siteMediaCompact(d, isNew) {
       h('span', { class: 's' }, uniform === 'mixed' ? 'Set differently per part — open “Set each” below' : 'Tap “Set each” to split them'),
       h('div', { style: 'margin-top:4px' }, obSeg('Photos, videos and sound', uniform === 'mixed' ? '' : uniform, setAll,
         { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMediaAll' }))),
-    h('details', { class: 'more' }, h('summary', null, 'Set each & add always-blocked pages'),
-      h('div', { style: 'margin-top:10px' }, siteMedia(d)),
-      h('div', { class: 'field', style: 'margin-top:12px' }, h('span', { class: 'flabel' }, 'Always blocked here'),
-        dom ? h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Pages of this site to keep blocked, even though the site is open. One per line.')
-            : h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Type the address above first, then add pages of this site to keep blocked here.'),
-        dom ? ta : null)));
+    h('details', { class: 'more' }, h('summary', null, 'Set each (photos, videos, sound)'),
+      h('div', { style: 'margin-top:10px' }, siteMedia(d))));
 }
 // A site's photos, videos and sound: Default (each phone's own default), Open or Blocked (for every phone using this list).
 function siteMedia(d) {
@@ -3444,8 +3487,10 @@ function siteMedia(d) {
     if (v === 'open') return 'Open on every phone using this list';
     if (v === 'blocked') return 'Blocked on every phone using this list';
     if (!users.length) return 'Each phone\'s own default';
-    const open = users.filter(x => !defBlocks(x, k)).map(firstName), blocked = users.filter(x => defBlocks(x, k)).map(firstName);
-    return 'Default now: ' + [open.length ? `open for ${joinWords(open)}` : '', blocked.length ? `blocked for ${joinWords(blocked)}` : ''].filter(Boolean).join(', ');
+    const open = users.filter(x => !defBlocks(x, k)), blocked = users.filter(x => defBlocks(x, k));
+    // Many phones: show counts, not a long list of names, so the line stays short.
+    if (users.length > 4) return 'Default now: ' + [open.length ? `open on ${open.length}` : '', blocked.length ? `blocked on ${blocked.length}` : ''].filter(Boolean).join(', ') + ` of ${users.length} phones`;
+    return 'Default now: ' + [open.length ? `open for ${joinWords(open.map(firstName))}` : '', blocked.length ? `blocked for ${joinWords(blocked.map(firstName))}` : ''].filter(Boolean).join(', ');
   };
   return h('div', { class: 'stack', style: 'gap:8px' },
     h('span', { class: 'flabel', style: 'margin-top:4px' }, 'Photos, videos and sound on this site'),
@@ -3474,10 +3519,10 @@ function tempScreen() {
   const host = h('div', { 'data-sync': '' });
   const picker = makePicker(host, sub.minutes || 30, m => { sub.minutes = m; len.textContent = `How long: ${fmtMin(m)}`; });
   host._picker = picker;
-  if (sub.what === 'media' && !sub.mediaSel) sub.mediaSel = ['photos', 'videos', 'sound'];
+  if (sub.what === 'media' && !sub.mediaSel) sub.mediaSel = [];   // nothing picked by default — you choose
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'What to open' },
     [['site', 'Whole site'], ['page', 'One page'], ['media', 'Photos/videos/sound']].map(([v, t]) =>
-      h('button', { type: 'button', 'aria-pressed': String(sub.what === v), onclick: () => { if (sub.what !== v) { sub.what = v; if (v === 'media' && !sub.mediaSel) sub.mediaSel = ['photos', 'videos', 'sound']; render(); } } }, t)));
+      h('button', { type: 'button', 'aria-pressed': String(sub.what === v), onclick: () => { if (sub.what !== v) { sub.what = v; render(); } } }, t)));
   // Photos, videos and sound: pick any (more than one is fine) — no "All".
   const toggleMedia = v => { const s = new Set(sub.mediaSel || []); if (s.has(v)) s.delete(v); else s.add(v); sub.mediaSel = [...s]; render(); };
   const seg2 = sub.what === 'media' ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Which' },
@@ -3572,38 +3617,42 @@ const blockScreen = () => linesScreen({ backTo: 'Sites', title: 'Always blocked'
   apply: lines => { if (lines.join('\n') !== S.L.block.join('\n')) { S.L.block = lines; markList(); } } });
 // Single pages without photos, videos and/or sound: one box each (a page in all three has them all off).
 // And single photos or videos allowed where they're otherwise off.
+// One page for everything done per-page: always-blocked pages, turning photos/videos/sound off on some pages, and
+// turning single ones back on. (Always blocked used to be its own screen — it lives here now, grouped with the rest.)
 function noMediaScreen() {
   const L = S.L;
   const box = (id, label, value, ph = 'en.wikipedia.org/wiki/Shark') => h('div', { class: 'field' }, h('label', { for: id }, label),
     h('textarea', { class: 'inp', id, rows: 4, placeholder: ph, autocapitalize: 'off', spellcheck: 'false',
-      style: 'min-height:100px;padding-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:14px' }, value.join('\n')));
+      style: 'min-height:92px;padding-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:14px' }, value.join('\n')));
   const apply = () => {
-    const read = id => [...new Set($(id).value.split('\n').map(x => x.trim()).filter(Boolean))];
-    const photos = read('npText'), videos = read('nvText'), sound = read('nsText'), items = read('maText');
+    const read = id => [...new Set(($(id) ? $(id).value : '').split('\n').map(x => x.trim()).filter(Boolean))];
+    const block = read('blkText'), photos = read('npText'), videos = read('nvText'), sound = read('nsText'), items = read('maText');
     const onP = read('onpText'), onV = read('onvText'), onS = read('onsText');
-    const bad = [...photos, ...videos, ...sound].filter(l => !blockEntry(l));
+    const bad = [...block, ...photos, ...videos, ...sound].filter(l => !blockEntry(l));
     const badOn = [...onP, ...onV, ...onS].filter(l => !(hasPath(l) ? blockEntry(l) : normalize(l)));
     if (badOn.length) return say(`These don't look like site or page addresses: ${badOn.join(', ')}`, true);
     if (bad.length) return say(`These don't look like page addresses: ${bad.join(', ')}`, true);
     const same = (a, b) => a.join('\n') === b.join('\n');
-    if (!same(photos, L.noPhotoPages) || !same(videos, L.noVideoPages) || !same(sound, L.noSoundPages) || !same(items, L.mediaAllow) ||
+    if (!same(block, L.block) || !same(photos, L.noPhotoPages) || !same(videos, L.noVideoPages) || !same(sound, L.noSoundPages) || !same(items, L.mediaAllow) ||
         !same(onP, L.photosOn) || !same(onV, L.videosOn) || !same(onS, L.soundOn)) {
-      L.noPhotoPages = photos; L.noVideoPages = videos; L.noSoundPages = sound; L.mediaAllow = items;
+      L.block = block; L.noPhotoPages = photos; L.noVideoPages = videos; L.noSoundPages = sound; L.mediaAllow = items;
       L.photosOn = onP; L.videosOn = onV; L.soundOn = onS; markList();
     }
     back();
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites', apply),
-    screenTitle('No photos, videos or sound on some pages', `In ${listLabel(S.current)}`),
-    h('p', { class: 'hint' }, 'Single pages of a site that\'s otherwise shown normally, one per line, e.g. en.wikipedia.org/wiki/Shark. ' +
-      'Put a page in all three boxes to turn them all off. For a whole site, use its switches instead.'),
+    screenTitle('Blocked & limited pages', `In ${listLabel(S.current)}`),
+    h('h2', { class: 'sec' }, 'Always blocked'),
+    h('p', { class: 'hint' }, 'Parts of an otherwise-open site to keep blocked, one per line — a single page like en.wikipedia.org/wiki/Fortnite, or a part like maps.google.com.'),
+    box('blkText', 'Always blocked', L.block, 'maps.google.com'),
+    h('h2', { class: 'sec' }, 'Photos, videos or sound off'),
+    h('p', { class: 'hint' }, 'Single pages that open normally but with one kind off, one per line. Put a page in all three to turn them all off. For a whole site, use its switches instead.'),
     box('npText', 'No photos on these pages', L.noPhotoPages), box('nvText', 'No videos on these pages', L.noVideoPages),
     box('nsText', 'No sound on these pages', L.noSoundPages),
-    h('p', { class: 'hint' }, 'Single photos or videos to show anyway, where they\'re otherwise off, one address per line ' +
-      '(phones ask for these by tapping a blocked photo or video).'),
+    h('h2', { class: 'sec' }, 'Turned back on'),
+    h('p', { class: 'hint' }, 'Single photos or videos to show where they\'re otherwise off — phones ask for these by tapping a blocked photo or video.'),
     box('maText', 'Single photos and videos allowed', L.mediaAllow, 'ichef.bbci.co.uk/news/976/shark.jpg'),
-    h('p', { class: 'hint' }, 'Turned back on: sites or pages where they show for the phones using this list, whatever other lists ' +
-      'say (and, for a page, even if its whole site has them off). Approving a request to turn them back on adds these.'),
+    h('p', { class: 'hint' }, 'Sites or pages where photos, videos or sound show for the phones using this list, whatever other lists say.'),
     box('onpText', 'Photos back on for', L.photosOn || [], 'nasa.gov  or  nasa.gov/moon'),
     box('onvText', 'Videos back on for', L.videosOn || []), box('onsText', 'Sound back on for', L.soundOn || []),
     h('button', { type: 'button', class: 'btn p wide', id: 'npDone', onclick: apply }, 'Done'));
@@ -3674,8 +3723,6 @@ function listSettingsScreen() {
     // Import, and the list-wide overviews (each site's own are in its settings).
     h('div', { class: 'group' },
       settingsRow('table', 'Import or download a spreadsheet', null, () => open({ name: 'import' }), 'openImport'),
-      settingsRow('photooff', 'Pages without photos, videos or sound (all sites)', new Set([...L.noPhotoPages, ...L.noVideoPages, ...L.noSoundPages]).size,
-        () => open({ name: 'nomedia' }), 'openNoMedia'),
       settingsRow('link', 'Embedded content allowed (all sites)', Object.values((L.extra && L.extra.embeds) || {}).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0),
         () => open({ name: 'embeds' }), 'openEmbeds')),
     S.current !== 'public' ? h('button', { type: 'button', class: 'btn dline wide', id: 'delList', onclick: deleteList }, `Delete the ${listLabel(S.current)} list`) : null);
@@ -4128,11 +4175,11 @@ function phoneMediaAndSearch(d, M) {
   return h('div', { class: 'stack', style: 'gap:10px' },
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound'),
-        h('span', { class: 'hint', style: 'margin:0' }, `The default on every site, unless a site is set to Open or Blocked on its own. Changing it changes every site on ${who} phone that's on Default, straight away.`)),
+        h('span', { class: 'hint', style: 'margin:0' }, `The default for every site left on Default — changing it updates those sites on ${who} phone straight away.`)),
       defaultRows(k => defBlocks(d, k) ? 'blocked' : 'open', (k, v) => { setDefault(d, k, v); markDevices(); render(); }, !M, 'pMedia_')),
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Text search'),
-        h('span', { class: 'hint', style: 'margin:0' }, 'A search box, words only (no pictures, video or sound), safe search on, nothing the filters block. Opening a result follows this phone\'s lists.')),
+        h('span', { class: 'hint', style: 'margin:0' }, 'Words only, safe search on. Opening a result follows this phone\'s lists.')),
       h('div', { class: 'mrows' },
         h('div', { class: 'mrow' }, h('div', { class: 'top' }, h('b', null, 'Text search'),
           obSeg('Text search', d.search === true ? 'open' : 'blocked', v => { if (v === 'open') d.search = true; else { delete d.search; delete d.searchApprovedOnly; } markDevices(); render(); },
