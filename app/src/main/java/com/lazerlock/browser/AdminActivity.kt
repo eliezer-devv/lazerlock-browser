@@ -92,10 +92,9 @@ class AdminActivity : Activity() {
                 override fun onAuthenticationSucceeded(result: android.hardware.biometrics.BiometricPrompt.AuthenticationResult?) { once(true, false) }
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence?) {
                     // Dismissing the prompt (Cancel, Back, or the system cancelling it) is not a failed match — flag it
-                    // as a cancel so the admin page stays quiet instead of saying "Not recognised".
-                    val cancelled = errorCode == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_USER_CANCELED ||
-                        errorCode == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_NEGATIVE_BUTTON ||
-                        errorCode == android.hardware.biometrics.BiometricPrompt.BIOMETRIC_ERROR_CANCELED
+                    // as a cancel so the admin page stays quiet instead of saying "Not recognised". These are the stable
+                    // platform error codes: 5 = ERROR_CANCELED, 10 = ERROR_USER_CANCELED, 13 = ERROR_NEGATIVE_BUTTON.
+                    val cancelled = errorCode == 5 || errorCode == 10 || errorCode == 13
                     once(false, cancelled)
                 }
             })
