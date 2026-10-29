@@ -1761,9 +1761,12 @@ async function exportAll() {
 // Navigation
 // ============================================================================================
 let lastScreenKey = '';
-function go(tab) { S.tab = tab; S.sub = null; render(); }
-function open(sub) { S.sub = sub; render(); }
-function back() { S.sub = null; render(); }
+// Leaving a screen that saves itself on exit (the site editor): commit its draft first, so a forgotten Done doesn't
+// lose the change. Wrapped so a hiccup here can never block navigation.
+function leaveSub() { try { if (S.sub && S.sub.name === 'site' && typeof S.sub.commit === 'function') S.sub.commit(); } catch (e) { console.log('leaveSub', e); } }
+function go(tab) { leaveSub(); S.tab = tab; S.sub = null; render(); }
+function open(sub) { leaveSub(); S.sub = sub; render(); }
+function back() { leaveSub(); S.sub = null; render(); }
 // After answering a request from its detail screen, go back to the requests list instead of the "already answered" card.
 function backOrRender() { if (S.sub && S.sub.fromThread) return reqBack(); if (S.sub && S.sub.name === 'request') back(); else render(); }
 // After viewing/answering a request that was opened from a message, go back to that conversation.
@@ -2048,21 +2051,22 @@ async function bioAvailable() {
   } catch { return false; }
 }
 let bioWait = null;
-window.wlBioDone = ok => { if (bioWait) { const w = bioWait; bioWait = null; w(!!ok); } };
+window.wlBioDone = (ok, cancelled) => { if (bioWait) { const w = bioWait; bioWait = null; w(ok ? 'ok' : cancelled ? 'cancel' : 'fail'); } };
 // Asks for the fingerprint now. True if it matched.
+// Returns 'ok' (verified), 'cancel' (the person dismissed the prompt — not a failure), or 'fail' (a real problem).
 async function bioCheck(b = getBio()) {
-  if (!b) return false;
-  if (b.kind === 'app') return new Promise(res => { bioWait = res; try { WLBAdmin.biometric(); } catch { bioWait = null; res(false); } });
+  if (!b) return 'fail';
+  if (b.kind === 'app') return new Promise(res => { bioWait = res; try { WLBAdmin.biometric(); } catch { bioWait = null; res('fail'); } });
   try {
     const a = await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)),
       allowCredentials: [{ type: 'public-key', id: b64u8(b.id) }], userVerification: 'required', timeout: 60000 } });
     const flags = new Uint8Array(a.response.authenticatorData)[32];
-    return !!(flags & 0x04);                      // (the device checked the person, not just that it's there)
-  } catch { return false; }
+    return (flags & 0x04) ? 'ok' : 'fail';        // (the device checked the person, not just that it's there)
+  } catch (e) { return (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) ? 'cancel' : 'fail'; }
 }
 // Sets it up for this device (asking for the fingerprint once). True if it worked.
 async function bioSetup() {
-  if (INAPP) { if (!(await bioCheck({ kind: 'app' }))) return false; localStorage.setItem(BIO_KEY, JSON.stringify({ kind: 'app' })); return true; }
+  if (INAPP) { if ((await bioCheck({ kind: 'app' })) !== 'ok') return false; localStorage.setItem(BIO_KEY, JSON.stringify({ kind: 'app' })); return true; }
   try {
     const c = await navigator.credentials.create({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)),
       rp: { name: 'Whitelist admin' }, user: { id: crypto.getRandomValues(new Uint8Array(16)), name: (ME && ME.email) || 'admin', displayName: (ME && (ME.name || ME.email)) || 'Admin' },
@@ -2182,8 +2186,10 @@ function unlockScreen() {
   };
   const bioBtn = B ? h('button', { type: 'button', class: P ? 'btn s wide' : 'btn p wide', id: 'uBio', onclick: async e => {
     const btn = e.currentTarget; btn.disabled = true;
-    if (await bioCheck(B)) return open1();
-    btn.disabled = false; say(P ? 'Not recognised. Try again, or type your PIN.' : 'Not recognised. Try again.', true);
+    const r = await bioCheck(B);
+    if (r === 'ok') return open1();
+    btn.disabled = false;
+    if (r === 'fail') say(P ? 'Not recognised. Try again, or type your PIN.' : 'Not recognised. Try again.', true);   // (a cancel is silent)
   } }, icon('shield', 18), 'Unlock with fingerprint') : null;
   if (go1) { go1.onclick = tryIt; pin.addEventListener('keydown', e => { if (e.key === 'Enter') tryIt(); }); }
   // (In the app, the fingerprint prompt opens by itself; a browser needs a tap first.)
@@ -2498,11 +2504,11 @@ function approvalPinScreen() {
     const hashed = await hashApprovalPin(a);
     if (all) S.D.approvalPin = hashed; else d.approvalPin = hashed;
     markDevices(); done();
-    say(`Approval PIN ${had ? 'changed' : 'set'} for ${who}. Tap Save to apply it.`);
+    say(`Approval PIN ${had ? 'changed' : 'set'} for ${who}. It saves automatically.`);
   };
   const remove = () => {
     if (all) delete S.D.approvalPin; else delete d.approvalPin;
-    markDevices(); done(); say(`Approval PIN removed for ${who}. Tap Save to apply it.`);
+    markDevices(); done(); say(`Approval PIN removed for ${who}. It saves automatically.`);
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(all ? 'Settings' : who, done),
     screenTitle(had ? 'Change the approval PIN' : 'Set an approval PIN', `For ${who}`),
@@ -3331,22 +3337,28 @@ function siteScreen() {
     h('div', { class: 'row' }, h('span', { class: 'grow' }, h('div', { class: 'inrow' }, pageInput, h('button', { type: 'button', class: 'btn s', id: 'sAddPage', onclick: addPage }, 'Add')))))
     : null;
   pageInput.addEventListener('keydown', e => { if (e.key === 'Enter') addPage(); });
-  const done = () => {
+  // Build + validate the entry and write it into the list. Returns true if it saved. silent=true (used when you just
+  // leave the screen) skips the error messages and simply declines to save an incomplete entry — so you don't have to
+  // remember the Done button on a long screen; finishing and navigating away saves it for you.
+  const commit = (silent) => {
+    if (sub.committed) return true;
     const dom = (normalize(d.domain) || '').replace(/^(www|m|mobile)\.(?=[^.]+\.[^.]+)/, '') || undefined;
-    if (!dom) { addr.classList.add('bad'); addr.focus(); return say(d.domain.trim() ? `"${d.domain}" doesn't look like a website address.` : 'Type the site\'s address.', true); }
-    if (S.L.sites.some((s, i) => i !== sub.index && (normalize(s.domain) || '').replace(/^(www|m|mobile)\.(?=[^.]+\.[^.]+)/, '') === dom)) return say(`${dom} is already on this list.`, true);
-    for (const p of d.pages) if (!pageOnSite(p, dom, d.subdomains)) return say(`The page ${p} isn't on ${dom}.`, true);
+    if (!dom) { if (!silent) { addr.classList.add('bad'); addr.focus(); say(d.domain.trim() ? `"${d.domain}" doesn't look like a website address.` : 'Type the site\'s address.', true); } return false; }
+    if (S.L.sites.some((s, i) => i !== sub.index && (normalize(s.domain) || '').replace(/^(www|m|mobile)\.(?=[^.]+\.[^.]+)/, '') === dom)) { if (!silent) say(`${dom} is already on this list.`, true); return false; }
+    for (const p of d.pages) if (!pageOnSite(p, dom, d.subdomains)) { if (!silent) say(`The page ${p} isn't on ${dom}.`, true); return false; }
     const site = { domain: dom, name: d.name.trim(), url: d.url.trim(), home: d.home, subdomains: d.subdomains,
       pages: d.only ? [...d.pages] : [], noPhotos: d.noPhotos, noVideos: d.noVideos, noSound: d.noSound,
       onPhotos: !!d.onPhotos && !d.noPhotos, onVideos: !!d.onVideos && !d.noVideos, onSound: !!d.onSound && !d.noSound, passThrough: d.passThrough, frames: d.frames, unfiltered: d.unfiltered,
       filtersOff: [...d.filtersOff] };
-    if (isNew) S.L.sites.push(site); else S.L.sites[sub.index] = site;
-    markList(); back();
-    say(`${isNew ? 'Added' : 'Updated'} ${site.name || dom}. Tap Save to apply it.`);
+    if (sub.index < 0) { S.L.sites.push(site); sub.index = S.L.sites.length - 1; } else S.L.sites[sub.index] = site;
+    sub.committed = true; markList();
+    return true;
   };
+  sub.commit = () => commit(true);      // leaving the screen saves what's there, as if Done was tapped
+  const done = () => { const nm = d.name.trim() || (normalize(d.domain) || '').replace(/^www\./, ''); if (commit(false)) { back(); say(`${isNew ? 'Added' : 'Updated'} ${nm}. It saves automatically.`); } };
   const remove = async () => {
     if (!(await uiConfirmDanger(`Remove ${d.name || d.domain}?`, `It comes off ${listLabel(S.current)} in a few minutes.`, 'Remove'))) return;
-    S.L.sites.splice(sub.index, 1); markList(); back();
+    S.L.sites.splice(sub.index, 1); sub.committed = true; markList(); back();   // committed: stop leave-save re-adding it
   };
   const letter = (d.name || d.domain || '?').replace(/^www\./, '')[0] || '?';
   return h('main', { class: 'stack', style: 'padding-bottom:24px' },
@@ -3407,7 +3419,7 @@ function siteMediaCompact(d, isNew) {
     const cleaned = lines.map(l => blockEntry(l));
     const others = S.L.block.filter(b => !(dom && pageOnSite(b, dom, d.subdomains)));   // keep entries for other sites
     const next = [...new Set([...others, ...cleaned])];
-    if (next.join('\n') !== S.L.block.join('\n')) { S.L.block = next; markList(); say('Always-blocked pages updated. Tap Save to apply it.'); }
+    if (next.join('\n') !== S.L.block.join('\n')) { S.L.block = next; markList(); say('Always-blocked pages updated. It saves automatically.'); }
   };
   ta.addEventListener('change', saveBlk);
   return h('div', { class: 'stack', style: 'gap:8px' },
@@ -3488,7 +3500,7 @@ function tempScreen() {
       S.L.temporary.push({ id: 't' + Date.now().toString(36) + k, what: k, entry, mode: sub.mode, minutes, from: new Date().toISOString() });
     });
     markList(); back();
-    say(`${entry}: ${fmtMin(minutes)}${sub.mode === 'use' ? ' of use' : ''}. Tap Save to apply it.`);
+    say(`${entry}: ${fmtMin(minutes)}${sub.mode === 'use' ? ' of use' : ''}. It saves automatically.`);
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' },
     backLink('Sites'),
@@ -3521,7 +3533,7 @@ function embedsScreen() {
       h('span', { class: 'grow' }, h('span', { style: 'font-weight:600' }, from), h('span', { class: 'dom' }, `inside ${site}`)),
       h('button', { type: 'button', class: 'btn d sm', 'aria-label': `Remove ${from} on ${site}`, onclick: () => {
         const next = { ...E, [site]: (E[site] || []).filter(x => x !== from) };
-        save(next); say(`Removed ${from} on ${site}. Tap Save to apply it.`);
+        save(next); say(`Removed ${from} on ${site}. It saves automatically.`);
       } }, 'Remove')))));
   const site = h('input', { class: 'inp', id: 'emSite', placeholder: 'Site, e.g. bbc.co.uk', autocomplete: 'off' });
   const from = h('input', { class: 'inp', id: 'emFrom', placeholder: 'Content from: a site, or one part (youtube.com/embed/abc)', autocomplete: 'off' });
@@ -3790,7 +3802,7 @@ function groupsScreen() {
       h('button', { type: 'button', class: 'btn d sm', onclick: () => remove(g) }, 'Delete'))))
       : h('div', { class: 'card empty' }, h('b', null, 'No groups yet'), 'Make one, then put phones in it from each phone\'s screen.'),
     h('button', { type: 'button', class: 'btn p wide', id: 'newGroup', onclick: async () => { if (await newGroup()) render(); } }, icon('plus', 18, 2.2), 'New group'),
-    h('p', { class: 'hint' }, 'Give a helper admin a group (Settings → Admins), and they look after every phone in it, including phones added to it later. Tap Save after changes.'));
+    h('p', { class: 'hint' }, 'Give a helper admin a group (Settings → Admins), and they look after every phone in it, including phones added to it later. Changes save automatically.'));
 }
 
 // When a phone last opened the app, and its version (from its check-in, every few hours).
@@ -5028,7 +5040,7 @@ function timerScreen() {
   }
   const del = async () => {
     if (!(await uiConfirmDanger(`Delete ${t.name || 'this timer'}?`, 'It stops on every phone it\'s for, within a few minutes.', 'Delete', 'trash'))) return;
-    delete S.D.timers[id]; markDevices(); backTo(); say('Deleted. Tap Save to keep the change.');
+    delete S.D.timers[id]; markDevices(); backTo(); say('Deleted. It saves automatically.');
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(backLabel, backTo),
     h('div', { class: 'field' }, h('label', { for: 'tName' }, 'Name'), name),
