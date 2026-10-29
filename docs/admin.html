@@ -2899,7 +2899,7 @@ function protectRequestCard(issue, req) {
     h('h3', null, title),
     h('p', { class: 'hint', style: 'margin:0' }, lists
       ? `${phone} asked to stop covering the whole Accessibility and Device admin lists. The app's own screens stay covered either way. Approving turns the stronger cover off.`
-      : `${phone} asked to switch off all protection — blocking other browsers, the uninstall lock and the screen cover. Approving turns it all off; "Keep it on" leaves everything as it is.`),
+      : `${phone} asked to switch off all protection — blocking other browsers, the uninstall lock and the screen guard. Approving turns it all off; "Keep it on" leaves everything as it is.`),
     actions].filter(Boolean));
   return card;
 }
@@ -4419,8 +4419,8 @@ function protectState(id) {
     return { label: 'Off', tone: 'amber' };
   }
   // Older app (no master status reported): describe the means it did report.
-  if (s.admin && s.cover) return { label: 'Screen cover + uninstall protection', tone: 'teal' };
-  if (s.cover) return { label: 'Screen cover', tone: 'teal' };
+  if (s.admin && s.cover) return { label: 'Screen guard + uninstall protection', tone: 'teal' };
+  if (s.cover) return { label: 'Screen guard', tone: 'teal' };
   if (s.admin) return { label: 'Uninstall protection only', tone: 'amber' };
   return { label: 'Not set up on the phone yet', tone: 'amber' };
 }
@@ -4434,7 +4434,7 @@ function protectionLapsed(id) {
 function protectMeans(id) {
   const s = seenProtect(id);
   if (!s || s.owner || s.intended === undefined) return null;
-  return [['Screen cover', s.cover === true], ['Can’t be uninstalled', s.admin === true], ['Always running (battery)', s.battery === true]];
+  return [['Screen guard', s.cover === true], ['Can’t be uninstalled', s.admin === true], ['Always running (battery)', s.battery === true]];
 }
 // How an app stands: explicit allow/block, or (a found browser) blocked by "block new".
 function appDecision(d, app) {
@@ -4449,7 +4449,7 @@ function browsersSummary(id, d) {
   const blocked = apps.filter(a => appDecision(d, a) === 'block').length;
   const m = effectiveMode(id, d);   // reflects the phone's own state when the admin hasn't set a mode
   if (m === 'off') return apps.length ? `${plural(apps.length, 'app')} found · not blocking` : 'Not set up';
-  return `${m === 'owner' ? 'Device owner' : 'Screen cover'} · ${blocked ? plural(blocked, 'app') + ' blocked' : 'nothing blocked yet'}`;
+  return `${m === 'owner' ? 'Device owner' : 'Device admin'} · ${blocked ? plural(blocked, 'app') + ' blocked' : 'nothing blocked yet'}`;
 }
 function phoneBrowsers(id, d, M) {
   return h('div', { class: 'field', id: 'pBrowsers' },
@@ -4788,7 +4788,7 @@ function browsersScreen() {
         st ? h('span', { class: `chip ${st.tone}`, style: 'flex:none' }, st.label.split(' · ')[0]) : h('span', { class: 'chip', style: 'flex:none' }, 'No report yet')),
       // What you've asked for (your setting), separate from what the phone has actually granted.
       p.mode && p.mode !== 'off' ? h('div', { class: 'ro', style: 'margin-top:2px' },
-        h('span', { class: 'grow' }, h('span', { class: 't' }, 'Mode you\'ve chosen'), h('span', { class: 's' }, p.mode === 'owner' ? 'Device owner' : 'Screen cover')),
+        h('span', { class: 'grow' }, h('span', { class: 't' }, 'Mode you\'ve chosen'), h('span', { class: 's' }, p.mode === 'owner' ? 'Device owner' : 'Device admin')),
         h('span', { class: 'chip', style: 'flex:none' }, 'Saved')) : null,
       // The per-means breakdown — what the phone has actually granted (the same four its own Protection screen shows).
       (() => { const rows = protectMeans(id); return rows ? h('div', { class: 'group', style: 'margin-top:2px' }, [h('div', { class: 'small muted', style: 'margin:0;padding:10px 16px 4px' }, 'On the phone now:'), ...rows.map(([t, on]) =>
@@ -4803,14 +4803,14 @@ function browsersScreen() {
     M ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'How this phone is protected'),
       h('div', { class: 'group' }, [
         ['owner', 'Device owner', 'Strongest: blocked apps are switched off, the app can\'t be uninstalled, the clock is kept honest. Needs the one-time computer setup.'],
-        ['cover', 'Screen cover', 'A blocked app is covered the moment it opens; uninstall needs a step that\'s covered. Set up on the phone, no computer.'],
+        ['cover', 'Device admin', 'A blocked app is covered the moment it opens; uninstall needs a step that\'s covered. Set up on the phone, no computer.'],
         ['off', 'Off', 'Other browsers are found and listed, but nothing is blocked.'],
       ].map(([v, t, s]) => { const dis = v === 'owner' && !isOwner;   // device owner can only be chosen once the phone is actually set up as one
         return h('label', { class: 'radio', style: dis ? 'opacity:.55' : '' },
           h('input', { type: 'radio', name: 'pmode', value: v, checked: em === v, disabled: dis, onchange: () => setMode(v) }),
           h('span', { class: 'grow' }, h('b', null, t), h('span', { class: 'small muted', style: 'display:block' },
             dis ? 'Set this phone up as a device owner first (the one-time step with a computer); then you can choose this.' : s))); })),
-      em === 'cover' ? sw('Screen cover', 'Turn the cover off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { const pr = lockMode(d, 'cover'); pr.overlay = v; }) : null,
+      em === 'cover' ? sw('Screen guard', 'Turn the screen guard off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { const pr = lockMode(d, 'cover'); pr.overlay = v; }) : null,
       em === 'cover' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = lockMode(d, 'cover'); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null,
       em === 'owner' && !isOwner ? h('p', { class: 'warn', style: 'margin:0' }, 'This phone isn\'t a device owner yet. Follow the one-time setup, with a computer, first.') : null,
       em === 'owner' ? sw('Keep the clock honest', 'Keeps automatic date and time on, so timers can\'t be dodged.', p.lockClock !== false, v => { const pr = lockMode(d, 'owner'); pr.lockClock = v; }) : null,
