@@ -134,7 +134,7 @@ object Protection {
     fun missing(ctx: Context): List<String> {
         if (!intended(ctx) || owner(ctx)) return emptyList()
         val out = ArrayList<String>()
-        if (!coverOn(ctx)) out.add("Screen cover")
+        if (!coverOn(ctx)) out.add("Screen guard")
         if (!adminOn(ctx)) out.add("Uninstall protection")
         if (!batteryUnrestricted(ctx)) out.add("Always running (battery)")
         return out

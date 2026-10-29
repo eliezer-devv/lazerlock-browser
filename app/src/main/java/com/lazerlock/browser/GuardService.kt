@@ -354,18 +354,19 @@ class GuardService : AccessibilityService() {
         if (coveringFor == forWhat && cover != null) return
         removeCover()
         val ctx = this
+        Ui.applyTheme(ctx)                       // follow the app's current palette, so the cover re-colours with the theme
         val panel = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setBackgroundColor(if (isDark()) Color.parseColor("#1F2B2C") else Color.parseColor("#F5F3EE"))
+            setBackgroundColor(Ui.PAGE)
             val pad = (resources.displayMetrics.density * 28).toInt(); setPadding(pad, pad, pad, pad)
             addView(TextView(ctx).apply {
                 text = title; textSize = 23f; setTypeface(typeface, android.graphics.Typeface.BOLD); gravity = Gravity.CENTER
-                setTextColor(if (isDark()) Color.parseColor("#ECF2F0") else Color.parseColor("#1C2B2D"))
+                setTextColor(Ui.INK)
             })
             addView(TextView(ctx).apply {
                 text = sub; textSize = 15f; gravity = Gravity.CENTER
-                setTextColor(if (isDark()) Color.parseColor("#AEBFBB") else Color.parseColor("#3E4B49"))
+                setTextColor(Ui.MUTED)
                 val m = (resources.displayMetrics.density * 12).toInt(); setPadding(0, m, 0, m * 2)
             })
             addView(TextView(ctx).apply {
@@ -373,7 +374,7 @@ class GuardService : AccessibilityService() {
                 gravity = Gravity.CENTER; setTextColor(Color.WHITE)
                 val h = (resources.displayMetrics.density * 50).toInt(); val padx = (resources.displayMetrics.density * 26).toInt()
                 minHeight = h; setPadding(padx, 0, padx, 0)
-                background = Ui.rounded(Color.parseColor("#1F5F55"), resources.displayMetrics.density * 25)
+                background = Ui.rounded(Ui.ACCENT, resources.displayMetrics.density * 25)
                 // Back goes back one screen (the previous page), like the phone's own Back. If there's nothing to go
                 // back to and we stay on the locked screen, showSettingCover sends the phone Home instead of looping.
                 setOnClickListener { backPressedAt = android.os.SystemClock.uptimeMillis(); hideAll(); performGlobalAction(GLOBAL_ACTION_BACK) }
@@ -411,7 +412,4 @@ class GuardService : AccessibilityService() {
         runCatching { Requests.checkInSoon(applicationContext) }
         return super.onUnbind(intent)
     }
-
-    private fun isDark(): Boolean =
-        (resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES
 }

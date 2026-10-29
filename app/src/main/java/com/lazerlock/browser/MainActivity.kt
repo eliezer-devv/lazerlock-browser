@@ -271,6 +271,7 @@ class MainActivity : Activity() {
         if (Device.name(this) != null) askNotificationsOnce()   // (phones set up before this was asked: once, now)
         askForAdminNotifications()
         main.removeCallbacks(soundCheck)                      // (the playing notification stays while something plays)
+        keepMediaAwake(false)                                 // back on screen: let the engine manage visibility normally
         web.settings.mediaPlaybackRequiresUserGesture = true  // pages start sound only after a tap again
         player?.settings?.mediaPlaybackRequiresUserGesture = true
         main.removeCallbacks(playCheck); main.postDelayed(playCheck, 3_000)
@@ -354,7 +355,7 @@ class MainActivity : Activity() {
         player = old
         playerIdleChecks = 0
         // A fresh tab to browse on (under the loading bar).
-        val fresh = WebView(this)
+        val fresh = MediaWebView(this)
         box.addView(fresh, box.indexOfChild(loadBar), android.widget.FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         web = fresh
@@ -551,9 +552,17 @@ class MainActivity : Activity() {
         mediaTick(lastInfo)
         if (!notifying) return
         AppLog.i("Sound", "Left the app while $soundSite plays: it keeps playing")
+        keepMediaAwake(true)                     // keep a video's sound going in the background, not just audio-only tracks
         // While away, a page may start sound without a tap (the next song, or a media button): restored on return.
         soundView.settings.mediaPlaybackRequiresUserGesture = false
         main.postDelayed(soundCheck, 3_000)
+    }
+
+    /** Keep (or stop keeping) the playing page's video decoding while the app is away, so its sound doesn't cut out —
+     *  Android otherwise pauses a <video> the moment its window goes out of sight. Harmless on the non-playing view. */
+    private fun keepMediaAwake(on: Boolean) {
+        (web as? MediaWebView)?.keepPlayingInBackground = on
+        (player as? MediaWebView)?.keepPlayingInBackground = on
     }
 
     /**
@@ -575,12 +584,12 @@ class MainActivity : Activity() {
         when {
             info == null || !info.optBoolean("has") -> {
                 if (nothingSince == 0L) nothingSince = now
-                if (now - nothingSince > 30_000L) { AppLog.i("Sound", "Nothing playing for 30 seconds: the notification goes"); notifying = false; PlaybackService.stop(this); return }
+                if (now - nothingSince > 30_000L) { AppLog.i("Sound", "Nothing playing for 30 seconds: the notification goes"); notifying = false; keepMediaAwake(false); PlaybackService.stop(this); return }
                 return
             }
             info.optBoolean("playing") -> { pausedSince = 0L; nothingSince = 0L }
             pausedSince == 0L -> pausedSince = now
-            now - pausedSince > 10 * 60_000L -> { AppLog.i("Sound", "Paused for 10 minutes: the notification goes"); notifying = false; PlaybackService.stop(this); return }
+            now - pausedSince > 10 * 60_000L -> { AppLog.i("Sound", "Paused for 10 minutes: the notification goes"); notifying = false; keepMediaAwake(false); PlaybackService.stop(this); return }
         }
         PlaybackService.show(this, soundSite, info)
     }
@@ -596,6 +605,7 @@ class MainActivity : Activity() {
     /** The notification's Stop: everything playing on the page stops, and the notification goes. */
     private fun stopSound() {
         notifying = false
+        keepMediaAwake(false)
         if (player != null) stopPlayer()
         else web.evaluateJavascript("window.__wlbStopAll && window.__wlbStopAll()", null)
         PlaybackService.stop(this)
@@ -4566,7 +4576,7 @@ class MainActivity : Activity() {
                 if (!battery) "Allow" to { Protection.batteryIntent(this)?.let { bi -> reopenProtection = true; d.dismiss(); runCatching { startActivity(bi) }.logged("Browsers", "Asking for unrestricted battery") } } else null, enabled = admin))
             // 3. Screen cover (accessibility) — locked until steps 1 and 2 are done (the row greys out until then). It
             // must come last because, once on, it covers the very Settings screens used for the first two steps.
-            d.add(meansRow("3. Screen cover", "Covers a blocked app the moment it opens.", cover,
+            d.add(meansRow("3. Screen guard", "Covers a blocked app the moment it opens.", cover,
                 if (!cover) "Turn it on" to { reopenProtection = true; d.dismiss(); openSettingsScreen(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS, "Find LazerLock and turn it on. If it's greyed out, use \"Allow restricted settings\" first (⋮, top right).") } else null, enabled = admin && battery))
             if (!cover && admin && battery) d.add(Ui.box(this, "If the Accessibility switch is greyed out (Android 13+): Settings → Apps → LazerLock → ⋮ → Allow restricted settings, then turn the cover on.", "warn"), 6)
             if (status == Protection.Status.PARTIAL) d.add(Ui.box(this, "Some protection has lapsed — tap the parts above to put it back. Whoever manages this phone has been told.", "warn"), 8)
