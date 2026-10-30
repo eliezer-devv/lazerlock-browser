@@ -3976,7 +3976,19 @@ function phonesScreen() {
         h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Add a phone by its ID')), h('span', { class: 'chev' }, icon('chev', 18))),
       h('button', { type: 'button', class: 'row', id: 'exportPhones', onclick: exportAll }, h('span', { class: 'ic' }, icon('download', 20)),
         h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Download everything as a spreadsheet'),
-          h('span', { class: 'muted small', style: 'display:block' }, 'A tab for each list, and one for the phones')), h('span', { class: 'chev' }, icon('chev', 18)))),
+          h('span', { class: 'muted small', style: 'display:block' }, 'A tab for each list, and one for the phones')), h('span', { class: 'chev' }, icon('chev', 18))),
+      !fullAdmin() ? null : h('button', { type: 'button', class: 'row', id: 'refreshAllPhones', onclick: async () => {
+        if (!(await uiConfirm('Refresh all phones now?', 'Every phone is woken to pull the latest right away — useful after a batch of changes. (They also update on their own within a few minutes.)', 'Refresh all'))) return;
+        const el = $('refreshAllPhones'); if (el) el.disabled = true;
+        try { const r = await command({ op: 'refreshall' });
+          if (r && r.ok) say(r.total ? `Waking ${plural(r.total, 'phone')} — they pull the latest within moments.` : 'No phones with instant push yet.');
+          else say((r && r.error) || 'Couldn\'t do that just now.', true);
+        } catch (e) { say(e.message || 'Couldn\'t do that just now.', true); }
+        finally { const e2 = $('refreshAllPhones'); if (e2) e2.disabled = false; } } },
+        h('span', { class: 'ic' }, icon('phone', 20)),
+        h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Refresh all phones now'),
+          h('span', { class: 'muted small', style: 'display:block' }, 'Wake every phone to pull the latest changes instantly')),
+        h('span', { class: 'chev' }, icon('chev', 18)))),
     h('p', { class: 'hint' }, 'Each phone asks for the person\'s first and last name when it\'s first opened. Its own list is named after its ID, and shown by the person\'s name. Tap a phone to rename it or change its lists.'));
 }
 // A phone's logs: "Get log" (the phone sends it at its next check), and the ones it has sent (newest first).
@@ -4142,6 +4154,12 @@ function phoneScreen() {
       : readOnlyPart(d, locked, M),
     canDo('logs') ? logsSection(id, d) : null,
     !M ? null : h('div', { class: 'stack', style: 'gap:8px;margin-top:8px' },
+      h('button', { type: 'button', class: 'btn s wide', id: 'pRefresh', onclick: async () => {
+        const el = $('pRefresh'); if (el) el.disabled = true;
+        try { const r = await command({ op: 'refreshone', id });
+          if (r && r.ok) say(`${d.name || id} is refreshing now.`); else say((r && r.error) || 'Couldn\'t do that just now.', true);
+        } catch (e) { say(e.message || 'Couldn\'t do that just now.', true); }
+        finally { const e2 = $('pRefresh'); if (e2) e2.disabled = false; } } }, 'Refresh this phone now'),
       d.blocked ? h('button', { type: 'button', class: 'btn s wide', id: 'pUnblock', onclick: unblock }, 'Unblock this phone')
         : h('button', { type: 'button', class: 'btn dline wide', id: 'pBlock', onclick: block }, 'Block this phone'),
       h('button', { type: 'button', class: 'btn s wide', id: 'pArchive', onclick: () => archiveNow(id) }, 'Archive now'),
