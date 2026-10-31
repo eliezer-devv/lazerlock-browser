@@ -171,9 +171,15 @@
   .pubtag { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; padding: 3px 9px; border-radius: 999px;
     background: #E3ECF5; color: #2F5D8A; white-space: nowrap; }
   .kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+  /* Select-and-approve: the tick box on a request row, the selected state, and the sticky action bar. */
+  .chk { flex: none; width: 22px; height: 22px; border-radius: 7px; border: 2px solid var(--field); display: grid; place-items: center; color: #fff; }
+  .chk.on { background: var(--accent); border-color: var(--accent); }
+  .row.sel { background: var(--accent-soft); }
+  .selbar { position: sticky; bottom: 8px; display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 9px 10px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 6px 20px -8px rgba(10, 16, 38, .35); }
   /* Photos, videos and sound: Open / Blocked (and Default) */
-  .seg.ob { flex: none; gap: 2px; padding: 3px; }
-  .seg.ob button { flex: none; padding: 0 14px; min-height: 38px; }
+  .seg.ob { flex: none; gap: 2px; padding: 3px; align-self: flex-start; }
+  .seg.ob button { flex: none; padding: 0 11px; min-height: 34px; font-size: 13px; }
   .seg.ob button[aria-pressed="true"][data-v="open"] { background: var(--accent); color: #fff; }
   .seg.ob button[aria-pressed="true"][data-v="blocked"] { background: var(--danger); color: #fff; }
   .seg.ob button:disabled { opacity: .55; }
@@ -484,7 +490,7 @@
   </header>
   <div id="view"></div>
 </div>
-<div id="savebar" hidden><span id="saveText">Changes not saved yet</span><div style="display:flex;gap:6px"><button type="button" class="undo" id="undoBtn">Undo</button><button type="button" class="save" id="saveBtn">Save</button></div></div>
+<div id="savebar" hidden><span id="saveText">Saving your changes…</span><div style="display:flex;gap:6px"><button type="button" class="undo" id="undoBtn">Undo</button><button type="button" class="save" id="saveBtn">Save</button></div></div>
 <nav id="tabs" aria-label="Sections" hidden></nav>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 <button type="button" id="syncPill" hidden></button>
@@ -679,8 +685,12 @@ window.wlBack = () => {
   if (shade) { const cancel = shade.querySelector('#dlgCancel'); if (cancel) cancel.click(); else shade.remove(); return true; }
   if (S.connected && S.sub) { back(); return true; }
   // Back on the top screen with unsaved changes: our own themed dialog (not the system one), then close if confirmed.
-  if (S.connected && (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length)) {
-    uiConfirmDanger('Leave without saving?', 'Your changes haven\'t been saved yet.', 'Leave', 'warn').then(ok => { if (ok) closeAdmin(); });
+  if (S.connected && S.saveBlocked) {     // changes that can't be saved yet (an invalid entry): closing would lose them
+    uiConfirmDanger('Leave without saving?', `Some changes can’t be saved yet (${S.saveError || 'check the entries'}).`, 'Leave', 'warn').then(ok => { if (ok) closeAdmin(); });
+    return true;
+  }
+  if (S.connected && (S.listDirty || S.devDirty || QUEUE.busy || QUEUE.ops.length)) {   // changes save themselves: flush, let the queue finish, then close
+    flushAndClose();
     return true;
   }
   return false;
@@ -1343,9 +1353,9 @@ function phonesUsing(name) {
 const canEditList = n => fullAdmin() || (canDo('edit') && !isPublicList(n) && !(S.D.default || []).includes(n));
 function markList() {
   if (!canEditList(S.current)) { say(`You can look at ${listLabel(S.current)}, but not change it.`, true); openList(S.current).then(render); return; }
-  S.listDirty = true; renderSaveBar();
+  S.listDirty = true; S.saveError = null; S.saveBlocked = false; scheduleAutoSave(true); renderSaveBar();
 }
-function markDevices() { S.devDirty = true; renderSaveBar(); }
+function markDevices() { S.devDirty = true; S.saveError = null; S.saveBlocked = false; scheduleAutoSave(true); renderSaveBar(); }
 
 // ---------- loading ----------
 // Everything this admin sees, at the newest version (or [sha]). False: this device is signed out.
@@ -1409,12 +1419,17 @@ const uiConfirm = (title, text, ok = 'OK', opts = {}) => uiDialog({ title, text,
 const uiConfirmDanger = (title, text, ok, ic = 'trash') => uiDialog({ title, text, ok, danger: true, red: true, icon: ic });
 
 // ---------- saving ----------
-async function saveAll() {
+async function saveAll(auto = false) {
   $('saveBtn').disabled = true;
+  const did = S.listDirty || S.devDirty;   // was there anything to commit? (feeds the adaptive-batching counter)
   try {
     if (S.listDirty) {
       const out = fromModel(S.L);
-      if (out.error) { say(out.error, true); return; }
+      if (out.error) {               // the list isn't valid yet (e.g. a half-typed entry): hold the changes rather than nag on every keystroke
+        S.saveError = out.error; S.saveBlocked = true;
+        if (!auto) say(out.error, true);
+        return;
+      }
       S.listSha = await putJson(listPathOf(S.current), out.data, S.listSha, `Update ${S.current} list from admin page`);
       S.L = toModel(out.data);
       S.listDirty = false;
@@ -1424,10 +1439,44 @@ async function saveAll() {
       S.devicesSha = await putJson('devices.json', S.D, S.devicesSha, 'Update phones and settings');
       S.devDirty = false;
     }
-    say('Saving. GitHub saves it within a minute, and phones pick it up a few minutes after.');
+    S.saveError = null; S.saveBlocked = false;
+    if (did) noteSave();                      // one more recent commit, for the adaptive batching
+    say(auto ? 'Saved ✓ · phones pick it up within a few minutes.'
+             : 'Saving. GitHub saves it within a minute, and phones pick it up a few minutes after.');
     render();
-  } catch (e) { say(e.message, true); }
+  } catch (e) { S.saveError = e.message; S.saveBlocked = false; if (!auto) say(e.message, true); }
   finally { $('saveBtn').disabled = false; renderSaveBar(); }
+}
+// Auto-save: a change commits itself a short moment after the last edit — no Save button to press. The small delay
+// batches a burst of edits (toggles, typing) into one save instead of one per keystroke.
+let autoSaveTimer = null, autoSaving = false;
+// Adaptive batching: the wait before a change commits grows when saves are coming thick and fast, so a busy spell
+// folds many edits into fewer commits (fewer GitHub Actions runs), then eases back to snappy once things calm down.
+// It only paces THIS admin's edits — phones' own check-ins are separate traffic it can't control.
+let saveTimes = [];
+const SAVE_WINDOW = 120000;                        // judge "how busy" over the last 2 minutes
+function noteSave() { const now = Date.now(); saveTimes.push(now); saveTimes = saveTimes.filter(t => now - t < SAVE_WINDOW); }
+function autoSaveDelay() {
+  const now = Date.now(), n = saveTimes.filter(t => now - t < SAVE_WINDOW).length;   // recent commits
+  return n < 5 ? 1200 : n < 10 ? 3000 : n < 18 ? 6000 : 12000;   // calm → snappy; very busy → batch hard (max 12s)
+}
+// reset=true (a fresh edit) restarts the delay, so a burst of edits batches into one save. reset=false (a plain
+// re-render, or coming back online with changes still pending) only starts a timer if none is already running, so
+// frequent re-renders can't keep pushing the save off, and an edit made while briefly offline still saves on reconnect.
+function scheduleAutoSave(reset = true) {
+  if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty)) return;
+  if (autoSaveTimer != null) { if (!reset) return; clearTimeout(autoSaveTimer); }
+  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, autoSaveDelay());
+}
+async function runAutoSave() {
+  if (autoSaving || !S.connected || !(S.listDirty || S.devDirty)) return;
+  autoSaving = true;
+  try { await saveAll(true); }
+  finally {
+    autoSaving = false;
+    if ((S.listDirty || S.devDirty) && !S.saveBlocked && !S.saveError) scheduleAutoSave(true);  // edits landed during the save: catch them
+    else if (S.saveError && !S.saveBlocked) autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 5000);  // a transient send problem: try again shortly
+  }
 }
 async function undoAll() {
   if (!(await uiConfirm('Undo all unsaved changes?', 'Everything since your last Save goes back to how it was.', 'Undo', { icon: 'warn' }))) return;
@@ -1439,20 +1488,40 @@ async function undoAll() {
   } catch (e) { say(e.message, true); }
 }
 function renderSaveBar() {
-  const n = (S.listDirty ? 1 : 0) + (S.devDirty ? 1 : 0);
-  $('savebar').hidden = !n || !S.connected;
-  document.body.classList.toggle('unsaved', !!n && S.connected);
-  $('saveText').textContent = S.listDirty && S.devDirty ? `Changes to ${listLabel(S.current)} and phones not saved yet`
-    : S.listDirty ? `Changes to ${listLabel(S.current)} not saved yet` : 'Changes to phones not saved yet';
+  const pending = !!(S.listDirty || S.devDirty);
+  const show = (pending || S.saveError) && S.connected;
+  $('savebar').hidden = !show;
+  document.body.classList.toggle('unsaved', show);
+  if (!show) return;
+  if (S.saveError) {                         // a save that didn't go through: say so, and offer to try again
+    $('saveText').textContent = 'Couldn’t save — ' + S.saveError;
+    $('undoBtn').hidden = true;
+    $('saveBtn').hidden = false; $('saveBtn').textContent = 'Retry'; $('saveBtn').disabled = false;
+  } else {                                   // changes are saving themselves — no button to press
+    $('saveText').textContent = 'Saving your changes…';
+    $('undoBtn').hidden = true; $('saveBtn').hidden = true;
+    scheduleAutoSave(false);
+  }
 }
-$('saveBtn').onclick = saveAll;
+$('saveBtn').onclick = () => { S.saveBlocked = false; S.saveError = null; saveAll(false); };
 $('undoBtn').onclick = undoAll;
 if (!INAPP) window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.sending || QUEUE.ops.length || CMDQ.sending) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- lists ----------
 // Unsaved changes to the open list: ask before leaving them.
-const discardListChanges = async () => !S.listDirty ||
-  uiConfirmDanger('Discard unsaved changes?', `Your changes to ${listLabel(S.current)} haven't been saved.`, 'Discard', 'warn');
+// Changes save themselves, so before leaving we just flush whatever's still pending. Only changes that can't be
+// saved yet (an invalid entry) still ask, since leaving really would drop them.
+async function flushSave() { clearTimeout(autoSaveTimer); if ((S.listDirty || S.devDirty) && !S.saveBlocked) await saveAll(true); }
+async function flushAndClose() {
+  await flushSave();
+  for (let i = 0; i < 50 && (QUEUE.busy || QUEUE.ops.length || (typeof CMDQ !== 'undefined' && CMDQ.sending)); i++) await new Promise(r => setTimeout(r, 100));
+  closeAdmin();
+}
+const discardListChanges = async () => {
+  if (!S.listDirty) return true;
+  if (S.saveBlocked) return uiConfirmDanger('Discard unsaved changes?', `Your changes to ${listLabel(S.current)} can’t be saved yet (${S.saveError || 'check the entries'}). Leave and discard them?`, 'Discard', 'warn');
+  await flushSave(); return true;
+};
 async function switchList(name) {
   if (name === S.current) return;
   if (!(await discardListChanges())) return;
@@ -1480,7 +1549,7 @@ async function newList() {
   S.L = toModel({ sites: [], block: [] });
   markList();
   render();
-  say(`New list "${listLabel(name)}". Add sites and tap Save, then give it to phones under Phones.`);
+  say(`New list "${listLabel(name)}". Add sites, then give it to phones under Phones.`);
 }
 async function deleteList() {
   const name = S.current;
@@ -1698,9 +1767,12 @@ async function exportAll() {
 // Navigation
 // ============================================================================================
 let lastScreenKey = '';
-function go(tab) { S.tab = tab; S.sub = null; render(); }
-function open(sub) { S.sub = sub; render(); }
-function back() { S.sub = null; render(); }
+// Leaving a screen that saves itself on exit (the site editor): commit its draft first, so a forgotten Done doesn't
+// lose the change. Wrapped so a hiccup here can never block navigation.
+function leaveSub() { try { if (S.sub && S.sub.name === 'site' && typeof S.sub.commit === 'function') S.sub.commit(); } catch (e) { console.log('leaveSub', e); } }
+function go(tab) { leaveSub(); S.tab = tab; S.sub = null; render(); }
+function open(sub) { leaveSub(); S.sub = sub; render(); }
+function back() { leaveSub(); S.sub = null; render(); }
 // After answering a request from its detail screen, go back to the requests list instead of the "already answered" card.
 function backOrRender() { if (S.sub && S.sub.fromThread) return reqBack(); if (S.sub && S.sub.name === 'request') back(); else render(); }
 // After viewing/answering a request that was opened from a message, go back to that conversation.
@@ -1985,21 +2057,22 @@ async function bioAvailable() {
   } catch { return false; }
 }
 let bioWait = null;
-window.wlBioDone = ok => { if (bioWait) { const w = bioWait; bioWait = null; w(!!ok); } };
+window.wlBioDone = (ok, cancelled) => { if (bioWait) { const w = bioWait; bioWait = null; w(ok ? 'ok' : cancelled ? 'cancel' : 'fail'); } };
 // Asks for the fingerprint now. True if it matched.
+// Returns 'ok' (verified), 'cancel' (the person dismissed the prompt — not a failure), or 'fail' (a real problem).
 async function bioCheck(b = getBio()) {
-  if (!b) return false;
-  if (b.kind === 'app') return new Promise(res => { bioWait = res; try { WLBAdmin.biometric(); } catch { bioWait = null; res(false); } });
+  if (!b) return 'fail';
+  if (b.kind === 'app') return new Promise(res => { bioWait = res; try { WLBAdmin.biometric(); } catch { bioWait = null; res('fail'); } });
   try {
     const a = await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)),
       allowCredentials: [{ type: 'public-key', id: b64u8(b.id) }], userVerification: 'required', timeout: 60000 } });
     const flags = new Uint8Array(a.response.authenticatorData)[32];
-    return !!(flags & 0x04);                      // (the device checked the person, not just that it's there)
-  } catch { return false; }
+    return (flags & 0x04) ? 'ok' : 'fail';        // (the device checked the person, not just that it's there)
+  } catch (e) { return (e && (e.name === 'NotAllowedError' || e.name === 'AbortError')) ? 'cancel' : 'fail'; }
 }
 // Sets it up for this device (asking for the fingerprint once). True if it worked.
 async function bioSetup() {
-  if (INAPP) { if (!(await bioCheck({ kind: 'app' }))) return false; localStorage.setItem(BIO_KEY, JSON.stringify({ kind: 'app' })); return true; }
+  if (INAPP) { if ((await bioCheck({ kind: 'app' })) !== 'ok') return false; localStorage.setItem(BIO_KEY, JSON.stringify({ kind: 'app' })); return true; }
   try {
     const c = await navigator.credentials.create({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)),
       rp: { name: 'Whitelist admin' }, user: { id: crypto.getRandomValues(new Uint8Array(16)), name: (ME && ME.email) || 'admin', displayName: (ME && (ME.name || ME.email)) || 'Admin' },
@@ -2119,8 +2192,10 @@ function unlockScreen() {
   };
   const bioBtn = B ? h('button', { type: 'button', class: P ? 'btn s wide' : 'btn p wide', id: 'uBio', onclick: async e => {
     const btn = e.currentTarget; btn.disabled = true;
-    if (await bioCheck(B)) return open1();
-    btn.disabled = false; say(P ? 'Not recognised. Try again, or type your PIN.' : 'Not recognised. Try again.', true);
+    const r = await bioCheck(B);
+    if (r === 'ok') return open1();
+    btn.disabled = false;
+    if (r === 'fail') say(P ? 'Not recognised. Try again, or type your PIN.' : 'Not recognised. Try again.', true);   // (a cancel is silent)
   } }, icon('shield', 18), 'Unlock with fingerprint') : null;
   if (go1) { go1.onclick = tryIt; pin.addEventListener('keydown', e => { if (e.key === 'Enter') tryIt(); }); }
   // (In the app, the fingerprint prompt opens by itself; a browser needs a tap first.)
@@ -2435,11 +2510,11 @@ function approvalPinScreen() {
     const hashed = await hashApprovalPin(a);
     if (all) S.D.approvalPin = hashed; else d.approvalPin = hashed;
     markDevices(); done();
-    say(`Approval PIN ${had ? 'changed' : 'set'} for ${who}. Tap Save to apply it.`);
+    say(`Approval PIN ${had ? 'changed' : 'set'} for ${who}. It saves automatically.`);
   };
   const remove = () => {
     if (all) delete S.D.approvalPin; else delete d.approvalPin;
-    markDevices(); done(); say(`Approval PIN removed for ${who}. Tap Save to apply it.`);
+    markDevices(); done(); say(`Approval PIN removed for ${who}. It saves automatically.`);
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(all ? 'Settings' : who, done),
     screenTitle(had ? 'Change the approval PIN' : 'Set an approval PIN', `For ${who}`),
@@ -2568,8 +2643,19 @@ function requestsScreen() {
   if (S.inboxError) kids.push(h('div', { class: 'card' }, h('p', { class: 'warn' }, S.inboxError)));
   // Waiting requests: each a compact row (like an answered one) — tap to open its details and answer.
   if (reqs && reqs.length) {
-    kids.push(h('h2', { class: 'sec' }, 'Waiting'));
+    const eligible = reqs.filter(bulkOK);
+    if (eligible.length < 1) S.selMode = false;
+    kids.push(h('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:2px' },
+      h('h2', { class: 'sec', style: 'margin:0' }, 'Waiting'),
+      eligible.length > 1 ? h('button', { type: 'button', class: 'btn s sm', id: 'selToggle', onclick: () => { S.selMode = !S.selMode; S.selected = new Set(); render(); } }, S.selMode ? 'Done' : 'Select') : null));
     kids.push(h('div', { class: 'group' }, reqs.map(waitingRow)));
+    if (S.selMode) {
+      const n = selSet().size, allOn = n === eligible.length;
+      kids.push(h('div', { class: 'selbar' },
+        h('button', { type: 'button', class: 'btn s sm', onclick: () => { S.selected = allOn ? new Set() : new Set(eligible.map(i => i.number)); render(); } }, allOn ? 'None' : 'All'),
+        h('span', { class: 'grow small', style: 'text-align:center' }, n ? `${plural(n, 'request')} selected` : 'Tap the ones to approve'),
+        h('button', { type: 'button', class: 'btn p sm', disabled: !n, onclick: approveSelected }, n ? `Approve ${n}` : 'Approve')));
+    }
   }
   else if (reqs && !S.inboxError) kids.push(h('div', { class: 'empty' }, h('b', null, 'All caught up'), 'New requests from phones appear here.'));
   if (S.newPhones.length) {
@@ -2604,11 +2690,57 @@ function requestsScreen() {
   return h('main', { class: 'stack' }, kids);
 }
 const possessive = n => /^the /.test(n) ? `${n}'s` : `${n}'${/s$/i.test(n) ? '' : 's'}`;
-// A waiting request, as a compact row: tap it to open the details and answer there.
+const phoneName = issue => field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
+// Straightforward "open the site" requests can be approved in a batch from the list. Anything that wants a closer look
+// — a block, turning media back on, embedded content, a filtered site, or a settings/timer/browser request — is left
+// to be opened and answered on its own.
+function bulkOK(issue) {
+  const req = marker(issue.body);
+  if (!req || typeof req !== 'object') return false;
+  if (['timer', 'browser', 'unprotect', 'uncoverlists', 'mediaDefault', 'search'].includes(req.type)) return false;
+  if (req.action === 'block' || req.media === 'on' || !req.domain) return false;
+  if (Array.isArray(req.frames) && req.frames.length) return false;
+  if (Array.isArray(req.filtered) && req.filtered.some(f => ['adult', 'gambling', 'malware'].includes(f))) return false;
+  return !!S.D.devices[String(req.device || '').toUpperCase()];   // a known phone, so its own list is a safe target
+}
+const selSet = () => (S.selected instanceof Set ? S.selected : (S.selected = new Set()));
+// Approve every selected request at once: each is sent as a plain "approve" to the phone's own list, and they ride out
+// together in one save. Requests needing a closer look were never selectable, so this stays safe.
+async function approveSelected() {
+  const nums = [...selSet()];
+  const list = (S.requests || []).filter(i => nums.includes(i.number) && bulkOK(i));
+  if (!list.length) return;
+  if (!(await uiConfirm(`Approve ${plural(list.length, 'request')}?`, 'Each opens the site as asked, added to that phone\'s own list. It saves automatically.', 'Approve all', { icon: 'check' }))) return;
+  list.forEach(issue => {
+    const req = marker(issue.body);
+    reply(issue.number, 'approve own', false);
+    S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
+    S.answered.unshift({ title: describe(req).title, label: `Approved, in their own list · ${phoneName(issue)}` });
+  });
+  const done = new Set(list.map(i => i.number));
+  S.requests = (S.requests || []).filter(i => !done.has(i.number));
+  S.selMode = false; S.selected = new Set();
+  render();
+  say(`Approved ${plural(list.length, 'request')}. GitHub does them within a minute, and the phones are told a few minutes after.`);
+}
+// A waiting request, as a compact row: tap it to open the details and answer there. In select mode, the eligible ones
+// tap to tick/untick instead (the rest still open as usual).
 function waitingRow(issue) {
   const req = marker(issue.body);
   const { title } = describe(req);
-  const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
+  const phone = phoneName(issue);
+  if (S.selMode) {
+    const ok = bulkOK(issue), sel = selSet().has(issue.number);
+    return h('button', { type: 'button', class: 'row tap' + (sel ? ' sel' : ''), 'data-n': issue.number, onclick: () => {
+        if (!ok) return open({ name: 'request', number: issue.number });
+        const s = selSet(); if (s.has(issue.number)) s.delete(issue.number); else s.add(issue.number); render();
+      } },
+      ok ? h('span', { class: 'chk' + (sel ? ' on' : '') }, sel ? icon('check', 14, 3) : null)
+         : h('span', { class: 'ic', style: 'color:var(--accent)' }, icon('clock', 20, 2.2)),
+      h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, title),
+        h('span', { class: 'dom' }, ok ? `${phone} · ${ago(issue.created_at)}` : `${phone} · open to answer`)),
+      ok ? null : icon('chev', 16));
+  }
   return h('button', { type: 'button', class: 'row tap', 'data-n': issue.number, onclick: () => open({ name: 'request', number: issue.number }) },
     h('span', { class: 'ic', style: 'color:var(--accent)' }, icon('clock', 20, 2.2)),
     h('span', { class: 'grow', style: 'min-width:0' }, h('span', { class: 'name' }, title),
@@ -2764,9 +2896,7 @@ function requestCard(issue) {
     allow && req.media !== 'on' && !frames.length && blockedByDef.length ? h('div', { class: 'kinds', 'data-group': 'open' }, openChips) : null,
     allow && req.media !== 'on' && !frames.length && openByDef.length ? h('div', { class: 'flabel klabel' }, 'Block', defTag(openByDef, 'open')) : null,
     allow && req.media !== 'on' && !frames.length && openByDef.length ? h('div', { class: 'kinds', 'data-group': 'block' }, kindChips) : null,
-    actions, panels,
-    issue._again ? null : h('button', { type: 'button', class: 'btn d details', style: 'align-self:center', onclick: () => open({ name: 'request', number: issue.number }) },
-      'All the details', icon('chev', 16))].filter(Boolean)); // skip lines that don't apply
+    actions, panels].filter(Boolean)); // (the "All the details" button was removed — the request row opens its details)
   return card;
 }
 // ---------- an answered request: all the details, and changing the answer ----------
@@ -2901,7 +3031,7 @@ function protectRequestCard(issue, req) {
     h('h3', null, title),
     h('p', { class: 'hint', style: 'margin:0' }, lists
       ? `${phone} asked to stop covering the whole Accessibility and Device admin lists. The app's own screens stay covered either way. Approving turns the stronger cover off.`
-      : `${phone} asked to switch off all protection — blocking other browsers, the uninstall lock and the screen cover. Approving turns it all off; "Keep it on" leaves everything as it is.`),
+      : `${phone} asked to switch off all protection — blocking other browsers, the uninstall lock and the screen guard. Approving turns it all off; "Keep it on" leaves everything as it is.`),
     actions].filter(Boolean));
   return card;
 }
@@ -3206,7 +3336,7 @@ function sitesScreen() {
   const live = L.temporary.filter(t => tempEnd(t) > Date.now());
   const temps = live.map(t => h('div', { class: 'tempcard' }, icon('clock', 22),
     h('span', { class: 'grow' }, h('b', null, t.entry), h('span', { class: 'small' }, `${t.what === 'media' ? 'Photos, videos and sound on' : t.what === 'photos' ? 'Photos on' : t.what === 'videos' ? 'Videos on' : t.what === 'sound' ? 'Sound on' : 'Open'} ${tempLeft(t)}${t.unfiltered ? ', despite a filter' : ''}`)),
-    h('button', { type: 'button', onclick: () => { L.temporary = L.temporary.filter(x => x !== t); markList(); render(); say(`${t.entry} will close when you tap Save.`); } }, 'End now')));
+    h('button', { type: 'button', onclick: () => { L.temporary = L.temporary.filter(x => x !== t); markList(); render(); say(`${t.entry} will close in a few minutes.`); } }, 'End now')));
   const rows = L.sites.map((s, i) => h('button', { type: 'button', class: 'row siterow', onclick: () => open({ name: 'site', index: i }) },
     h('span', { class: 'tile', style: `color:${tileColor(s.domain)}` }, (s.name || s.domain || '?').replace(/^www\./, '')[0].toUpperCase()),
     h('span', { class: 'grow' }, h('span', { style: 'display:flex;align-items:baseline;gap:6px;min-width:0' },
@@ -3234,7 +3364,7 @@ function sitesScreen() {
     // the list-wide overviews in List settings.)
     h('div', { class: 'group' },
       moreRow('clock', 'Open something temporarily', null, () => open({ name: 'temp' }), 'openTemp'),
-      moreRow('ban', 'Always blocked', L.block.length, () => open({ name: 'block' }), 'openBlock'),
+      moreRow('ban', 'Blocked & limited pages', new Set([...L.block, ...L.noPhotoPages, ...L.noVideoPages, ...L.noSoundPages, ...(L.photosOn || []), ...(L.videosOn || []), ...(L.soundOn || []), ...(L.mediaAllow || [])]).size || null, () => open({ name: 'nomedia' }), 'openBlock'),
       moreRow('gear', 'List settings', null, () => open({ name: 'listsettings' }), 'openListSettings')));
 }
 
@@ -3270,22 +3400,28 @@ function siteScreen() {
     h('div', { class: 'row' }, h('span', { class: 'grow' }, h('div', { class: 'inrow' }, pageInput, h('button', { type: 'button', class: 'btn s', id: 'sAddPage', onclick: addPage }, 'Add')))))
     : null;
   pageInput.addEventListener('keydown', e => { if (e.key === 'Enter') addPage(); });
-  const done = () => {
+  // Build + validate the entry and write it into the list. Returns true if it saved. silent=true (used when you just
+  // leave the screen) skips the error messages and simply declines to save an incomplete entry — so you don't have to
+  // remember the Done button on a long screen; finishing and navigating away saves it for you.
+  const commit = (silent) => {
+    if (sub.committed) return true;
     const dom = (normalize(d.domain) || '').replace(/^(www|m|mobile)\.(?=[^.]+\.[^.]+)/, '') || undefined;
-    if (!dom) { addr.classList.add('bad'); addr.focus(); return say(d.domain.trim() ? `"${d.domain}" doesn't look like a website address.` : 'Type the site\'s address.', true); }
-    if (S.L.sites.some((s, i) => i !== sub.index && (normalize(s.domain) || '').replace(/^(www|m|mobile)\.(?=[^.]+\.[^.]+)/, '') === dom)) return say(`${dom} is already on this list.`, true);
-    for (const p of d.pages) if (!pageOnSite(p, dom, d.subdomains)) return say(`The page ${p} isn't on ${dom}.`, true);
+    if (!dom) { if (!silent) { addr.classList.add('bad'); addr.focus(); say(d.domain.trim() ? `"${d.domain}" doesn't look like a website address.` : 'Type the site\'s address.', true); } return false; }
+    if (S.L.sites.some((s, i) => i !== sub.index && (normalize(s.domain) || '').replace(/^(www|m|mobile)\.(?=[^.]+\.[^.]+)/, '') === dom)) { if (!silent) say(`${dom} is already on this list.`, true); return false; }
+    for (const p of d.pages) if (!pageOnSite(p, dom, d.subdomains)) { if (!silent) say(`The page ${p} isn't on ${dom}.`, true); return false; }
     const site = { domain: dom, name: d.name.trim(), url: d.url.trim(), home: d.home, subdomains: d.subdomains,
       pages: d.only ? [...d.pages] : [], noPhotos: d.noPhotos, noVideos: d.noVideos, noSound: d.noSound,
       onPhotos: !!d.onPhotos && !d.noPhotos, onVideos: !!d.onVideos && !d.noVideos, onSound: !!d.onSound && !d.noSound, passThrough: d.passThrough, frames: d.frames, unfiltered: d.unfiltered,
       filtersOff: [...d.filtersOff] };
-    if (isNew) S.L.sites.push(site); else S.L.sites[sub.index] = site;
-    markList(); back();
-    say(`${isNew ? 'Added' : 'Updated'} ${site.name || dom}. Tap Save to apply it.`);
+    if (sub.index < 0) { S.L.sites.push(site); sub.index = S.L.sites.length - 1; } else S.L.sites[sub.index] = site;
+    sub.committed = true; markList();
+    return true;
   };
+  sub.commit = () => commit(true);      // leaving the screen saves what's there, as if Done was tapped
+  const done = () => { const nm = d.name.trim() || (normalize(d.domain) || '').replace(/^www\./, ''); if (commit(false)) { back(); say(`${isNew ? 'Added' : 'Updated'} ${nm}. It saves automatically.`); } };
   const remove = async () => {
-    if (!(await uiConfirmDanger(`Remove ${d.name || d.domain}?`, `It comes off ${listLabel(S.current)} when you tap Save.`, 'Remove'))) return;
-    S.L.sites.splice(sub.index, 1); markList(); back();
+    if (!(await uiConfirmDanger(`Remove ${d.name || d.domain}?`, `It comes off ${listLabel(S.current)} in a few minutes.`, 'Remove'))) return;
+    S.L.sites.splice(sub.index, 1); sub.committed = true; markList(); back();   // committed: stop leave-save re-adding it
   };
   const letter = (d.name || d.domain || '?').replace(/^www\./, '')[0] || '?';
   return h('main', { class: 'stack', style: 'padding-bottom:24px' },
@@ -3327,28 +3463,12 @@ function siteScreen() {
 }
 
 // The small photos/videos/sound row on the site screen: one Open/Blocked/Default choice for all three at once, with a
-// "Set each" disclosure that opens the full per-part control and this site's always-blocked pages. Stays on this one
-// screen (no navigating away) so a half-typed new site is never lost.
+// "Set each" disclosure that opens the full per-part control. Stays on this one screen (no navigating away) so a
+// half-typed new site is never lost. (Always-blocked pages live together on one page — Sites → Blocked & limited pages.)
 function siteMediaCompact(d, isNew) {
   const agg = MKINDS.map(([k]) => { const K = capFirst(k); return d['no' + K] ? 'blocked' : d['on' + K] ? 'open' : 'default'; });
   const uniform = agg.every(v => v === agg[0]) ? agg[0] : 'mixed';
   const setAll = nv => { MKINDS.forEach(([k]) => { const K = capFirst(k); d['no' + K] = nv === 'blocked'; d['on' + K] = nv === 'open'; }); render(); };
-  const dom = (normalize(d.domain) || '').replace(/^www\./, '');
-  // This site's always-blocked pages (the subset of the list's "always blocked" that's on this site).
-  const mine = dom ? S.L.block.filter(b => pageOnSite(b, dom, d.subdomains)) : [];
-  const ta = h('textarea', { class: 'inp', id: 'sBlockHere', rows: 3, placeholder: dom ? `${dom}/forum` : 'e.g. example.com/forum',
-    autocapitalize: 'off', spellcheck: 'false', style: 'min-height:72px;padding-top:10px;font-family:ui-monospace,Menlo,monospace;font-size:13px' }, mine.join('\n'));
-  const saveBlk = () => {
-    const lines = ta.value.split('\n').map(l => l.trim()).filter(Boolean);
-    const bad = lines.filter(l => !blockEntry(l));
-    if (bad.length) { ta.classList.add('bad'); return say(`These don't look like page addresses: ${bad.join(', ')}`, true); }
-    ta.classList.remove('bad');
-    const cleaned = lines.map(l => blockEntry(l));
-    const others = S.L.block.filter(b => !(dom && pageOnSite(b, dom, d.subdomains)));   // keep entries for other sites
-    const next = [...new Set([...others, ...cleaned])];
-    if (next.join('\n') !== S.L.block.join('\n')) { S.L.block = next; markList(); say('Always-blocked pages updated. Tap Save to apply it.'); }
-  };
-  ta.addEventListener('change', saveBlk);
   return h('div', { class: 'stack', style: 'gap:8px' },
     // Label and note on their own lines (full width), the segment below — so the text isn't squeezed next to the buttons.
     h('div', { class: 'mrow' },
@@ -3356,12 +3476,8 @@ function siteMediaCompact(d, isNew) {
       h('span', { class: 's' }, uniform === 'mixed' ? 'Set differently per part — open “Set each” below' : 'Tap “Set each” to split them'),
       h('div', { style: 'margin-top:4px' }, obSeg('Photos, videos and sound', uniform === 'mixed' ? '' : uniform, setAll,
         { opts: [['default', 'Default'], ['open', 'Open'], ['blocked', 'Blocked']], id: 'sMediaAll' }))),
-    h('details', { class: 'more' }, h('summary', null, 'Set each & add always-blocked pages'),
-      h('div', { style: 'margin-top:10px' }, siteMedia(d)),
-      h('div', { class: 'field', style: 'margin-top:12px' }, h('span', { class: 'flabel' }, 'Always blocked here'),
-        dom ? h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Pages of this site to keep blocked, even though the site is open. One per line.')
-            : h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Type the address above first, then add pages of this site to keep blocked here.'),
-        dom ? ta : null)));
+    h('details', { class: 'more' }, h('summary', null, 'Set each (photos, videos, sound)'),
+      h('div', { style: 'margin-top:10px' }, siteMedia(d))));
 }
 // A site's photos, videos and sound: Default (each phone's own default), Open or Blocked (for every phone using this list).
 function siteMedia(d) {
@@ -3371,8 +3487,10 @@ function siteMedia(d) {
     if (v === 'open') return 'Open on every phone using this list';
     if (v === 'blocked') return 'Blocked on every phone using this list';
     if (!users.length) return 'Each phone\'s own default';
-    const open = users.filter(x => !defBlocks(x, k)).map(firstName), blocked = users.filter(x => defBlocks(x, k)).map(firstName);
-    return 'Default now: ' + [open.length ? `open for ${joinWords(open)}` : '', blocked.length ? `blocked for ${joinWords(blocked)}` : ''].filter(Boolean).join(', ');
+    const open = users.filter(x => !defBlocks(x, k)), blocked = users.filter(x => defBlocks(x, k));
+    // Many phones: show counts, not a long list of names, so the line stays short.
+    if (users.length > 4) return 'Default now: ' + [open.length ? `open on ${open.length}` : '', blocked.length ? `blocked on ${blocked.length}` : ''].filter(Boolean).join(', ') + ` of ${users.length} phones`;
+    return 'Default now: ' + [open.length ? `open for ${joinWords(open.map(firstName))}` : '', blocked.length ? `blocked for ${joinWords(blocked.map(firstName))}` : ''].filter(Boolean).join(', ');
   };
   return h('div', { class: 'stack', style: 'gap:8px' },
     h('span', { class: 'flabel', style: 'margin-top:4px' }, 'Photos, videos and sound on this site'),
@@ -3401,10 +3519,10 @@ function tempScreen() {
   const host = h('div', { 'data-sync': '' });
   const picker = makePicker(host, sub.minutes || 30, m => { sub.minutes = m; len.textContent = `How long: ${fmtMin(m)}`; });
   host._picker = picker;
-  if (sub.what === 'media' && !sub.mediaSel) sub.mediaSel = ['photos', 'videos', 'sound'];
+  if (sub.what === 'media' && !sub.mediaSel) sub.mediaSel = [];   // nothing picked by default — you choose
   const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'What to open' },
     [['site', 'Whole site'], ['page', 'One page'], ['media', 'Photos/videos/sound']].map(([v, t]) =>
-      h('button', { type: 'button', 'aria-pressed': String(sub.what === v), onclick: () => { if (sub.what !== v) { sub.what = v; if (v === 'media' && !sub.mediaSel) sub.mediaSel = ['photos', 'videos', 'sound']; render(); } } }, t)));
+      h('button', { type: 'button', 'aria-pressed': String(sub.what === v), onclick: () => { if (sub.what !== v) { sub.what = v; render(); } } }, t)));
   // Photos, videos and sound: pick any (more than one is fine) — no "All".
   const toggleMedia = v => { const s = new Set(sub.mediaSel || []); if (s.has(v)) s.delete(v); else s.add(v); sub.mediaSel = [...s]; render(); };
   const seg2 = sub.what === 'media' ? h('div', { class: 'seg', role: 'group', 'aria-label': 'Which' },
@@ -3427,7 +3545,7 @@ function tempScreen() {
       S.L.temporary.push({ id: 't' + Date.now().toString(36) + k, what: k, entry, mode: sub.mode, minutes, from: new Date().toISOString() });
     });
     markList(); back();
-    say(`${entry}: ${fmtMin(minutes)}${sub.mode === 'use' ? ' of use' : ''}. Tap Save to apply it.`);
+    say(`${entry}: ${fmtMin(minutes)}${sub.mode === 'use' ? ' of use' : ''}. It saves automatically.`);
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' },
     backLink('Sites'),
@@ -3460,7 +3578,7 @@ function embedsScreen() {
       h('span', { class: 'grow' }, h('span', { style: 'font-weight:600' }, from), h('span', { class: 'dom' }, `inside ${site}`)),
       h('button', { type: 'button', class: 'btn d sm', 'aria-label': `Remove ${from} on ${site}`, onclick: () => {
         const next = { ...E, [site]: (E[site] || []).filter(x => x !== from) };
-        save(next); say(`Removed ${from} on ${site}. Tap Save to apply it.`);
+        save(next); say(`Removed ${from} on ${site}. It saves automatically.`);
       } }, 'Remove')))));
   const site = h('input', { class: 'inp', id: 'emSite', placeholder: 'Site, e.g. bbc.co.uk', autocomplete: 'off' });
   const from = h('input', { class: 'inp', id: 'emFrom', placeholder: 'Content from: a site, or one part (youtube.com/embed/abc)', autocomplete: 'off' });
@@ -3470,7 +3588,7 @@ function embedsScreen() {
     const raw = from.value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('?')[0].split('#')[0].replace(/\/+$/, '');
     const f1 = raw.includes('/') ? (/^[a-z0-9.-]+\.[a-z]{2,}\//.test(raw) ? raw : '') : (normalize(raw) || '').replace(/^www\./, '');
     if (!s1 || !f1 || hasPath(s1)) return say('Type a site, e.g. bbc.co.uk, and what may show in it: a site like player.vimeo.com, or one part like youtube.com/embed/abc.', true);
-    save({ ...E, [s1]: [...(E[s1] || []), f1] }); say(`Content from ${f1} can show on ${s1} once you tap Save.`);
+    save({ ...E, [s1]: [...(E[s1] || []), f1] }); say(`Content from ${f1} can show on ${s1} in a few minutes.`);
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites'),
     screenTitle('Embedded content allowed', `In ${listLabel(S.current)}`),
@@ -3499,38 +3617,42 @@ const blockScreen = () => linesScreen({ backTo: 'Sites', title: 'Always blocked'
   apply: lines => { if (lines.join('\n') !== S.L.block.join('\n')) { S.L.block = lines; markList(); } } });
 // Single pages without photos, videos and/or sound: one box each (a page in all three has them all off).
 // And single photos or videos allowed where they're otherwise off.
+// One page for everything done per-page: always-blocked pages, turning photos/videos/sound off on some pages, and
+// turning single ones back on. (Always blocked used to be its own screen — it lives here now, grouped with the rest.)
 function noMediaScreen() {
   const L = S.L;
   const box = (id, label, value, ph = 'en.wikipedia.org/wiki/Shark') => h('div', { class: 'field' }, h('label', { for: id }, label),
     h('textarea', { class: 'inp', id, rows: 4, placeholder: ph, autocapitalize: 'off', spellcheck: 'false',
-      style: 'min-height:100px;padding-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:14px' }, value.join('\n')));
+      style: 'min-height:92px;padding-top:12px;font-family:ui-monospace,Menlo,monospace;font-size:14px' }, value.join('\n')));
   const apply = () => {
-    const read = id => [...new Set($(id).value.split('\n').map(x => x.trim()).filter(Boolean))];
-    const photos = read('npText'), videos = read('nvText'), sound = read('nsText'), items = read('maText');
+    const read = id => [...new Set(($(id) ? $(id).value : '').split('\n').map(x => x.trim()).filter(Boolean))];
+    const block = read('blkText'), photos = read('npText'), videos = read('nvText'), sound = read('nsText'), items = read('maText');
     const onP = read('onpText'), onV = read('onvText'), onS = read('onsText');
-    const bad = [...photos, ...videos, ...sound].filter(l => !blockEntry(l));
+    const bad = [...block, ...photos, ...videos, ...sound].filter(l => !blockEntry(l));
     const badOn = [...onP, ...onV, ...onS].filter(l => !(hasPath(l) ? blockEntry(l) : normalize(l)));
     if (badOn.length) return say(`These don't look like site or page addresses: ${badOn.join(', ')}`, true);
     if (bad.length) return say(`These don't look like page addresses: ${bad.join(', ')}`, true);
     const same = (a, b) => a.join('\n') === b.join('\n');
-    if (!same(photos, L.noPhotoPages) || !same(videos, L.noVideoPages) || !same(sound, L.noSoundPages) || !same(items, L.mediaAllow) ||
+    if (!same(block, L.block) || !same(photos, L.noPhotoPages) || !same(videos, L.noVideoPages) || !same(sound, L.noSoundPages) || !same(items, L.mediaAllow) ||
         !same(onP, L.photosOn) || !same(onV, L.videosOn) || !same(onS, L.soundOn)) {
-      L.noPhotoPages = photos; L.noVideoPages = videos; L.noSoundPages = sound; L.mediaAllow = items;
+      L.block = block; L.noPhotoPages = photos; L.noVideoPages = videos; L.noSoundPages = sound; L.mediaAllow = items;
       L.photosOn = onP; L.videosOn = onV; L.soundOn = onS; markList();
     }
     back();
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites', apply),
-    screenTitle('No photos, videos or sound on some pages', `In ${listLabel(S.current)}`),
-    h('p', { class: 'hint' }, 'Single pages of a site that\'s otherwise shown normally, one per line, e.g. en.wikipedia.org/wiki/Shark. ' +
-      'Put a page in all three boxes to turn them all off. For a whole site, use its switches instead.'),
+    screenTitle('Blocked & limited pages', `In ${listLabel(S.current)}`),
+    h('h2', { class: 'sec' }, 'Always blocked'),
+    h('p', { class: 'hint' }, 'Parts of an otherwise-open site to keep blocked, one per line — a single page like en.wikipedia.org/wiki/Fortnite, or a part like maps.google.com.'),
+    box('blkText', 'Always blocked', L.block, 'maps.google.com'),
+    h('h2', { class: 'sec' }, 'Photos, videos or sound off'),
+    h('p', { class: 'hint' }, 'Single pages that open normally but with one kind off, one per line. Put a page in all three to turn them all off. For a whole site, use its switches instead.'),
     box('npText', 'No photos on these pages', L.noPhotoPages), box('nvText', 'No videos on these pages', L.noVideoPages),
     box('nsText', 'No sound on these pages', L.noSoundPages),
-    h('p', { class: 'hint' }, 'Single photos or videos to show anyway, where they\'re otherwise off, one address per line ' +
-      '(phones ask for these by tapping a blocked photo or video).'),
+    h('h2', { class: 'sec' }, 'Turned back on'),
+    h('p', { class: 'hint' }, 'Single photos or videos to show where they\'re otherwise off — phones ask for these by tapping a blocked photo or video.'),
     box('maText', 'Single photos and videos allowed', L.mediaAllow, 'ichef.bbci.co.uk/news/976/shark.jpg'),
-    h('p', { class: 'hint' }, 'Turned back on: sites or pages where they show for the phones using this list, whatever other lists ' +
-      'say (and, for a page, even if its whole site has them off). Approving a request to turn them back on adds these.'),
+    h('p', { class: 'hint' }, 'Sites or pages where photos, videos or sound show for the phones using this list, whatever other lists say.'),
     box('onpText', 'Photos back on for', L.photosOn || [], 'nasa.gov  or  nasa.gov/moon'),
     box('onvText', 'Videos back on for', L.videosOn || []), box('onsText', 'Sound back on for', L.soundOn || []),
     h('button', { type: 'button', class: 'btn p wide', id: 'npDone', onclick: apply }, 'Done'));
@@ -3568,7 +3690,7 @@ function importScreen() {
         if (i >= 0) { S.L.sites[i] = { ...S.L.sites[i], ...s, passThrough: S.L.sites[i].passThrough }; updated++; } else { S.L.sites.push(s); added++; }
       }
       markList(); back();
-      say(`${plural(added, 'site')} added${updated ? `, ${updated} updated` : ''}${bad.length ? `. Skipped: ${bad.slice(0, 5).join(', ')}` : ''}. Check them, then tap Save.`);
+      say(`${plural(added, 'site')} added${updated ? `, ${updated} updated` : ''}${bad.length ? `. Skipped: ${bad.slice(0, 5).join(', ')}` : ''}. They save automatically.`);
     } catch (e) { say(e.message, true); }
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Sites'),
@@ -3601,8 +3723,6 @@ function listSettingsScreen() {
     // Import, and the list-wide overviews (each site's own are in its settings).
     h('div', { class: 'group' },
       settingsRow('table', 'Import or download a spreadsheet', null, () => open({ name: 'import' }), 'openImport'),
-      settingsRow('photooff', 'Pages without photos, videos or sound (all sites)', new Set([...L.noPhotoPages, ...L.noVideoPages, ...L.noSoundPages]).size,
-        () => open({ name: 'nomedia' }), 'openNoMedia'),
       settingsRow('link', 'Embedded content allowed (all sites)', Object.values((L.extra && L.extra.embeds) || {}).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0),
         () => open({ name: 'embeds' }), 'openEmbeds')),
     S.current !== 'public' ? h('button', { type: 'button', class: 'btn dline wide', id: 'delList', onclick: deleteList }, `Delete the ${listLabel(S.current)} list`) : null);
@@ -3729,7 +3849,7 @@ function groupsScreen() {
       h('button', { type: 'button', class: 'btn d sm', onclick: () => remove(g) }, 'Delete'))))
       : h('div', { class: 'card empty' }, h('b', null, 'No groups yet'), 'Make one, then put phones in it from each phone\'s screen.'),
     h('button', { type: 'button', class: 'btn p wide', id: 'newGroup', onclick: async () => { if (await newGroup()) render(); } }, icon('plus', 18, 2.2), 'New group'),
-    h('p', { class: 'hint' }, 'Give a helper admin a group (Settings → Admins), and they look after every phone in it, including phones added to it later. Tap Save after changes.'));
+    h('p', { class: 'hint' }, 'Give a helper admin a group (Settings → Admins), and they look after every phone in it, including phones added to it later. Changes save automatically.'));
 }
 
 // When a phone last opened the app, and its version (from its check-in, every few hours).
@@ -3856,7 +3976,19 @@ function phonesScreen() {
         h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Add a phone by its ID')), h('span', { class: 'chev' }, icon('chev', 18))),
       h('button', { type: 'button', class: 'row', id: 'exportPhones', onclick: exportAll }, h('span', { class: 'ic' }, icon('download', 20)),
         h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Download everything as a spreadsheet'),
-          h('span', { class: 'muted small', style: 'display:block' }, 'A tab for each list, and one for the phones')), h('span', { class: 'chev' }, icon('chev', 18)))),
+          h('span', { class: 'muted small', style: 'display:block' }, 'A tab for each list, and one for the phones')), h('span', { class: 'chev' }, icon('chev', 18))),
+      !fullAdmin() ? null : h('button', { type: 'button', class: 'row', id: 'refreshAllPhones', onclick: async () => {
+        if (!(await uiConfirm('Refresh all phones now?', 'Every phone is woken to pull the latest right away — useful after a batch of changes. (They also update on their own within a few minutes.)', 'Refresh all'))) return;
+        const el = $('refreshAllPhones'); if (el) el.disabled = true;
+        try { const r = await command({ op: 'refreshall' });
+          if (r && r.ok) say(r.total ? `Waking ${plural(r.total, 'phone')} — they pull the latest within moments.` : 'No phones with instant push yet.');
+          else say((r && r.error) || 'Couldn\'t do that just now.', true);
+        } catch (e) { say(e.message || 'Couldn\'t do that just now.', true); }
+        finally { const e2 = $('refreshAllPhones'); if (e2) e2.disabled = false; } } },
+        h('span', { class: 'ic' }, icon('phone', 20)),
+        h('span', { class: 'grow' }, h('span', { style: 'font-weight:500' }, 'Refresh all phones now'),
+          h('span', { class: 'muted small', style: 'display:block' }, 'Wake every phone to pull the latest changes instantly')),
+        h('span', { class: 'chev' }, icon('chev', 18)))),
     h('p', { class: 'hint' }, 'Each phone asks for the person\'s first and last name when it\'s first opened. Its own list is named after its ID, and shown by the person\'s name. Tap a phone to rename it or change its lists.'));
 }
 // A phone's logs: "Get log" (the phone sends it at its next check), and the ones it has sent (newest first).
@@ -3963,13 +4095,13 @@ function phoneScreen() {
     d.blockedLists = [...new Set([...(d.lists || []), ...(d.blockedLists || [])])];
     d.lists = []; d.blocked = true;
     markDevices(); render();
-    say(`${d.name || id} will be blocked when you tap Save.`);
+    say(`${d.name || id} will be blocked in a few minutes.`);
   };
   const unblock = () => {
     d.lists = [...new Set([...(d.lists || []), ...(d.blockedLists || []).filter(l => S.lists.includes(l))])];
     delete d.blocked; delete d.blockedLists;
     markDevices(); render();
-    say(`${d.name || id} will be unblocked when you tap Save.`);
+    say(`${d.name || id} will be unblocked in a few minutes.`);
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink('Phones'),
     h('div', { style: 'display:flex;align-items:center;gap:14px;padding:0 4px' }, h('span', { class: 'av big' }, (d.name || '?')[0].toUpperCase()),
@@ -4022,6 +4154,12 @@ function phoneScreen() {
       : readOnlyPart(d, locked, M),
     canDo('logs') ? logsSection(id, d) : null,
     !M ? null : h('div', { class: 'stack', style: 'gap:8px;margin-top:8px' },
+      h('button', { type: 'button', class: 'btn s wide', id: 'pRefresh', onclick: async () => {
+        const el = $('pRefresh'); if (el) el.disabled = true;
+        try { const r = await command({ op: 'refreshone', id });
+          if (r && r.ok) say(`${d.name || id} is refreshing now.`); else say((r && r.error) || 'Couldn\'t do that just now.', true);
+        } catch (e) { say(e.message || 'Couldn\'t do that just now.', true); }
+        finally { const e2 = $('pRefresh'); if (e2) e2.disabled = false; } } }, 'Refresh this phone now'),
       d.blocked ? h('button', { type: 'button', class: 'btn s wide', id: 'pUnblock', onclick: unblock }, 'Unblock this phone')
         : h('button', { type: 'button', class: 'btn dline wide', id: 'pBlock', onclick: block }, 'Block this phone'),
       h('button', { type: 'button', class: 'btn s wide', id: 'pArchive', onclick: () => archiveNow(id) }, 'Archive now'),
@@ -4055,11 +4193,11 @@ function phoneMediaAndSearch(d, M) {
   return h('div', { class: 'stack', style: 'gap:10px' },
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound'),
-        h('span', { class: 'hint', style: 'margin:0' }, `The default on every site, unless a site is set to Open or Blocked on its own. Changing it changes every site on ${who} phone that's on Default, straight away.`)),
+        h('span', { class: 'hint', style: 'margin:0' }, `The default for every site left on Default — changing it updates those sites on ${who} phone straight away.`)),
       defaultRows(k => defBlocks(d, k) ? 'blocked' : 'open', (k, v) => { setDefault(d, k, v); markDevices(); render(); }, !M, 'pMedia_')),
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Text search'),
-        h('span', { class: 'hint', style: 'margin:0' }, 'A search box, words only (no pictures, video or sound), safe search on, nothing the filters block. Opening a result follows this phone\'s lists.')),
+        h('span', { class: 'hint', style: 'margin:0' }, 'Words only, safe search on. Opening a result follows this phone\'s lists.')),
       h('div', { class: 'mrows' },
         h('div', { class: 'mrow' }, h('div', { class: 'top' }, h('b', null, 'Text search'),
           obSeg('Text search', d.search === true ? 'open' : 'blocked', v => { if (v === 'open') d.search = true; else { delete d.search; delete d.searchApprovedOnly; } markDevices(); render(); },
@@ -4421,8 +4559,8 @@ function protectState(id) {
     return { label: 'Off', tone: 'amber' };
   }
   // Older app (no master status reported): describe the means it did report.
-  if (s.admin && s.cover) return { label: 'Screen cover + uninstall protection', tone: 'teal' };
-  if (s.cover) return { label: 'Screen cover', tone: 'teal' };
+  if (s.admin && s.cover) return { label: 'Screen guard + uninstall protection', tone: 'teal' };
+  if (s.cover) return { label: 'Screen guard', tone: 'teal' };
   if (s.admin) return { label: 'Uninstall protection only', tone: 'amber' };
   return { label: 'Not set up on the phone yet', tone: 'amber' };
 }
@@ -4436,7 +4574,7 @@ function protectionLapsed(id) {
 function protectMeans(id) {
   const s = seenProtect(id);
   if (!s || s.owner || s.intended === undefined) return null;
-  return [['Screen cover', s.cover === true], ['Can’t be uninstalled', s.admin === true], ['Always running (battery)', s.battery === true]];
+  return [['Screen guard', s.cover === true], ['Can’t be uninstalled', s.admin === true], ['Always running (battery)', s.battery === true]];
 }
 // How an app stands: explicit allow/block, or (a found browser) blocked by "block new".
 function appDecision(d, app) {
@@ -4451,7 +4589,7 @@ function browsersSummary(id, d) {
   const blocked = apps.filter(a => appDecision(d, a) === 'block').length;
   const m = effectiveMode(id, d);   // reflects the phone's own state when the admin hasn't set a mode
   if (m === 'off') return apps.length ? `${plural(apps.length, 'app')} found · not blocking` : 'Not set up';
-  return `${m === 'owner' ? 'Device owner' : 'Screen cover'} · ${blocked ? plural(blocked, 'app') + ' blocked' : 'nothing blocked yet'}`;
+  return `${m === 'owner' ? 'Device owner' : 'Device admin'} · ${blocked ? plural(blocked, 'app') + ' blocked' : 'nothing blocked yet'}`;
 }
 function phoneBrowsers(id, d, M) {
   return h('div', { class: 'field', id: 'pBrowsers' },
@@ -4790,7 +4928,7 @@ function browsersScreen() {
         st ? h('span', { class: `chip ${st.tone}`, style: 'flex:none' }, st.label.split(' · ')[0]) : h('span', { class: 'chip', style: 'flex:none' }, 'No report yet')),
       // What you've asked for (your setting), separate from what the phone has actually granted.
       p.mode && p.mode !== 'off' ? h('div', { class: 'ro', style: 'margin-top:2px' },
-        h('span', { class: 'grow' }, h('span', { class: 't' }, 'Mode you\'ve chosen'), h('span', { class: 's' }, p.mode === 'owner' ? 'Device owner' : 'Screen cover')),
+        h('span', { class: 'grow' }, h('span', { class: 't' }, 'Mode you\'ve chosen'), h('span', { class: 's' }, p.mode === 'owner' ? 'Device owner' : 'Device admin')),
         h('span', { class: 'chip', style: 'flex:none' }, 'Saved')) : null,
       // The per-means breakdown — what the phone has actually granted (the same four its own Protection screen shows).
       (() => { const rows = protectMeans(id); return rows ? h('div', { class: 'group', style: 'margin-top:2px' }, [h('div', { class: 'small muted', style: 'margin:0;padding:10px 16px 4px' }, 'On the phone now:'), ...rows.map(([t, on]) =>
@@ -4805,14 +4943,14 @@ function browsersScreen() {
     M ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'How this phone is protected'),
       h('div', { class: 'group' }, [
         ['owner', 'Device owner', 'Strongest: blocked apps are switched off, the app can\'t be uninstalled, the clock is kept honest. Needs the one-time computer setup.'],
-        ['cover', 'Screen cover', 'A blocked app is covered the moment it opens; uninstall needs a step that\'s covered. Set up on the phone, no computer.'],
+        ['cover', 'Device admin', 'A blocked app is covered the moment it opens; uninstall needs a step that\'s covered. Set up on the phone, no computer.'],
         ['off', 'Off', 'Other browsers are found and listed, but nothing is blocked.'],
       ].map(([v, t, s]) => { const dis = v === 'owner' && !isOwner;   // device owner can only be chosen once the phone is actually set up as one
         return h('label', { class: 'radio', style: dis ? 'opacity:.55' : '' },
           h('input', { type: 'radio', name: 'pmode', value: v, checked: em === v, disabled: dis, onchange: () => setMode(v) }),
           h('span', { class: 'grow' }, h('b', null, t), h('span', { class: 'small muted', style: 'display:block' },
             dis ? 'Set this phone up as a device owner first (the one-time step with a computer); then you can choose this.' : s))); })),
-      em === 'cover' ? sw('Screen cover', 'Turn the cover off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { const pr = lockMode(d, 'cover'); pr.overlay = v; }) : null,
+      em === 'cover' ? sw('Screen guard', 'Turn the screen guard off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { const pr = lockMode(d, 'cover'); pr.overlay = v; }) : null,
       em === 'cover' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = lockMode(d, 'cover'); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null,
       em === 'owner' && !isOwner ? h('p', { class: 'warn', style: 'margin:0' }, 'This phone isn\'t a device owner yet. Follow the one-time setup, with a computer, first.') : null,
       em === 'owner' ? sw('Keep the clock honest', 'Keeps automatic date and time on, so timers can\'t be dodged.', p.lockClock !== false, v => { const pr = lockMode(d, 'owner'); pr.lockClock = v; }) : null,
@@ -4967,7 +5105,7 @@ function timerScreen() {
   }
   const del = async () => {
     if (!(await uiConfirmDanger(`Delete ${t.name || 'this timer'}?`, 'It stops on every phone it\'s for, within a few minutes.', 'Delete', 'trash'))) return;
-    delete S.D.timers[id]; markDevices(); backTo(); say('Deleted. Tap Save to keep the change.');
+    delete S.D.timers[id]; markDevices(); backTo(); say('Deleted. It saves automatically.');
   };
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(backLabel, backTo),
     h('div', { class: 'field' }, h('label', { for: 'tName' }, 'Name'), name),
