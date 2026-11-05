@@ -4242,7 +4242,12 @@ function phoneMediaAndSearch(d, M) {
         h('div', { class: 'mrow' }, h('div', { class: 'top' },
           h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'The PIN'),
             h('span', { class: 's' }, d.openPin && d.openPin.set ? 'Set on the phone' : 'Not set yet — set it on the phone')),
-          M && d.openPin && d.openPin.set ? h('button', { type: 'button', class: 'btn d sm', onclick: () => resetOpenPin(d) }, 'Reset') : null))),
+          M && d.openPin && d.openPin.set ? h('button', { type: 'button', class: 'btn d sm', onclick: () => resetOpenPin(d) }, 'Reset') : null)),
+        h('div', { class: 'mrow' }, h('div', { class: 'top' },
+          h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Recovery email'),
+            h('span', { class: 's' }, d.openPin && d.openPin.email
+              ? d.openPin.email + (d.openPin.emailConfirmed ? ' · confirmed' : ' · not confirmed yet')
+              : 'None yet — the parent sets it on the phone'))))),
       h('p', { class: 'hint', style: 'margin:0' }, d.openPin && d.openPin.set ? '' : 'The parent sets the PIN on the phone. Once set, it is kept even if the app is reinstalled.')));
 }
 // Reset the open-requests PIN: clears it everywhere so the parent must set a new one on the phone.
