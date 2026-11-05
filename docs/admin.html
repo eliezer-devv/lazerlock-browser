@@ -1458,7 +1458,7 @@ const SAVE_WINDOW = 120000;                        // judge "how busy" over the 
 function noteSave() { const now = Date.now(); saveTimes.push(now); saveTimes = saveTimes.filter(t => now - t < SAVE_WINDOW); }
 function autoSaveDelay() {
   const now = Date.now(), n = saveTimes.filter(t => now - t < SAVE_WINDOW).length;   // recent commits
-  return n < 5 ? 1200 : n < 10 ? 3000 : n < 18 ? 6000 : 12000;   // calm → snappy; very busy → batch hard (max 12s)
+  return n < 5 ? 2500 : n < 10 ? 4000 : n < 18 ? 6000 : 12000;   // wait until typing pauses; very busy → batch hard (max 12s)
 }
 // reset=true (a fresh edit) restarts the delay, so a burst of edits batches into one save. reset=false (a plain
 // re-render, or coming back online with changes still pending) only starts a timer if none is already running, so
@@ -1468,12 +1468,24 @@ function scheduleAutoSave(reset = true) {
   if (autoSaveTimer != null) { if (!reset) return; clearTimeout(autoSaveTimer); }
   autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, autoSaveDelay());
 }
+// You're still typing in a field: a real text box (not a toggle/checkbox) has focus and isn't read-only.
+function editingField() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const t = el.tagName;
+  if (t === 'TEXTAREA') return !el.readOnly;
+  if (t === 'INPUT') return !el.readOnly && !['checkbox', 'radio', 'button', 'submit', 'range'].includes(el.type);
+  return el.isContentEditable === true;
+}
 async function runAutoSave() {
   if (autoSaving || !S.connected || !(S.listDirty || S.devDirty)) return;
+  if (editingField()) { scheduleAutoSave(true); return; }   // don't save mid-type — wait until you leave the field
   autoSaving = true;
+  renderSaveBar();                 // now it really is saving: show "Saving…"
   try { await saveAll(true); }
   finally {
     autoSaving = false;
+    renderSaveBar();
     if ((S.listDirty || S.devDirty) && !S.saveBlocked && !S.saveError) scheduleAutoSave(true);  // edits landed during the save: catch them
     else if (S.saveError && !S.saveBlocked) autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 5000);  // a transient send problem: try again shortly
   }
@@ -1497,14 +1509,19 @@ function renderSaveBar() {
     $('saveText').textContent = 'Couldn’t save — ' + S.saveError;
     $('undoBtn').hidden = true;
     $('saveBtn').hidden = false; $('saveBtn').textContent = 'Retry'; $('saveBtn').disabled = false;
-  } else {                                   // changes are saving themselves — no button to press
-    $('saveText').textContent = 'Saving your changes…';
+  } else {                                   // changes save themselves once you pause — no button, and no "Saving…" flash per keystroke
+    $('saveText').textContent = autoSaving ? 'Saving your changes…' : 'Unsaved changes — saving when you finish';
     $('undoBtn').hidden = true; $('saveBtn').hidden = true;
     scheduleAutoSave(false);
   }
 }
 $('saveBtn').onclick = () => { S.saveBlocked = false; S.saveError = null; saveAll(false); };
 $('undoBtn').onclick = undoAll;
+// Left a text field: now it can save (while the cursor was in it, autosave held off).
+document.addEventListener('focusout', e => {
+  const t = e.target && e.target.tagName;
+  if ((t === 'INPUT' || t === 'TEXTAREA') && (S.listDirty || S.devDirty) && !S.saveBlocked) scheduleAutoSave(true);
+});
 if (!INAPP) window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.sending || QUEUE.ops.length || CMDQ.sending) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- lists ----------
