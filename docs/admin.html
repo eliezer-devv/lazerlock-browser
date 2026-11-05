@@ -4226,7 +4226,27 @@ function phoneMediaAndSearch(d, M) {
           h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Only show results already approved'),
             h('span', { class: 's' }, d.searchApprovedOnly ? 'On: only pages this phone can open' : 'Off: new sites show too, to ask for')),
           sw('pSearchOnly', d.searchApprovedOnly === true, on => { if (on) d.searchApprovedOnly = true; else delete d.searchApprovedOnly; markDevices(); render(); }, !M || d.search !== true)))),
-      h('p', { class: 'hint', style: 'margin:0' }, d.search === true ? '' : 'Off to start with. The phone can ask for it, or you turn it on here.')));
+      h('p', { class: 'hint', style: 'margin:0' }, d.search === true ? '' : 'Off to start with. The phone can ask for it, or you turn it on here.')),
+    h('div', { class: 'stack', style: 'gap:6px' },
+      h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'PIN to send open requests'),
+        h('span', { class: 'hint', style: 'margin:0' }, `When on, ${who} phone must enter a PIN before it can ask to open a site or media — so open requests can't be sent without it. Block requests never need it. The PIN is set on the phone (Settings → Protection & controls); here you turn the gate on or off, or reset it.`)),
+      h('div', { class: 'mrows' },
+        h('div', { class: 'mrow' }, h('div', { class: 'top' }, h('b', null, 'Require a PIN'),
+          obSeg('Require a PIN', d.openPin && d.openPin.on ? 'open' : 'blocked',
+            v => { const op = { ...(d.openPin || {}) }; if (v === 'open') op.on = true; else delete op.on; d.openPin = op; markDevices(); render(); },
+            { disabled: !M, opts: [['open', 'On'], ['blocked', 'Off']], id: 'pOpenPin' }))),
+        h('div', { class: 'mrow' }, h('div', { class: 'top' },
+          h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'The PIN'),
+            h('span', { class: 's' }, d.openPin && d.openPin.set ? 'Set on the phone' : 'Not set yet — set it on the phone')),
+          M && d.openPin && d.openPin.set ? h('button', { type: 'button', class: 'btn d sm', onclick: () => resetOpenPin(d) }, 'Reset') : null))),
+      h('p', { class: 'hint', style: 'margin:0' }, d.openPin && d.openPin.set ? '' : 'The parent sets the PIN on the phone. Once set, it is kept even if the app is reinstalled.')));
+}
+// Reset the open-requests PIN: clears it everywhere so the parent must set a new one on the phone.
+async function resetOpenPin(d) {
+  if (!(await uiConfirm('Reset the open-requests PIN?', 'The current PIN stops working, and the parent sets a new one on the phone. The phone picks this up within a few minutes.', 'Reset', { icon: 'ban', red: true }))) return;
+  const op = { ...(d.openPin || {}) }; op.reset = true; delete op.set; d.openPin = op;
+  markDevices(); saveAll();
+  say('Open-requests PIN reset. The parent sets a new one on the phone.');
 }
 // PIN approvals locked on a phone (5 wrong PINs): unlocked, and saved, straight away.
 const pinLocked = d => !!(d && d.pinLockedUntil && Date.parse(d.pinLockedUntil) > Date.now());
