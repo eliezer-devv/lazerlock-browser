@@ -2653,7 +2653,8 @@ function requestsScreen() {
       const n = selSet().size, allOn = n === eligible.length;
       kids.push(h('div', { class: 'selbar' },
         h('button', { type: 'button', class: 'btn s sm', onclick: () => { S.selected = allOn ? new Set() : new Set(eligible.map(i => i.number)); render(); } }, allOn ? 'None' : 'All'),
-        h('span', { class: 'grow small', style: 'text-align:center' }, n ? `${plural(n, 'request')} selected` : 'Tap the ones to approve'),
+        h('span', { class: 'grow small', style: 'text-align:center' }, n ? `${plural(n, 'request')} selected` : 'Tap the ones to answer'),
+        h('button', { type: 'button', class: 'btn d sm', disabled: !n, onclick: denySelected }, n ? `Deny ${n}` : 'Deny'),
         h('button', { type: 'button', class: 'btn p sm', disabled: !n, onclick: approveSelected }, n ? `Approve ${n}` : 'Approve')));
     }
   }
@@ -2722,6 +2723,25 @@ async function approveSelected() {
   S.selMode = false; S.selected = new Set();
   render();
   say(`Approved ${plural(list.length, 'request')}. GitHub does them within a minute, and the phones are told a few minutes after.`);
+}
+// Deny every selected request at once: each is sent as a plain "deny" (no reason) to the phone's own list, and they
+// ride out together in one save. Same safe set as Approve — only straightforward requests are ever selectable.
+async function denySelected() {
+  const nums = [...selSet()];
+  const list = (S.requests || []).filter(i => nums.includes(i.number) && bulkOK(i));
+  if (!list.length) return;
+  if (!(await uiConfirm(`Deny ${plural(list.length, 'request')}?`, 'Each is turned down, with no reason given. It saves automatically.', 'Deny all', { icon: 'ban', red: true }))) return;
+  list.forEach(issue => {
+    const req = marker(issue.body);
+    reply(issue.number, 'deny', false);
+    S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
+    S.answered.unshift({ title: describe(req).title, label: `Denied · ${phoneName(issue)}` });
+  });
+  const done = new Set(list.map(i => i.number));
+  S.requests = (S.requests || []).filter(i => !done.has(i.number));
+  S.selMode = false; S.selected = new Set();
+  render();
+  say(`Denied ${plural(list.length, 'request')}. GitHub does them within a minute, and the phones are told a few minutes after.`);
 }
 // A waiting request, as a compact row: tap it to open the details and answer there. In select mode, the eligible ones
 // tap to tick/untick instead (the rest still open as usual).
