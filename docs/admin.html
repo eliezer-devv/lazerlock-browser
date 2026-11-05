@@ -4082,7 +4082,11 @@ function phoneScreen() {
   const first = h('input', { class: 'inp', id: 'pFirst', value: d.first || '', placeholder: 'e.g. Emma', readonly: !M, oninput: e => { d.first = e.target.value; setName(); } });
   const last = h('input', { class: 'inp', id: 'pLast', value: d.last || '', placeholder: 'e.g. Smith', readonly: !M, oninput: e => { d.last = e.target.value; setName(); } });
   // The owner's email, typed at setup on the phone. Editable by the main admin; kept in devices.json.
-  const email = h('input', { class: 'inp', id: 'pEmail', type: 'email', value: d.email || '', placeholder: 'e.g. parent@email.com', readonly: !M, oninput: e => { const v = e.target.value.trim(); if (v !== (d.email || '')) delete d.emailConfirmed; if (v) d.email = v; else delete d.email; markDevices(); render(); } });
+  const email = h('input', { class: 'inp', id: 'pEmail', type: 'email', value: d.email || '', placeholder: 'e.g. parent@email.com', readonly: !M,
+    // Update the model (and the save bar) as they type, but DON'T re-render — a re-render per keystroke rebuilds the
+    // field and loses focus, so you can't type. Re-render once on blur, to refresh anything that depends on the email.
+    oninput: e => { const v = e.target.value.trim(); if (v !== (d.email || '')) delete d.emailConfirmed; if (v) d.email = v; else delete d.email; markDevices(); },
+    onchange: () => render() });
   const lists = h('div', { class: 'chips', style: 'gap:8px' }, S.lists.map(l => {
     const on = (d.lists || []).includes(l);
     return h('button', { type: 'button', class: 'lc pick', 'aria-pressed': String(on), disabled: !!d.blocked || !E, onclick: () => {
