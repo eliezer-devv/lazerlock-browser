@@ -4231,6 +4231,8 @@ function phoneSeenPart(id, d, M) {
 function phoneMediaAndSearch(d, M) {
   const fname = firstName(d), who = possessive(fname);
   const sw = (id, on, change, disabled) => h('input', { type: 'checkbox', class: 'sw', id, checked: on, disabled, onchange: e => change(e.target.checked) });
+  // A PIN is set either way we might be reading this device: the raw file has `hash`, the sub-admin view has `set`.
+  const op = d.openPin || {}, opSet = !!(op.hash || op.set);
   return h('div', { class: 'stack', style: 'gap:10px' },
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound'),
@@ -4250,27 +4252,38 @@ function phoneMediaAndSearch(d, M) {
       h('p', { class: 'hint', style: 'margin:0' }, d.search === true ? '' : 'Off to start with. The phone can ask for it, or you turn it on here.')),
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'PIN to send open requests'),
-        h('span', { class: 'hint', style: 'margin:0' }, `When on, ${who} phone must enter a PIN before it can ask to open a site or media — so open requests can't be sent without it. Block requests never need it. The PIN is set on the phone (Settings → Protection & controls); here you turn the gate on or off, or reset it.`)),
+        h('span', { class: 'hint', style: 'margin:0' }, `When on, ${who} phone must enter a PIN before it can ask to open a site or media — so open requests can't be sent without it. Block requests never need it. The PIN is set on the phone (Settings → Protection & controls); here you can turn that gate off (or back on) and reset it.`)),
       h('div', { class: 'mrows' },
-        h('div', { class: 'mrow' }, h('div', { class: 'top' }, h('b', null, 'Require a PIN'),
-          obSeg('Require a PIN', d.openPin && d.openPin.on ? 'open' : 'blocked',
-            v => { const op = { ...(d.openPin || {}) }; if (v === 'open') op.on = true; else delete op.on; d.openPin = op; markDevices(); render(); },
-            { disabled: !M, opts: [['open', 'On'], ['blocked', 'Off']], id: 'pOpenPin' }))),
+        h('div', { class: 'mrow' }, h('div', { class: 'top' },
+          h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Require a PIN'),
+            h('span', { class: 's' }, !opSet ? 'No PIN set yet'
+              : op.on ? 'On — a PIN is needed to open things' : 'Off — not required right now')),
+          // Only when a PIN actually exists on the phone: the admin can turn that gate off (or back on). Turning it
+          // "on" when there is no PIN makes no sense, so there's no control then — the parent sets it on the phone.
+          (M && opSet)
+            ? h('button', { type: 'button', class: 'btn s sm', onclick: () => { const o = { ...(d.openPin || {}) }; if (o.on) delete o.on; else o.on = true; d.openPin = o; markDevices(); render(); } },
+                op.on ? 'Turn off' : 'Turn on')
+            : null)),
         h('div', { class: 'mrow' }, h('div', { class: 'top' },
           h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'The PIN'),
-            h('span', { class: 's' }, d.openPin && d.openPin.set ? 'Set on the phone' : 'Not set yet — set it on the phone')),
-          M && d.openPin && d.openPin.set ? h('button', { type: 'button', class: 'btn d sm', onclick: () => resetOpenPin(d) }, 'Reset') : null)),
+            h('span', { class: 's' }, opSet ? 'Set on the phone' : 'Not set yet — set it on the phone')),
+          M && opSet ? h('button', { type: 'button', class: 'btn d sm', onclick: () => resetOpenPin(d) }, 'Reset') : null)),
         h('div', { class: 'mrow' }, h('div', { class: 'top' },
           h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Recovery email'),
-            h('span', { class: 's' }, d.openPin && d.openPin.email
-              ? d.openPin.email + (d.openPin.emailConfirmed ? ' · confirmed' : ' · not confirmed yet')
+            h('span', { class: 's' }, op.email
+              ? op.email + (op.emailConfirmed ? ' · confirmed' : ' · not confirmed yet')
               : 'None yet — the parent sets it on the phone'))))),
-      h('p', { class: 'hint', style: 'margin:0' }, d.openPin && d.openPin.set ? '' : 'The parent sets the PIN on the phone. Once set, it is kept even if the app is reinstalled.')));
+      h('p', { class: 'hint', style: 'margin:0' }, opSet ? '' : 'The parent sets the PIN on the phone. Once set, it is kept even if the app is reinstalled.')));
 }
 // Reset the open-requests PIN: clears it everywhere so the parent must set a new one on the phone.
 async function resetOpenPin(d) {
   if (!(await uiConfirm('Reset the open-requests PIN?', 'The current PIN stops working, and the parent sets a new one on the phone. The phone picks this up within a few minutes.', 'Reset', { icon: 'ban', red: true }))) return;
-  const op = { ...(d.openPin || {}) }; op.reset = true; delete op.set; d.openPin = op;
+  // Clear the PIN directly (the main admin writes devices.json, so there's no backend step to do it), AND flag reset:true
+  // and a resetAt stamp — the phone obeys resetAt and drops its local PIN. The recovery email is kept for the new PIN.
+  const op = { ...(d.openPin || {}) };
+  delete op.hash; delete op.resetCode; delete op.emailCode; delete op.set;
+  op.reset = true; op.resetAt = Date.now();
+  d.openPin = op;
   markDevices(); saveAll();
   say('Open-requests PIN reset. The parent sets a new one on the phone.');
 }
