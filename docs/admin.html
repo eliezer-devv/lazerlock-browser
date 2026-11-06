@@ -4332,7 +4332,7 @@ function pausePicker() {
     const dlg = h('section', { class: 'dlg', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Temporarily turn off the PIN' },
       h('div', { class: 'dhead' }, h('span', { class: 'dicon' }, icon('clock', 22)), h('h2', null, 'Temporarily turn off')),
       h('p', null, 'How long should the PIN be off? The timer starts when the phone next opens the app, and the PIN switches back on by itself when it ends.'),
-      h('div', { style: 'display:flex;flex-wrap:wrap;gap:8px' }, opt(5), opt(10), opt(15), opt(30)),
+      h('div', { style: 'display:flex;flex-wrap:wrap;gap:8px' }, opt(2), opt(5), opt(10), opt(15)),
       h('div', { class: 'dacts' }, h('button', { type: 'button', class: 'btn d', onclick: () => close(0) }, 'Cancel')));
     const shade = h('div', { class: 'dlg-shade', onclick: e => { if (e.target === shade) close(0); } }, dlg);
     const keys = e => { if (e.key === 'Escape') { e.preventDefault(); close(0); } };
