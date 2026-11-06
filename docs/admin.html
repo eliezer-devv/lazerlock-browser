@@ -4252,6 +4252,18 @@ function phoneMediaAndSearch(id, d, M) {
   const seenRec = seenOf(id) || {}, seenOp = (seenRec.openPin && typeof seenRec.openPin === 'object') ? seenRec.openPin : {};
   const seenSetFresh = !!(seenOp.set && (!op.resetAt || (seenRec.at || 0) > op.resetAt));
   const opSet = !!(op.hash || op.set || seenSetFresh);
+  // A temporary pause: armed by the admin (pauseMins/pauseAt); the phone reports when it actually started (pauseStart),
+  // which is its first app-open after arming. "Waiting" = armed but the phone hasn't opened yet; "running" = the window
+  // is counting down now; once it ends the phone is back on by itself (so the row shows "On" again).
+  const pauseMins = Number(op.pauseMins) || 0, pauseAt = Number(op.pauseAt) || 0, now = Date.now();
+  const pauseArmed = pauseMins > 0 && pauseAt > 0;
+  // Trust the phone's reported start only if it's for THIS arm — the phone always starts a window after the admin arms
+  // it, so a start time older than pauseAt belongs to a previous pause (seen.json just hasn't caught up yet).
+  const pauseStart = Number(seenOp.pauseStart) >= pauseAt ? Number(seenOp.pauseStart) : 0;
+  const pauseEndsAt = pauseStart > 0 ? pauseStart + pauseMins * 60000 : 0;
+  const pauseRunning = pauseArmed && pauseEndsAt > now;
+  const pauseWaiting = pauseArmed && pauseStart <= 0;
+  const paused = pauseRunning || pauseWaiting;
   return h('div', { class: 'stack', style: 'gap:10px' },
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound'),
@@ -4271,22 +4283,27 @@ function phoneMediaAndSearch(id, d, M) {
       h('p', { class: 'hint', style: 'margin:0' }, d.search === true ? '' : 'Off to start with. The phone can ask for it, or you turn it on here.')),
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'PIN to send open requests'),
-        h('span', { class: 'hint', style: 'margin:0' }, `When on, ${who} phone must enter a PIN before it can ask to open a site or media — so open requests can't be sent without it. Block requests never need it. The PIN is set on the phone (Settings → Protection & controls); here you can turn that gate off (or back on) and reset it.`)),
+        h('span', { class: 'hint', style: 'margin:0' }, `When on, ${who} phone must enter a PIN before it can ask to open a site or media — so open requests can't be sent without it. Block requests never need it. The PIN is set on the phone (Settings → Protection & controls); here you can turn it off for a short while (it comes back on by itself) or remove it.`)),
       h('div', { class: 'mrows' },
         h('div', { class: 'mrow' }, h('div', { class: 'top' },
           h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Require a PIN'),
             h('span', { class: 's' }, !opSet ? 'No PIN set yet'
-              : op.on ? 'On — a PIN is needed to open things' : 'Off — not required right now')),
-          // Only when a PIN actually exists on the phone: the admin can turn that gate off (or back on). Turning it
-          // "on" when there is no PIN makes no sense, so there's no control then — the parent sets it on the phone.
+              : !op.on ? 'Off — not required right now'
+              : pauseRunning ? `Temporarily off — back on in ${fmtMin(Math.max(1, Math.ceil((pauseEndsAt - now) / 60000)))}`
+              : pauseWaiting ? `Temporarily off for ${fmtMin(pauseMins)} — starts when the phone opens the app`
+              : 'On — a PIN is needed to open things')),
+          // The PIN exists on the phone. The admin can turn it off for a short window (which auto-returns), or cancel that.
           (M && opSet)
-            ? h('button', { type: 'button', class: 'btn s sm', onclick: () => { const o = { ...(d.openPin || {}) }; if (o.on) delete o.on; else o.on = true; d.openPin = o; markDevices(); render(); } },
-                op.on ? 'Turn off' : 'Turn on')
+            ? (!op.on
+                ? h('button', { type: 'button', class: 'btn s sm', onclick: () => { const o = { ...(d.openPin || {}) }; o.on = true; d.openPin = o; markDevices(); render(); } }, 'Turn on')
+                : paused
+                  ? h('button', { type: 'button', class: 'btn s sm', onclick: () => resumeOpenPin(d) }, 'Turn back on now')
+                  : h('button', { type: 'button', class: 'btn s sm', onclick: () => pauseOpenPin(d) }, 'Temporarily turn off'))
             : null)),
         h('div', { class: 'mrow' }, h('div', { class: 'top' },
           h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'The PIN'),
             h('span', { class: 's' }, opSet ? 'Set on the phone' : 'Not set yet — set it on the phone')),
-          M && opSet ? h('button', { type: 'button', class: 'btn d sm', onclick: () => resetOpenPin(d) }, 'Reset') : null)),
+          M && opSet ? h('button', { type: 'button', class: 'btn d sm', onclick: () => resetOpenPin(d) }, 'Remove') : null)),
         h('div', { class: 'mrow' }, h('div', { class: 'top' },
           h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Recovery email'),
             h('span', { class: 's' }, op.email
@@ -4294,17 +4311,50 @@ function phoneMediaAndSearch(id, d, M) {
               : 'None yet — the parent sets it on the phone'))))),
       h('p', { class: 'hint', style: 'margin:0' }, opSet ? '' : 'The parent sets the PIN on the phone. Once set, it is kept even if the app is reinstalled.')));
 }
-// Reset the open-requests PIN: clears it everywhere so the parent must set a new one on the phone.
+// Remove the open-requests PIN: clears it everywhere so the parent must set a new one on the phone.
 async function resetOpenPin(d) {
-  if (!(await uiConfirm('Reset the open-requests PIN?', 'The current PIN stops working and its recovery email is cleared, so the parent sets a new one — with a fresh email — on the phone. The phone picks this up within a few minutes.', 'Reset', { icon: 'ban', red: true }))) return;
+  if (!(await uiConfirm('Remove the open-requests PIN?', 'The current PIN stops working and its recovery email is cleared, so the parent sets a new one — with a fresh email — on the phone. The phone picks this up within a few minutes.', 'Remove', { icon: 'ban', red: true }))) return;
   // Clear the PIN directly (the main admin writes devices.json, so there's no backend step to do it), AND flag reset:true
   // and a resetAt stamp — the phone obeys resetAt and drops its local PIN. Clearing the PIN clears the recovery email too.
   const op = { ...(d.openPin || {}) };
   delete op.hash; delete op.resetCode; delete op.emailCode; delete op.set; delete op.email; delete op.emailConfirmed;
+  delete op.pauseMins; delete op.pauseAt; delete op.pauseStart;
   op.reset = true; op.resetAt = Date.now();
   d.openPin = op;
   markDevices(); saveAll();
-  say('Open-requests PIN reset. The parent sets a new one on the phone.');
+  say('Open-requests PIN removed. The parent sets a new one on the phone.');
+}
+// Temporarily turn the PIN off for a small window, starting when the phone next opens the app; it switches back on by itself.
+function pausePicker() {
+  return new Promise(resolve => {
+    const close = v => { shade.remove(); document.removeEventListener('keydown', keys, true); resolve(v); };
+    const opt = m => h('button', { type: 'button', class: 'btn p', style: 'flex:1;min-width:76px', onclick: () => close(m) }, fmtMin(m));
+    const dlg = h('section', { class: 'dlg', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Temporarily turn off the PIN' },
+      h('div', { class: 'dhead' }, h('span', { class: 'dicon' }, icon('clock', 22)), h('h2', null, 'Temporarily turn off')),
+      h('p', null, 'How long should the PIN be off? The timer starts when the phone next opens the app, and the PIN switches back on by itself when it ends.'),
+      h('div', { style: 'display:flex;flex-wrap:wrap;gap:8px' }, opt(5), opt(10), opt(15), opt(30)),
+      h('div', { class: 'dacts' }, h('button', { type: 'button', class: 'btn d', onclick: () => close(0) }, 'Cancel')));
+    const shade = h('div', { class: 'dlg-shade', onclick: e => { if (e.target === shade) close(0); } }, dlg);
+    const keys = e => { if (e.key === 'Escape') { e.preventDefault(); close(0); } };
+    document.addEventListener('keydown', keys, true);
+    document.body.append(shade);
+  });
+}
+async function pauseOpenPin(d) {
+  const m = await pausePicker();
+  if (!m) return;
+  const op = { ...(d.openPin || {}) };
+  op.pauseMins = m; op.pauseAt = Date.now(); delete op.pauseStart; delete op.set;
+  d.openPin = op;
+  markDevices(); saveAll();
+  say(`PIN off for ${fmtMin(m)} once the phone opens the app — it comes back on by itself.`);
+}
+async function resumeOpenPin(d) {
+  const op = { ...(d.openPin || {}) };
+  delete op.pauseMins; delete op.pauseAt; delete op.pauseStart; delete op.set;
+  d.openPin = op;
+  markDevices(); saveAll();
+  say('PIN back on.');
 }
 // PIN approvals locked on a phone (5 wrong PINs): unlocked, and saved, straight away.
 const pinLocked = d => !!(d && d.pinLockedUntil && Date.parse(d.pinLockedUntil) > Date.now());
