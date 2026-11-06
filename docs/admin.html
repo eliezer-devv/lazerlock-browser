@@ -4171,7 +4171,7 @@ function phoneScreen() {
       }), h('button', { type: 'button', class: 'lc addtxt', onclick: async () => {
         const g = await newGroup(); if (g) { d.groups = [...(d.groups || []), g]; markDevices(); render(); } } }, icon('plus', 15, 2.4), 'New group')),
       h('p', { class: 'hint', style: 'margin:0' }, 'Helper admins given a group look after every phone in it.')) : null,
-    phoneMediaAndSearch(d, M),
+    phoneMediaAndSearch(id, d, M),
     phoneTimers(id),
     phoneBrowsers(id, d, M),
     phoneMessages(id),
@@ -4228,11 +4228,16 @@ function phoneSeenPart(id, d, M) {
     notes.length ? h('p', { class: 'warn', id: 'pClock', style: 'margin:0' }, notes.join(' ')) : null);
 }
 // A phone's default for photos, videos and sound, and its text search. Changed by those who manage the phone.
-function phoneMediaAndSearch(d, M) {
+function phoneMediaAndSearch(id, d, M) {
   const fname = firstName(d), who = possessive(fname);
-  const sw = (id, on, change, disabled) => h('input', { type: 'checkbox', class: 'sw', id, checked: on, disabled, onchange: e => change(e.target.checked) });
-  // A PIN is set either way we might be reading this device: the raw file has `hash`, the sub-admin view has `set`.
-  const op = d.openPin || {}, opSet = !!(op.hash || op.set);
+  const sw = (sid, on, change, disabled) => h('input', { type: 'checkbox', class: 'sw', id: sid, checked: on, disabled, onchange: e => change(e.target.checked) });
+  // Whether a PIN is set. The PIN's hash is owned by the phone and reported in seen.json (it isn't in devices.json for a
+  // full admin), so read it from there — but only a hash newer than the last reset counts, so a reset shows as cleared
+  // straight away rather than lingering until the phone next syncs. The sub-admin view carries a plain `set` flag.
+  const op = d.openPin || {};
+  const seenRec = seenOf(id) || {}, seenOp = (seenRec.openPin && typeof seenRec.openPin === 'object') ? seenRec.openPin : {};
+  const seenSetFresh = !!(seenOp.set && (!op.resetAt || (seenRec.at || 0) > op.resetAt));
+  const opSet = !!(op.hash || op.set || seenSetFresh);
   return h('div', { class: 'stack', style: 'gap:10px' },
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound'),
@@ -4277,11 +4282,11 @@ function phoneMediaAndSearch(d, M) {
 }
 // Reset the open-requests PIN: clears it everywhere so the parent must set a new one on the phone.
 async function resetOpenPin(d) {
-  if (!(await uiConfirm('Reset the open-requests PIN?', 'The current PIN stops working, and the parent sets a new one on the phone. The phone picks this up within a few minutes.', 'Reset', { icon: 'ban', red: true }))) return;
+  if (!(await uiConfirm('Reset the open-requests PIN?', 'The current PIN stops working and its recovery email is cleared, so the parent sets a new one — with a fresh email — on the phone. The phone picks this up within a few minutes.', 'Reset', { icon: 'ban', red: true }))) return;
   // Clear the PIN directly (the main admin writes devices.json, so there's no backend step to do it), AND flag reset:true
-  // and a resetAt stamp — the phone obeys resetAt and drops its local PIN. The recovery email is kept for the new PIN.
+  // and a resetAt stamp — the phone obeys resetAt and drops its local PIN. Clearing the PIN clears the recovery email too.
   const op = { ...(d.openPin || {}) };
-  delete op.hash; delete op.resetCode; delete op.emailCode; delete op.set;
+  delete op.hash; delete op.resetCode; delete op.emailCode; delete op.set; delete op.email; delete op.emailConfirmed;
   op.reset = true; op.resetAt = Date.now();
   d.openPin = op;
   markDevices(); saveAll();
