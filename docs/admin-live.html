@@ -1353,9 +1353,9 @@ function phonesUsing(name) {
 const canEditList = n => fullAdmin() || (canDo('edit') && !isPublicList(n) && !(S.D.default || []).includes(n));
 function markList() {
   if (!canEditList(S.current)) { say(`You can look at ${listLabel(S.current)}, but not change it.`, true); openList(S.current).then(render); return; }
-  S.listDirty = true; S.saveError = null; S.saveBlocked = false; scheduleAutoSave(true); renderSaveBar();
+  S.listDirty = true; S.saveError = null; S.saveBlocked = false; if (dirtySince == null) dirtySince = Date.now(); scheduleAutoSave(true); renderSaveBar();
 }
-function markDevices() { S.devDirty = true; S.saveError = null; S.saveBlocked = false; scheduleAutoSave(true); renderSaveBar(); }
+function markDevices() { S.devDirty = true; S.saveError = null; S.saveBlocked = false; if (dirtySince == null) dirtySince = Date.now(); scheduleAutoSave(true); renderSaveBar(); }
 
 // ---------- loading ----------
 // Everything this admin sees, at the newest version (or [sha]). False: this device is signed out.
@@ -1440,6 +1440,7 @@ async function saveAll(auto = false) {
       S.devDirty = false;
     }
     S.saveError = null; S.saveBlocked = false;
+    if (!S.listDirty && !S.devDirty) dirtySince = null;   // all pending changes committed: clear the pending-clock
     if (did) noteSave();                      // one more recent commit, for the adaptive batching
     say(auto ? 'Saved ✓ · phones pick it up within a few minutes.'
              : 'Saving. GitHub saves it within a minute, and phones pick it up a few minutes after.');
@@ -1450,6 +1451,11 @@ async function saveAll(auto = false) {
 // Auto-save: a change commits itself a short moment after the last edit — no Save button to press. The small delay
 // batches a burst of edits (toggles, typing) into one save instead of one per keystroke.
 let autoSaveTimer = null, autoSaving = false;
+// When the first still-unsaved change was made. The debounce waits for a pause, but a long spell of back-to-back edits
+// never pauses — so changes may never commit and the bar is stuck on "unsaved". This caps how long anything can sit:
+// a save fires at most MAX_PENDING after the first pending change, even if you're still editing.
+let dirtySince = null;
+const MAX_PENDING = 8000;
 // Adaptive batching: the wait before a change commits grows when saves are coming thick and fast, so a busy spell
 // folds many edits into fewer commits (fewer GitHub Actions runs), then eases back to snappy once things calm down.
 // It only paces THIS admin's edits — phones' own check-ins are separate traffic it can't control.
@@ -1458,22 +1464,42 @@ const SAVE_WINDOW = 120000;                        // judge "how busy" over the 
 function noteSave() { const now = Date.now(); saveTimes.push(now); saveTimes = saveTimes.filter(t => now - t < SAVE_WINDOW); }
 function autoSaveDelay() {
   const now = Date.now(), n = saveTimes.filter(t => now - t < SAVE_WINDOW).length;   // recent commits
-  return n < 5 ? 1200 : n < 10 ? 3000 : n < 18 ? 6000 : 12000;   // calm → snappy; very busy → batch hard (max 12s)
+  return n < 5 ? 2500 : n < 10 ? 4000 : n < 18 ? 6000 : 12000;   // wait until typing pauses; very busy → batch hard (max 12s)
 }
 // reset=true (a fresh edit) restarts the delay, so a burst of edits batches into one save. reset=false (a plain
 // re-render, or coming back online with changes still pending) only starts a timer if none is already running, so
 // frequent re-renders can't keep pushing the save off, and an edit made while briefly offline still saves on reconnect.
 function scheduleAutoSave(reset = true) {
   if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty)) return;
+  // The normal debounce, but never pushed out past MAX_PENDING since the first unsaved change — so continuous editing
+  // still commits on a steady cadence instead of resetting the timer forever.
+  let delay = autoSaveDelay();
+  if (dirtySince != null) delay = Math.min(delay, Math.max(0, dirtySince + MAX_PENDING - Date.now()));
   if (autoSaveTimer != null) { if (!reset) return; clearTimeout(autoSaveTimer); }
-  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, autoSaveDelay());
+  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, delay);
+}
+// You're still typing in a field: a real text box (not a toggle/checkbox) has focus and isn't read-only.
+function editingField() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const t = el.tagName;
+  if (t === 'TEXTAREA') return !el.readOnly;
+  if (t === 'INPUT') return !el.readOnly && !['checkbox', 'radio', 'button', 'submit', 'range'].includes(el.type);
+  return el.isContentEditable === true;
 }
 async function runAutoSave() {
   if (autoSaving || !S.connected || !(S.listDirty || S.devDirty)) return;
+  // Don't save mid-type: wait until the text field is left. Poll on a fixed delay (not the clamped one, which can be 0
+  // once MAX_PENDING is passed, and would busy-loop). Toggles/checkboxes aren't "editing", so they save right away.
+  if (editingField()) { if (autoSaveTimer != null) clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 1500); return; }
   autoSaving = true;
+  renderSaveBar();                 // now it really is saving: show "Saving…"
   try { await saveAll(true); }
   finally {
     autoSaving = false;
+    // Start a fresh pending-clock: null if everything saved, else now (edits that landed during the save get their own window).
+    dirtySince = (S.listDirty || S.devDirty) ? Date.now() : null;
+    renderSaveBar();
     if ((S.listDirty || S.devDirty) && !S.saveBlocked && !S.saveError) scheduleAutoSave(true);  // edits landed during the save: catch them
     else if (S.saveError && !S.saveBlocked) autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 5000);  // a transient send problem: try again shortly
   }
@@ -1497,14 +1523,19 @@ function renderSaveBar() {
     $('saveText').textContent = 'Couldn’t save — ' + S.saveError;
     $('undoBtn').hidden = true;
     $('saveBtn').hidden = false; $('saveBtn').textContent = 'Retry'; $('saveBtn').disabled = false;
-  } else {                                   // changes are saving themselves — no button to press
-    $('saveText').textContent = 'Saving your changes…';
+  } else {                                   // changes save themselves once you pause — no button, and no "Saving…" flash per keystroke
+    $('saveText').textContent = autoSaving ? 'Saving your changes…' : 'Unsaved changes — saving automatically…';
     $('undoBtn').hidden = true; $('saveBtn').hidden = true;
     scheduleAutoSave(false);
   }
 }
 $('saveBtn').onclick = () => { S.saveBlocked = false; S.saveError = null; saveAll(false); };
 $('undoBtn').onclick = undoAll;
+// Left a text field: now it can save (while the cursor was in it, autosave held off).
+document.addEventListener('focusout', e => {
+  const t = e.target && e.target.tagName;
+  if ((t === 'INPUT' || t === 'TEXTAREA') && (S.listDirty || S.devDirty) && !S.saveBlocked) scheduleAutoSave(true);
+});
 if (!INAPP) window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.sending || QUEUE.ops.length || CMDQ.sending) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- lists ----------
@@ -2653,7 +2684,8 @@ function requestsScreen() {
       const n = selSet().size, allOn = n === eligible.length;
       kids.push(h('div', { class: 'selbar' },
         h('button', { type: 'button', class: 'btn s sm', onclick: () => { S.selected = allOn ? new Set() : new Set(eligible.map(i => i.number)); render(); } }, allOn ? 'None' : 'All'),
-        h('span', { class: 'grow small', style: 'text-align:center' }, n ? `${plural(n, 'request')} selected` : 'Tap the ones to approve'),
+        h('span', { class: 'grow small', style: 'text-align:center' }, n ? `${plural(n, 'request')} selected` : 'Tap the ones to answer'),
+        h('button', { type: 'button', class: 'btn d sm', disabled: !n, onclick: denySelected }, n ? `Deny ${n}` : 'Deny'),
         h('button', { type: 'button', class: 'btn p sm', disabled: !n, onclick: approveSelected }, n ? `Approve ${n}` : 'Approve')));
     }
   }
@@ -2722,6 +2754,25 @@ async function approveSelected() {
   S.selMode = false; S.selected = new Set();
   render();
   say(`Approved ${plural(list.length, 'request')}. GitHub does them within a minute, and the phones are told a few minutes after.`);
+}
+// Deny every selected request at once: each is sent as a plain "deny" (no reason) to the phone's own list, and they
+// ride out together in one save. Same safe set as Approve — only straightforward requests are ever selectable.
+async function denySelected() {
+  const nums = [...selSet()];
+  const list = (S.requests || []).filter(i => nums.includes(i.number) && bulkOK(i));
+  if (!list.length) return;
+  if (!(await uiConfirm(`Deny ${plural(list.length, 'request')}?`, 'Each is turned down, with no reason given. It saves automatically.', 'Deny all', { icon: 'ban', red: true }))) return;
+  list.forEach(issue => {
+    const req = marker(issue.body);
+    reply(issue.number, 'deny', false);
+    S.answeredNumbers = [...(S.answeredNumbers || []), issue.number];
+    S.answered.unshift({ title: describe(req).title, label: `Denied · ${phoneName(issue)}` });
+  });
+  const done = new Set(list.map(i => i.number));
+  S.requests = (S.requests || []).filter(i => !done.has(i.number));
+  S.selMode = false; S.selected = new Set();
+  render();
+  say(`Denied ${plural(list.length, 'request')}. GitHub does them within a minute, and the phones are told a few minutes after.`);
 }
 // A waiting request, as a compact row: tap it to open the details and answer there. In select mode, the eligible ones
 // tap to tick/untick instead (the rest still open as usual).
@@ -4062,7 +4113,11 @@ function phoneScreen() {
   const first = h('input', { class: 'inp', id: 'pFirst', value: d.first || '', placeholder: 'e.g. Emma', readonly: !M, oninput: e => { d.first = e.target.value; setName(); } });
   const last = h('input', { class: 'inp', id: 'pLast', value: d.last || '', placeholder: 'e.g. Smith', readonly: !M, oninput: e => { d.last = e.target.value; setName(); } });
   // The owner's email, typed at setup on the phone. Editable by the main admin; kept in devices.json.
-  const email = h('input', { class: 'inp', id: 'pEmail', type: 'email', value: d.email || '', placeholder: 'e.g. parent@email.com', readonly: !M, oninput: e => { const v = e.target.value.trim(); if (v !== (d.email || '')) delete d.emailConfirmed; if (v) d.email = v; else delete d.email; markDevices(); render(); } });
+  const email = h('input', { class: 'inp', id: 'pEmail', type: 'email', value: d.email || '', placeholder: 'e.g. parent@email.com', readonly: !M,
+    // Update the model (and the save bar) as they type, but DON'T re-render — a re-render per keystroke rebuilds the
+    // field and loses focus, so you can't type. Re-render once on blur, to refresh anything that depends on the email.
+    oninput: e => { const v = e.target.value.trim(); if (v !== (d.email || '')) delete d.emailConfirmed; if (v) d.email = v; else delete d.email; markDevices(); },
+    onchange: () => render() });
   const lists = h('div', { class: 'chips', style: 'gap:8px' }, S.lists.map(l => {
     const on = (d.lists || []).includes(l);
     return h('button', { type: 'button', class: 'lc pick', 'aria-pressed': String(on), disabled: !!d.blocked || !E, onclick: () => {
@@ -4130,7 +4185,7 @@ function phoneScreen() {
       }), h('button', { type: 'button', class: 'lc addtxt', onclick: async () => {
         const g = await newGroup(); if (g) { d.groups = [...(d.groups || []), g]; markDevices(); render(); } } }, icon('plus', 15, 2.4), 'New group')),
       h('p', { class: 'hint', style: 'margin:0' }, 'Helper admins given a group look after every phone in it.')) : null,
-    phoneMediaAndSearch(d, M),
+    phoneMediaAndSearch(id, d, M),
     phoneTimers(id),
     phoneBrowsers(id, d, M),
     phoneMessages(id),
@@ -4187,9 +4242,28 @@ function phoneSeenPart(id, d, M) {
     notes.length ? h('p', { class: 'warn', id: 'pClock', style: 'margin:0' }, notes.join(' ')) : null);
 }
 // A phone's default for photos, videos and sound, and its text search. Changed by those who manage the phone.
-function phoneMediaAndSearch(d, M) {
+function phoneMediaAndSearch(id, d, M) {
   const fname = firstName(d), who = possessive(fname);
-  const sw = (id, on, change, disabled) => h('input', { type: 'checkbox', class: 'sw', id, checked: on, disabled, onchange: e => change(e.target.checked) });
+  const sw = (sid, on, change, disabled) => h('input', { type: 'checkbox', class: 'sw', id: sid, checked: on, disabled, onchange: e => change(e.target.checked) });
+  // Whether a PIN is set. The PIN's hash is owned by the phone and reported in seen.json (it isn't in devices.json for a
+  // full admin), so read it from there — but only a hash newer than the last reset counts, so a reset shows as cleared
+  // straight away rather than lingering until the phone next syncs. The sub-admin view carries a plain `set` flag.
+  const op = d.openPin || {};
+  const seenRec = seenOf(id) || {}, seenOp = (seenRec.openPin && typeof seenRec.openPin === 'object') ? seenRec.openPin : {};
+  const seenSetFresh = !!(seenOp.set && (!op.resetAt || (seenRec.at || 0) > op.resetAt));
+  const opSet = !!(op.hash || op.set || seenSetFresh);
+  // A temporary pause: armed by the admin (pauseMins/pauseAt); the phone reports when it actually started (pauseStart),
+  // which is its first app-open after arming. "Waiting" = armed but the phone hasn't opened yet; "running" = the window
+  // is counting down now; once it ends the phone is back on by itself (so the row shows "On" again).
+  const pauseMins = Number(op.pauseMins) || 0, pauseAt = Number(op.pauseAt) || 0, now = Date.now();
+  const pauseArmed = pauseMins > 0 && pauseAt > 0;
+  // Trust the phone's reported start only if it's for THIS arm — the phone always starts a window after the admin arms
+  // it, so a start time older than pauseAt belongs to a previous pause (seen.json just hasn't caught up yet).
+  const pauseStart = Number(seenOp.pauseStart) >= pauseAt ? Number(seenOp.pauseStart) : 0;
+  const pauseEndsAt = pauseStart > 0 ? pauseStart + pauseMins * 60000 : 0;
+  const pauseRunning = pauseArmed && pauseEndsAt > now;
+  const pauseWaiting = pauseArmed && pauseStart <= 0;
+  const paused = pauseRunning || pauseWaiting;
   return h('div', { class: 'stack', style: 'gap:10px' },
     h('div', { class: 'stack', style: 'gap:6px' },
       h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'Photos, videos and sound'),
@@ -4206,7 +4280,81 @@ function phoneMediaAndSearch(d, M) {
           h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Only show results already approved'),
             h('span', { class: 's' }, d.searchApprovedOnly ? 'On: only pages this phone can open' : 'Off: new sites show too, to ask for')),
           sw('pSearchOnly', d.searchApprovedOnly === true, on => { if (on) d.searchApprovedOnly = true; else delete d.searchApprovedOnly; markDevices(); render(); }, !M || d.search !== true)))),
-      h('p', { class: 'hint', style: 'margin:0' }, d.search === true ? '' : 'Off to start with. The phone can ask for it, or you turn it on here.')));
+      h('p', { class: 'hint', style: 'margin:0' }, d.search === true ? '' : 'Off to start with. The phone can ask for it, or you turn it on here.')),
+    h('div', { class: 'stack', style: 'gap:6px' },
+      h('div', { class: 'stack', style: 'gap:2px' }, h('span', { class: 'flabel' }, 'PIN to send open requests'),
+        h('span', { class: 'hint', style: 'margin:0' }, `When on, ${who} phone must enter a PIN before it can ask to open a site or media — so open requests can't be sent without it. Block requests never need it. The PIN is set on the phone (Settings → Protection & controls); here you can turn it off for a short while (it comes back on by itself) or remove it.`)),
+      h('div', { class: 'mrows' },
+        h('div', { class: 'mrow' }, h('div', { class: 'top' },
+          h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Require a PIN'),
+            h('span', { class: 's' }, !opSet ? 'No PIN set yet'
+              : !op.on ? 'Off — not required right now'
+              : pauseRunning ? `Temporarily off — back on in ${fmtMin(Math.max(1, Math.ceil((pauseEndsAt - now) / 60000)))}`
+              : pauseWaiting ? `Temporarily off for ${fmtMin(pauseMins)} — starts when the phone opens the app`
+              : 'On — a PIN is needed to open things')),
+          // The PIN exists on the phone. The admin can turn it off for a short window (which auto-returns), or cancel that.
+          (M && opSet)
+            ? (!op.on
+                ? h('button', { type: 'button', class: 'btn s sm', onclick: () => { const o = { ...(d.openPin || {}) }; o.on = true; d.openPin = o; markDevices(); render(); } }, 'Turn on')
+                : paused
+                  ? h('button', { type: 'button', class: 'btn s sm', onclick: () => resumeOpenPin(d) }, 'Turn back on now')
+                  : h('button', { type: 'button', class: 'btn s sm', onclick: () => pauseOpenPin(d) }, 'Temporarily turn off'))
+            : null)),
+        h('div', { class: 'mrow' }, h('div', { class: 'top' },
+          h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'The PIN'),
+            h('span', { class: 's' }, opSet ? 'Set on the phone' : 'Not set yet — set it on the phone')),
+          M && opSet ? h('button', { type: 'button', class: 'btn d sm', onclick: () => resetOpenPin(d) }, 'Remove') : null)),
+        h('div', { class: 'mrow' }, h('div', { class: 'top' },
+          h('span', { class: 'grow', style: 'display:flex;flex-direction:column' }, h('b', null, 'Recovery email'),
+            h('span', { class: 's' }, op.email
+              ? op.email + (op.emailConfirmed ? ' · confirmed' : ' · not confirmed yet')
+              : 'None yet — the parent sets it on the phone'))))),
+      h('p', { class: 'hint', style: 'margin:0' }, opSet ? '' : 'The parent sets the PIN on the phone. Once set, it is kept even if the app is reinstalled.')));
+}
+// Remove the open-requests PIN: clears it everywhere so the parent must set a new one on the phone.
+async function resetOpenPin(d) {
+  if (!(await uiConfirm('Remove the open-requests PIN?', 'The current PIN stops working and its recovery email is cleared, so the parent sets a new one — with a fresh email — on the phone. The phone picks this up within a few minutes.', 'Remove', { icon: 'ban', red: true }))) return;
+  // Clear the PIN directly (the main admin writes devices.json, so there's no backend step to do it), AND flag reset:true
+  // and a resetAt stamp — the phone obeys resetAt and drops its local PIN. Clearing the PIN clears the recovery email too.
+  const op = { ...(d.openPin || {}) };
+  delete op.hash; delete op.resetCode; delete op.emailCode; delete op.set; delete op.email; delete op.emailConfirmed;
+  delete op.pauseMins; delete op.pauseAt; delete op.pauseStart;
+  op.reset = true; op.resetAt = Date.now();
+  d.openPin = op;
+  markDevices(); saveAll();
+  say('Open-requests PIN removed. The parent sets a new one on the phone.');
+}
+// Temporarily turn the PIN off for a small window, starting when the phone next opens the app; it switches back on by itself.
+function pausePicker() {
+  return new Promise(resolve => {
+    const close = v => { shade.remove(); document.removeEventListener('keydown', keys, true); resolve(v); };
+    const opt = m => h('button', { type: 'button', class: 'btn p', style: 'flex:1;min-width:76px', onclick: () => close(m) }, fmtMin(m));
+    const dlg = h('section', { class: 'dlg', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Temporarily turn off the PIN' },
+      h('div', { class: 'dhead' }, h('span', { class: 'dicon' }, icon('clock', 22)), h('h2', null, 'Temporarily turn off')),
+      h('p', null, 'How long should the PIN be off? The timer starts when the phone next opens the app, and the PIN switches back on by itself when it ends.'),
+      h('div', { style: 'display:flex;flex-wrap:wrap;gap:8px' }, opt(2), opt(5), opt(10), opt(15)),
+      h('div', { class: 'dacts' }, h('button', { type: 'button', class: 'btn d', onclick: () => close(0) }, 'Cancel')));
+    const shade = h('div', { class: 'dlg-shade', onclick: e => { if (e.target === shade) close(0); } }, dlg);
+    const keys = e => { if (e.key === 'Escape') { e.preventDefault(); close(0); } };
+    document.addEventListener('keydown', keys, true);
+    document.body.append(shade);
+  });
+}
+async function pauseOpenPin(d) {
+  const m = await pausePicker();
+  if (!m) return;
+  const op = { ...(d.openPin || {}) };
+  op.pauseMins = m; op.pauseAt = Date.now(); delete op.pauseStart; delete op.set;
+  d.openPin = op;
+  markDevices(); saveAll();
+  say(`PIN off for ${fmtMin(m)} once the phone opens the app — it comes back on by itself.`);
+}
+async function resumeOpenPin(d) {
+  const op = { ...(d.openPin || {}) };
+  delete op.pauseMins; delete op.pauseAt; delete op.pauseStart; delete op.set;
+  d.openPin = op;
+  markDevices(); saveAll();
+  say('PIN back on.');
 }
 // PIN approvals locked on a phone (5 wrong PINs): unlocked, and saved, straight away.
 const pinLocked = d => !!(d && d.pinLockedUntil && Date.parse(d.pinLockedUntil) > Date.now());
