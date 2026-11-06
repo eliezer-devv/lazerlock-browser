@@ -776,7 +776,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function postCommand(sealed) {
   if (!ghToken()) throw new Error('This copy of the admin page can\'t send anything: the REQUESTS_TOKEN secret was missing when it was published. Add it in the public repository, then run Publish list.');
   const body = `🔒 Admin\n<!-- whitelist-admin-cmd\n${JSON.stringify(await seal(sealed))}\n-->`;
-  const res = await fetch(`${API}/repos/${C.owner}/${C.repo}/issues`, { method: 'POST', headers: ghHeaders(), body: JSON.stringify({ title: '🔒 Admin', body }) });
+  // keepalive lets the request finish in the background even if the page is closing (the on-exit flush), as long as the
+  // body is small enough (~64KB); for normal saves it's off. The command carries the whole changed file, so a very large
+  // list may exceed that on exit — but the backstop and leave-screen saves will have committed it already by then.
+  const res = await fetch(`${API}/repos/${C.owner}/${C.repo}/issues`, { method: 'POST', headers: ghHeaders(), body: JSON.stringify({ title: '🔒 Admin', body }), keepalive: UNLOAD });
   if (res.status === 401) throw new Error('GitHub turned the requests token down: it may have expired. Renew REQUESTS_TOKEN (README, section 6).');
   if (!res.ok) throw new Error(`GitHub returned ${res.status}. Check this device is online, then try again.`);
   return (await res.json()).number;
@@ -1441,43 +1444,29 @@ async function saveAll(auto = false) {
     }
     S.saveError = null; S.saveBlocked = false;
     if (!S.listDirty && !S.devDirty) dirtySince = null;   // all pending changes committed: clear the pending-clock
-    if (did) noteSave();                      // one more recent commit, for the adaptive batching
-    say(auto ? 'Saved ✓ · phones pick it up within a few minutes.'
-             : 'Saving. GitHub saves it within a minute, and phones pick it up a few minutes after.');
+    if (did) noteSave();
+    if (!auto) say('Saved ✓ · phones pick it up within a few minutes.');   // only a manual Save/Retry says so — auto-saves stay silent (the bar is the only sign)
     render();
   } catch (e) { S.saveError = e.message; S.saveBlocked = false; if (!auto) say(e.message, true); }
   finally { $('saveBtn').disabled = false; renderSaveBar(); }
 }
-// Auto-save: a change commits itself a short moment after the last edit — no Save button to press. The small delay
-// batches a burst of edits (toggles, typing) into one save instead of one per keystroke.
-let autoSaveTimer = null, autoSaving = false;
-// When the first still-unsaved change was made. The debounce waits for a pause, but a long spell of back-to-back edits
-// never pauses — so changes may never commit and the bar is stuck on "unsaved". This caps how long anything can sit:
-// a save fires at most MAX_PENDING after the first pending change, even if you're still editing.
-let dirtySince = null;
-const MAX_PENDING = 8000;
-// Adaptive batching: the wait before a change commits grows when saves are coming thick and fast, so a busy spell
-// folds many edits into fewer commits (fewer GitHub Actions runs), then eases back to snappy once things calm down.
-// It only paces THIS admin's edits — phones' own check-ins are separate traffic it can't control.
-let saveTimes = [];
-const SAVE_WINDOW = 120000;                        // judge "how busy" over the last 2 minutes
-function noteSave() { const now = Date.now(); saveTimes.push(now); saveTimes = saveTimes.filter(t => now - t < SAVE_WINDOW); }
-function autoSaveDelay() {
-  const now = Date.now(), n = saveTimes.filter(t => now - t < SAVE_WINDOW).length;   // recent commits
-  return n < 5 ? 2500 : n < 10 ? 4000 : n < 18 ? 6000 : 12000;   // wait until typing pauses; very busy → batch hard (max 12s)
+// Saving: quiet, and only at natural moments. Changes stay in memory and commit when you LEAVE a screen, switch away
+// from or CLOSE the dashboard, or every SAFETY ms as a backstop while you stay put — never on every keystroke, and never
+// with a pop-up. The bar at the bottom is the only sign. (This replaces the old per-edit autosave, which both saved too
+// eagerly — a commit mid-typing — and announced each save, which was noisy when making lots of quick changes.)
+let autoSaving = false, safetyTimer = null, dirtySince = null, UNLOAD = false;
+const SAFETY = 60000;                              // backstop commit while you stay on one screen making changes
+function noteSave() {}                             // kept for callers; the old adaptive batching is gone
+// Start (once) the backstop that commits after a quiet spell on the same screen, and stops itself when nothing's pending.
+function startSafety() {
+  if (safetyTimer != null) return;
+  safetyTimer = setInterval(() => {
+    if (!(S.listDirty || S.devDirty)) { clearInterval(safetyTimer); safetyTimer = null; return; }
+    if (S.connected && !S.saveBlocked && !autoSaving && !editingField()) runAutoSave();
+  }, SAFETY);
 }
-// reset=true (a fresh edit) restarts the delay, so a burst of edits batches into one save. reset=false (a plain
-// re-render, or coming back online with changes still pending) only starts a timer if none is already running, so
-// frequent re-renders can't keep pushing the save off, and an edit made while briefly offline still saves on reconnect.
-function scheduleAutoSave(reset = true) {
-  if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty)) return;
-  // The normal debounce, but never pushed out past MAX_PENDING since the first unsaved change — so continuous editing
-  // still commits on a steady cadence instead of resetting the timer forever.
-  let delay = autoSaveDelay();
-  if (dirtySince != null) delay = Math.min(delay, Math.max(0, dirtySince + MAX_PENDING - Date.now()));
-  if (autoSaveTimer != null) { if (!reset) return; clearTimeout(autoSaveTimer); }
-  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, delay);
-}
+// Callers still call this on each edit; now it just means "there are changes — arm the backstop" (no eager save).
+function scheduleAutoSave() { if (S.connected && (S.listDirty || S.devDirty) && !S.saveBlocked) startSafety(); }
 // You're still typing in a field: a real text box (not a toggle/checkbox) has focus and isn't read-only.
 function editingField() {
   const el = document.activeElement;
@@ -1488,20 +1477,14 @@ function editingField() {
   return el.isContentEditable === true;
 }
 async function runAutoSave() {
-  if (autoSaving || !S.connected || !(S.listDirty || S.devDirty)) return;
-  // Don't save mid-type: wait until the text field is left. Poll on a fixed delay (not the clamped one, which can be 0
-  // once MAX_PENDING is passed, and would busy-loop). Toggles/checkboxes aren't "editing", so they save right away.
-  if (editingField()) { if (autoSaveTimer != null) clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 1500); return; }
-  autoSaving = true;
-  renderSaveBar();                 // now it really is saving: show "Saving…"
+  if (autoSaving || !S.connected || !(S.listDirty || S.devDirty) || S.saveBlocked) return;
+  autoSaving = true; renderSaveBar();
   try { await saveAll(true); }
   finally {
     autoSaving = false;
-    // Start a fresh pending-clock: null if everything saved, else now (edits that landed during the save get their own window).
     dirtySince = (S.listDirty || S.devDirty) ? Date.now() : null;
     renderSaveBar();
-    if ((S.listDirty || S.devDirty) && !S.saveBlocked && !S.saveError) scheduleAutoSave(true);  // edits landed during the save: catch them
-    else if (S.saveError && !S.saveBlocked) autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 5000);  // a transient send problem: try again shortly
+    if (S.saveError && !S.saveBlocked) setTimeout(() => runAutoSave(), 5000);   // a transient send problem: try again shortly
   }
 }
 async function undoAll() {
@@ -1524,9 +1507,9 @@ function renderSaveBar() {
     $('undoBtn').hidden = true;
     $('saveBtn').hidden = false; $('saveBtn').textContent = 'Retry'; $('saveBtn').disabled = false;
   } else {                                   // changes save themselves once you pause — no button, and no "Saving…" flash per keystroke
-    $('saveText').textContent = autoSaving ? 'Saving your changes…' : 'Unsaved changes — saving automatically…';
+    $('saveText').textContent = autoSaving ? 'Saving…' : 'Unsaved changes — saved when you leave this screen or close';
     $('undoBtn').hidden = true; $('saveBtn').hidden = true;
-    scheduleAutoSave(false);
+    scheduleAutoSave();
   }
 }
 $('saveBtn').onclick = () => { S.saveBlocked = false; S.saveError = null; saveAll(false); };
@@ -1536,13 +1519,22 @@ document.addEventListener('focusout', e => {
   const t = e.target && e.target.tagName;
   if ((t === 'INPUT' || t === 'TEXTAREA') && (S.listDirty || S.devDirty) && !S.saveBlocked) scheduleAutoSave(true);
 });
-if (!INAPP) window.addEventListener('beforeunload', e => { if (S.listDirty || S.devDirty || QUEUE.sending || QUEUE.ops.length || CMDQ.sending) { e.preventDefault(); e.returnValue = ''; } });
+// Switching away from / minimizing / locking the screen (and the first step of closing) all fire 'hidden' while the page
+// is still alive — so commit pending changes now, in the background. This is the main "save on minimize/close".
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
+// A hard close: fire the commit with keepalive so GitHub still receives it after the page is gone.
+window.addEventListener('pagehide', () => {
+  if (S.connected && (S.listDirty || S.devDirty) && !S.saveBlocked && !autoSaving) { UNLOAD = true; runAutoSave(); }
+});
+// Only a change that genuinely can't be saved yet (an invalid, half-typed entry) is worth warning about on close now —
+// everything else has already been committed by the handlers above.
+if (!INAPP) window.addEventListener('beforeunload', e => { if (S.saveBlocked || QUEUE.sending || QUEUE.ops.length || CMDQ.sending) { e.preventDefault(); e.returnValue = ''; } });
 
 // ---------- lists ----------
 // Unsaved changes to the open list: ask before leaving them.
 // Changes save themselves, so before leaving we just flush whatever's still pending. Only changes that can't be
 // saved yet (an invalid entry) still ask, since leaving really would drop them.
-async function flushSave() { clearTimeout(autoSaveTimer); if ((S.listDirty || S.devDirty) && !S.saveBlocked) await saveAll(true); }
+async function flushSave() { if (autoSaving) return; if ((S.listDirty || S.devDirty) && !S.saveBlocked) await runAutoSave(); }
 async function flushAndClose() {
   await flushSave();
   for (let i = 0; i < 50 && (QUEUE.busy || QUEUE.ops.length || (typeof CMDQ !== 'undefined' && CMDQ.sending)); i++) await new Promise(r => setTimeout(r, 100));
@@ -1801,9 +1793,11 @@ let lastScreenKey = '';
 // Leaving a screen that saves itself on exit (the site editor): commit its draft first, so a forgotten Done doesn't
 // lose the change. Wrapped so a hiccup here can never block navigation.
 function leaveSub() { try { if (S.sub && S.sub.name === 'site' && typeof S.sub.commit === 'function') S.sub.commit(); } catch (e) { console.log('leaveSub', e); } }
-function go(tab) { leaveSub(); S.tab = tab; S.sub = null; render(); }
-function open(sub) { leaveSub(); S.sub = sub; render(); }
-function back() { leaveSub(); S.sub = null; render(); }
+// Changing screen is a natural save point: commit the draft, then flush pending changes in the background (not awaited,
+// so navigation stays instant). This is how "lots of settings, saved on page change" works.
+function go(tab) { leaveSub(); flushSave(); S.tab = tab; S.sub = null; render(); }
+function open(sub) { leaveSub(); flushSave(); S.sub = sub; render(); }
+function back() { leaveSub(); flushSave(); S.sub = null; render(); }
 // After answering a request from its detail screen, go back to the requests list instead of the "already answered" card.
 function backOrRender() { if (S.sub && S.sub.fromThread) return reqBack(); if (S.sub && S.sub.name === 'request') back(); else render(); }
 // After viewing/answering a request that was opened from a message, go back to that conversation.
