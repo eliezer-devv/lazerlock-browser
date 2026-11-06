@@ -1280,7 +1280,9 @@ async function signedOutHere(why) {
 // Reopened from the background (called by the app): re-ask the PIN/fingerprint if one is set, by reloading the gate.
 // Re-lock when the app is reopened — WITHOUT reloading the page, so after unlocking you return to the same screen
 // you were on (S.sub is kept). Showing the unlock screen just needs connected=false + locked=true.
-window.wlRelock = () => { try { if ((getPin() || getBio()) && !S.locked) { S.connected = false; S.locked = true; S.bioAsked = false; render(); } } catch {} };   // clear bioAsked so the fingerprint prompt opens by itself again on reopen
+// Reopened from the background: just raise the lock screen for the person. It does NOT disconnect the session or touch
+// any in-flight work — saves keep finishing, unsaved edits stay in memory — so unlocking returns to exactly where they were.
+window.wlRelock = () => { try { if ((getPin() || getBio()) && !S.locked) { S.locked = true; S.bioAsked = false; render(); } } catch {} };   // clear bioAsked so the fingerprint prompt opens by itself again on reopen
 const NO_ISSUES_MSG = 'Couldn\'t answer it.';
 const listPathOf = name => name === 'public' ? 'docs/whitelist.json' : `docs/lists/${name}.json`;
 
@@ -1505,14 +1507,22 @@ async function saveAll(auto = false) {
   } catch (e) { S.saveError = e.message; S.saveBlocked = false; if (!auto) say(e.message, true); }
   finally { $('saveBtn').disabled = false; renderSaveBar(); }
 }
-// Saving: quiet, and only at natural moments. Changes stay in memory and commit when you LEAVE a screen, switch away
-// from or CLOSE the dashboard, or every SAFETY ms as a backstop while you stay put — never on every keystroke, and never
-// with a pop-up. The bar at the bottom is the only sign. (This replaces the old per-edit autosave, which both saved too
-// eagerly — a commit mid-typing — and announced each save, which was noisy when making lots of quick changes.)
-let autoSaving = false, safetyTimer = null, dirtySince = null, UNLOAD = false;
-const SAFETY = 60000;                              // backstop commit while you stay on one screen making changes
-function noteSave() {}                             // kept for callers; the old adaptive batching is gone
-// Start (once) the backstop that commits after a quiet spell on the same screen, and stops itself when nothing's pending.
+// Saving: prompt but quiet. A change commits a short moment after you make it — no pop-up, no Save button. This matters
+// most in the admin APP, whose WebView is re-locked, reloaded, or killed whenever it goes to the background: a change has
+// to reach GitHub while the app is still alive, or the reload-on-unlock drops it. The pop-ups that used to appear were the
+// real annoyance, and they're gone; the bar at the bottom is the only sign. The leave/minimize/close + worker paths below
+// are extra safety nets on top of this.
+let autoSaving = false, autoSaveTimer = null, safetyTimer = null, dirtySince = null, UNLOAD = false;
+const DEBOUNCE = 1800, MAX_PENDING = 7000, SAFETY = 45000;   // commit ~2s after the last edit; never later than MAX_PENDING; 45s backstop
+function noteSave() {}
+function scheduleAutoSave(reset = true) {
+  if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty)) return;
+  startSafety();
+  let delay = DEBOUNCE;
+  if (dirtySince != null) delay = Math.min(delay, Math.max(0, dirtySince + MAX_PENDING - Date.now()));   // a long editing spell still commits on a cadence
+  if (autoSaveTimer != null) { if (!reset) return; clearTimeout(autoSaveTimer); }
+  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, delay);
+}
 function startSafety() {
   if (safetyTimer != null) return;
   safetyTimer = setInterval(() => {
@@ -1520,9 +1530,8 @@ function startSafety() {
     if (S.connected && !S.saveBlocked && !autoSaving && !editingField()) runAutoSave();
   }, SAFETY);
 }
-// Callers still call this on each edit; now it just means "there are changes — arm the backstop" (no eager save).
-function scheduleAutoSave() { if (S.connected && (S.listDirty || S.devDirty) && !S.saveBlocked) startSafety(); }
-// You're still typing in a field: a real text box (not a toggle/checkbox) has focus and isn't read-only.
+// You're still typing in a field: a real text box (not a toggle/checkbox) has focus and isn't read-only. Don't commit
+// mid-word — wait until you leave the field (focusout re-schedules) or a short poll catches the pause.
 function editingField() {
   const el = document.activeElement;
   if (!el) return false;
@@ -1533,13 +1542,15 @@ function editingField() {
 }
 async function runAutoSave() {
   if (autoSaving || !S.connected || !(S.listDirty || S.devDirty) || S.saveBlocked) return;
+  if (editingField()) { if (autoSaveTimer != null) clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 1200); return; }
   autoSaving = true; renderSaveBar();
   try { await saveAll(true); }
   finally {
     autoSaving = false;
     dirtySince = (S.listDirty || S.devDirty) ? Date.now() : null;
     renderSaveBar();
-    if (S.saveError && !S.saveBlocked) setTimeout(() => runAutoSave(), 5000);   // a transient send problem: try again shortly
+    if ((S.listDirty || S.devDirty) && !S.saveBlocked && !S.saveError) scheduleAutoSave(true);   // edits landed during the save: catch them
+    else if (S.saveError && !S.saveBlocked) setTimeout(() => runAutoSave(), 5000);               // a transient send problem: try again shortly
   }
 }
 async function undoAll() {
@@ -1553,7 +1564,7 @@ async function undoAll() {
 }
 function renderSaveBar() {
   const pending = !!(S.listDirty || S.devDirty);
-  const show = (pending || S.saveError) && S.connected;
+  const show = (pending || S.saveError) && S.connected && !S.locked;   // don't show the save bar over the lock screen (saving still runs underneath)
   $('savebar').hidden = !show;
   document.body.classList.toggle('unsaved', show);
   if (!show) return;
@@ -1562,9 +1573,9 @@ function renderSaveBar() {
     $('undoBtn').hidden = true;
     $('saveBtn').hidden = false; $('saveBtn').textContent = 'Retry'; $('saveBtn').disabled = false;
   } else {                                   // changes save themselves once you pause — no button, and no "Saving…" flash per keystroke
-    $('saveText').textContent = autoSaving ? 'Saving…' : 'Unsaved changes — saved when you leave this screen or close';
+    $('saveText').textContent = autoSaving ? 'Saving…' : 'Unsaved changes — saving…';
     $('undoBtn').hidden = true; $('saveBtn').hidden = true;
-    scheduleAutoSave();
+    scheduleAutoSave(false);
   }
 }
 $('saveBtn').onclick = () => { S.saveBlocked = false; S.saveError = null; saveAll(false); };
@@ -1870,7 +1881,7 @@ function render() {
   let node;
   if (LINK && LINK.kind !== 'done') node = linkScreen();
   else if (S.starting) node = h('main', null, screenTitle('Opening…', ''), waitNote('Loading your data…'));
-  else if (!S.connected && S.locked) node = unlockScreen();
+  else if (S.locked) node = unlockScreen();   // the lock is only a privacy screen for the person: it overlays whatever's underneath (a live, still-connected session) without disconnecting or disrupting it
   else if (!S.connected) node = signInScreen();
   else if (S.sub) node = ({ site: siteScreen, temp: tempScreen, block: blockScreen, nomedia: noMediaScreen, import: importScreen,
     listsettings: listSettingsScreen, phone: phoneScreen, archived: archivedScreen, neverblock: neverBlockScreen, pin: pinScreen,
@@ -1883,10 +1894,12 @@ function render() {
   if (key !== lastScreenKey) { window.scrollTo(0, 0); lastScreenKey = key; }
   const inSub = !S.connected || !!S.sub;
   $('app').classList.toggle('sub', inSub);
-  document.querySelector('.top').hidden = !!S.sub && S.connected;
-  $('tabs').hidden = inSub;
-  $('connBtn').hidden = !S.connected;
-  $('syncTop').hidden = !S.connected;
+  // While the lock screen is up, hide the chrome (top bar, tabs, buttons) so it shows cleanly — the session is still
+  // connected underneath, so these are only hidden for the lock, not disabled.
+  document.querySelector('.top').hidden = S.locked || (!!S.sub && S.connected);
+  $('tabs').hidden = inSub || S.locked;
+  $('connBtn').hidden = !S.connected || S.locked;
+  $('syncTop').hidden = !S.connected || S.locked;
   renderTabs(); renderSaveBar(); renderSync();
   view.querySelectorAll('[data-sync]').forEach(n => n._picker && n._picker.sync());
 }
@@ -2258,6 +2271,9 @@ function unlockScreen() {
   const go1 = P ? h('button', { type: 'button', class: 'btn p wide', id: 'uGo' }, 'Unlock') : null;
   const open1 = async () => {
     S.locked = false;
+    // The session is still live underneath (an ordinary re-lock): just reveal it — no reload, so nothing in flight or
+    // unsaved is disturbed. Only when there's no session (a fresh start after the app was killed) do we load data.
+    if (S.connected) { render(); if (S.listDirty || S.devDirty) flushSave(); return; }
     S.starting = true; render();
     try { await openData(); } catch (e) { say(e.message, true); }
     S.starting = false; render();
