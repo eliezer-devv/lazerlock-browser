@@ -1353,9 +1353,9 @@ function phonesUsing(name) {
 const canEditList = n => fullAdmin() || (canDo('edit') && !isPublicList(n) && !(S.D.default || []).includes(n));
 function markList() {
   if (!canEditList(S.current)) { say(`You can look at ${listLabel(S.current)}, but not change it.`, true); openList(S.current).then(render); return; }
-  S.listDirty = true; S.saveError = null; S.saveBlocked = false; scheduleAutoSave(true); renderSaveBar();
+  S.listDirty = true; S.saveError = null; S.saveBlocked = false; if (dirtySince == null) dirtySince = Date.now(); scheduleAutoSave(true); renderSaveBar();
 }
-function markDevices() { S.devDirty = true; S.saveError = null; S.saveBlocked = false; scheduleAutoSave(true); renderSaveBar(); }
+function markDevices() { S.devDirty = true; S.saveError = null; S.saveBlocked = false; if (dirtySince == null) dirtySince = Date.now(); scheduleAutoSave(true); renderSaveBar(); }
 
 // ---------- loading ----------
 // Everything this admin sees, at the newest version (or [sha]). False: this device is signed out.
@@ -1440,6 +1440,7 @@ async function saveAll(auto = false) {
       S.devDirty = false;
     }
     S.saveError = null; S.saveBlocked = false;
+    if (!S.listDirty && !S.devDirty) dirtySince = null;   // all pending changes committed: clear the pending-clock
     if (did) noteSave();                      // one more recent commit, for the adaptive batching
     say(auto ? 'Saved ✓ · phones pick it up within a few minutes.'
              : 'Saving. GitHub saves it within a minute, and phones pick it up a few minutes after.');
@@ -1450,6 +1451,11 @@ async function saveAll(auto = false) {
 // Auto-save: a change commits itself a short moment after the last edit — no Save button to press. The small delay
 // batches a burst of edits (toggles, typing) into one save instead of one per keystroke.
 let autoSaveTimer = null, autoSaving = false;
+// When the first still-unsaved change was made. The debounce waits for a pause, but a long spell of back-to-back edits
+// never pauses — so changes may never commit and the bar is stuck on "unsaved". This caps how long anything can sit:
+// a save fires at most MAX_PENDING after the first pending change, even if you're still editing.
+let dirtySince = null;
+const MAX_PENDING = 8000;
 // Adaptive batching: the wait before a change commits grows when saves are coming thick and fast, so a busy spell
 // folds many edits into fewer commits (fewer GitHub Actions runs), then eases back to snappy once things calm down.
 // It only paces THIS admin's edits — phones' own check-ins are separate traffic it can't control.
@@ -1465,8 +1471,12 @@ function autoSaveDelay() {
 // frequent re-renders can't keep pushing the save off, and an edit made while briefly offline still saves on reconnect.
 function scheduleAutoSave(reset = true) {
   if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty)) return;
+  // The normal debounce, but never pushed out past MAX_PENDING since the first unsaved change — so continuous editing
+  // still commits on a steady cadence instead of resetting the timer forever.
+  let delay = autoSaveDelay();
+  if (dirtySince != null) delay = Math.min(delay, Math.max(0, dirtySince + MAX_PENDING - Date.now()));
   if (autoSaveTimer != null) { if (!reset) return; clearTimeout(autoSaveTimer); }
-  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, autoSaveDelay());
+  autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, delay);
 }
 // You're still typing in a field: a real text box (not a toggle/checkbox) has focus and isn't read-only.
 function editingField() {
@@ -1479,12 +1489,16 @@ function editingField() {
 }
 async function runAutoSave() {
   if (autoSaving || !S.connected || !(S.listDirty || S.devDirty)) return;
-  if (editingField()) { scheduleAutoSave(true); return; }   // don't save mid-type — wait until you leave the field
+  // Don't save mid-type: wait until the text field is left. Poll on a fixed delay (not the clamped one, which can be 0
+  // once MAX_PENDING is passed, and would busy-loop). Toggles/checkboxes aren't "editing", so they save right away.
+  if (editingField()) { if (autoSaveTimer != null) clearTimeout(autoSaveTimer); autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 1500); return; }
   autoSaving = true;
   renderSaveBar();                 // now it really is saving: show "Saving…"
   try { await saveAll(true); }
   finally {
     autoSaving = false;
+    // Start a fresh pending-clock: null if everything saved, else now (edits that landed during the save get their own window).
+    dirtySince = (S.listDirty || S.devDirty) ? Date.now() : null;
     renderSaveBar();
     if ((S.listDirty || S.devDirty) && !S.saveBlocked && !S.saveError) scheduleAutoSave(true);  // edits landed during the save: catch them
     else if (S.saveError && !S.saveBlocked) autoSaveTimer = setTimeout(() => { autoSaveTimer = null; runAutoSave(); }, 5000);  // a transient send problem: try again shortly
@@ -1510,7 +1524,7 @@ function renderSaveBar() {
     $('undoBtn').hidden = true;
     $('saveBtn').hidden = false; $('saveBtn').textContent = 'Retry'; $('saveBtn').disabled = false;
   } else {                                   // changes save themselves once you pause — no button, and no "Saving…" flash per keystroke
-    $('saveText').textContent = autoSaving ? 'Saving your changes…' : 'Unsaved changes — saving when you finish';
+    $('saveText').textContent = autoSaving ? 'Saving your changes…' : 'Unsaved changes — saving automatically…';
     $('undoBtn').hidden = true; $('saveBtn').hidden = true;
     scheduleAutoSave(false);
   }
