@@ -784,6 +784,60 @@ async function postCommand(sealed) {
   if (!res.ok) throw new Error(`GitHub returned ${res.status}. Check this device is online, then try again.`);
   return (await res.json()).number;
 }
+
+// ---------- Background save outbox: finish a save even if the page is closed mid-save ----------
+// The dashboard commits changes when you leave a screen / minimize / close (above). As a guarantee for a hard close, we
+// also keep the latest pending save, fully sealed and ready to POST, in IndexedDB; a service worker sends it — retrying
+// when back online — even after the page is gone. A superseded copy is harmless: the automation rejects it as REPLAY
+// (its nonce is behind), so at worst it's one ignored commit. Nothing here is needed while the page stays open.
+let swReg = null;
+async function ensureSW() {
+  if (swReg) return swReg;
+  if (!('serviceWorker' in navigator)) return null;
+  try { swReg = await navigator.serviceWorker.register('firebase-messaging-sw.js'); } catch { swReg = null; }
+  return swReg;
+}
+// Build the ready-to-POST GitHub issue for whatever's pending right now (same sealing as a normal save). It runs ON the
+// signed-command chain, so its nonce can't collide with a normal save happening at the same moment (e.g. on 'hidden',
+// where the direct save and this both fire): whichever is behind is simply rejected as REPLAY and dropped.
+function buildCloseSave() {
+  const run = signedChain.then(() => buildCloseSaveInner());
+  signedChain = run.catch(e => { console.log(`(carried on) buildCloseSave ${e && e.message}`); return null; });
+  return run;
+}
+async function buildCloseSaveInner() {
+  if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty) || !ghToken()) return null;
+  const ops = [];
+  if (S.devDirty) ops.push({ op: 'put', path: 'devices.json', content: JSON.stringify(S.D, null, 2) + '\n', base: S.devicesSha || null });
+  if (S.listDirty) { const out = fromModel(S.L); if (!out.error) ops.push({ op: 'put', path: listPathOf(S.current), content: JSON.stringify(out.data, null, 2) + '\n', base: S.listSha || null }); }
+  if (!ops.length) return null;
+  const dev = await deviceKeys();
+  const mac = await idb.get('mac');
+  await getRequestKey();                 // do every await BEFORE claiming the nonce, so the claim below is atomic
+  const s = getSession();
+  if (!s || !mac) return null;
+  s.n = (s.n || 0) + 1; setSession(s);    // claim the nonce (no await between read and write — can't collide)
+  const payload = { op: 'write', ops, message: 'Save settings (background, on close)', rk: dev.enc, at: Date.now(), tz: localTz(), n: s.n };
+  const p = JSON.stringify(payload);
+  const sealedInner = { p, aid: s.aid, did: dev.did, mac: u8b64(await crypto.subtle.sign('HMAC', mac, enc8(p))) };
+  const body = `🔒 Admin\n<!-- whitelist-admin-cmd\n${JSON.stringify(await seal(sealedInner))}\n-->`;
+  return { url: `${API}/repos/${C.owner}/${C.repo}/issues`, method: 'POST', headers: ghHeaders(), body: JSON.stringify({ title: '🔒 Admin', body }) };
+}
+// Stash the latest pending save and ask the worker to send it (and register a background-sync so it still runs after close).
+async function armOutbox() {
+  try {
+    const req = await buildCloseSave();
+    if (!req) return;
+    await idb.set('outbox', req);
+    const reg = await ensureSW();
+    if (!reg) return;
+    // Register a background-sync so the worker sends it after we're gone. We do NOT poke the worker now: while the page
+    // is alive the direct save usually lands first and clears the outbox, so poking would just double the commit. The
+    // leftover (after a real close) is sent by the sync, or by the drain we fire on the next open / when we come back.
+    if ('sync' in reg) { try { await reg.sync.register('wl-drain'); } catch {} }
+  } catch (e) { console.log('armOutbox', e && e.message); }
+}
+function clearOutbox() { idb.del('outbox').catch(() => {}); }
 // Waits for the automation's answers on that issue (sealed for this device). onEach(result) returns true to stop.
 async function awaitAnswers(number, onEach, { minutes = 4, seen = new Set() } = {}) {
   const until = Date.now() + minutes * 60000;
@@ -1369,6 +1423,7 @@ async function loadAll(sha, opts) {
   await loadDevices();
   await openList(S.lists.includes(S.current) ? S.current : 'public');
   S.connected = true;
+  ensureSW().then(reg => { const w = reg && (reg.active || navigator.serviceWorker.controller); if (w) w.postMessage({ type: 'wl-drain' }); });   // ready the background-save worker; send anything a previous session left unsent
   // Signed in on this phone: it may act as an admin phone again (clears the signed-out flag the app keeps).
   if (INAPP && window.WLBAdmin && WLBAdmin.adminSignedIn) try { WLBAdmin.adminSignedIn(); } catch {}
   registerAdminPush();   // admin app: register its push token so phone→admin messages wake it instantly
@@ -1443,7 +1498,7 @@ async function saveAll(auto = false) {
       S.devDirty = false;
     }
     S.saveError = null; S.saveBlocked = false;
-    if (!S.listDirty && !S.devDirty) dirtySince = null;   // all pending changes committed: clear the pending-clock
+    if (!S.listDirty && !S.devDirty) { dirtySince = null; clearOutbox(); }   // all pending changes committed: clear the pending-clock and the on-close fallback
     if (did) noteSave();
     if (!auto) say('Saved ✓ · phones pick it up within a few minutes.');   // only a manual Save/Retry says so — auto-saves stay silent (the bar is the only sign)
     render();
@@ -1520,11 +1575,15 @@ document.addEventListener('focusout', e => {
   if ((t === 'INPUT' || t === 'TEXTAREA') && (S.listDirty || S.devDirty) && !S.saveBlocked) scheduleAutoSave(true);
 });
 // Switching away from / minimizing / locking the screen (and the first step of closing) all fire 'hidden' while the page
-// is still alive — so commit pending changes now, in the background. This is the main "save on minimize/close".
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushSave(); });
-// A hard close: fire the commit with keepalive so GitHub still receives it after the page is gone.
+// is still alive — so commit pending changes now, in the background (the main "save on minimize/close"). We also arm the
+// worker outbox as a guarantee in case this page is killed before the commit lands; a successful commit clears it.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { if (S.connected && (S.listDirty || S.devDirty) && !S.saveBlocked) { armOutbox(); flushSave(); } }
+  else if (document.visibilityState === 'visible') { ensureSW().then(reg => { const w = reg && (reg.active || navigator.serviceWorker.controller); if (w) w.postMessage({ type: 'wl-drain' }); }); }  // send anything a prior close left behind
+});
+// A hard close: arm the outbox (the worker finishes it after we're gone) and fire the commit with keepalive as well.
 window.addEventListener('pagehide', () => {
-  if (S.connected && (S.listDirty || S.devDirty) && !S.saveBlocked && !autoSaving) { UNLOAD = true; runAutoSave(); }
+  if (S.connected && (S.listDirty || S.devDirty) && !S.saveBlocked) { armOutbox(); if (!autoSaving) { UNLOAD = true; runAutoSave(); } }
 });
 // Only a change that genuinely can't be saved yet (an invalid, half-typed entry) is worth warning about on close now —
 // everything else has already been committed by the handlers above.
