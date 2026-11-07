@@ -819,7 +819,7 @@ function buildCloseSave() {
 async function buildCloseSaveInner() {
   if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty) || !ghToken()) return null;
   const ops = [];
-  if (S.devDirty) ops.push({ op: 'put', path: 'devices.json', content: JSON.stringify(S.D, null, 2) + '\n', base: S.devicesSha || null });
+  if (S.devDirty) ops.push({ op: 'put', path: 'devices.json', content: trimForSave(JSON.stringify(S.D, null, 2) + '\n'), base: S.devicesSha || null });
   if (S.listDirty) { const out = fromModel(S.L); if (!out.error) ops.push({ op: 'put', path: listPathOf(S.current), content: JSON.stringify(out.data, null, 2) + '\n', base: S.listSha || null }); }
   if (!ops.length) return null;
   const dev = await deviceKeys();
@@ -1154,9 +1154,32 @@ async function moveFile(from, to, message) {   // keeps the content exactly
 }
 // [again]: answering one that was answered already ('undo' an approval, or 'approve' a denied one after all).
 async function reply(number, text, again) { queueOp({ op: 'reply', number, text, ...(again ? { again } : {}) }, `Answer request #${number}`); }
+// Each put/delete carries the whole file, so only the LAST one per path matters. Collapse them before sending:
+// a run of failed saves (or rapid edits) otherwise stacks several full-file copies into one command, and the GitHub
+// issue it's posted in caps at 65536 characters — stacked copies are what pushed it over (a 422). reply/move stay.
+function coalesceOps(list) {
+  const out = [], at = new Map();
+  for (const o of list) {
+    if (o.op === 'put' || o.op === 'delete') { if (at.has(o.path)) out[at.get(o.path)] = o; else { at.set(o.path, out.length); out.push(o); } }
+    else out.push(o);
+  }
+  return out;
+}
+// Fields the backend's owner-save restores from the latest on the server — so the page never needs to SEND them.
+// Trimming them from the saved copy keeps the command small (message threads especially) and keeps the payload well
+// under GitHub's issue limit. They stay in S.D for display; only the copy that goes to GitHub is trimmed. This MUST
+// match the backend's restore set (admin.js PHONE_OWNED + KEEP_BUT_RESTORE), or a trimmed field would be lost.
+const SERVER_OWNED = ['phoneSyncAt', 'fcm', 'fcmAt', 'pinFails', 'pinLockedUntil', 'answerChanges', 'key', 'threads', 'adminViewAt'];
+function trimForSave(content) {
+  let d; try { d = JSON.parse(content); } catch { return content; }
+  if (!d || typeof d !== 'object') return content;
+  delete d.adminFcm;
+  for (const map of [d.devices, d.archived]) for (const id in (map || {})) { const x = map[id]; if (x && typeof x === 'object') for (const f of SERVER_OWNED) delete x[f]; }
+  return JSON.stringify(d, null, 2) + '\n';
+}
 async function flushQueue() {
   if (QUEUE.busy || !QUEUE.ops.length || QUEUE.failed) return;
-  const ops = QUEUE.ops.splice(0), message = QUEUE.message;
+  const ops = coalesceOps(QUEUE.ops.splice(0)), message = QUEUE.message;
   QUEUE.message = ''; QUEUE.busy = true; QUEUE.sending = true; renderSync();
   try {
     // "Saved" shows the moment the change reaches GitHub (onSent) — it's durable from then on. We keep awaiting the
@@ -1164,7 +1187,11 @@ async function flushQueue() {
     // baseText is a local-only copy of the prior file contents (used to merge a conflict). It must NOT be sent: it
     // would roughly double the command and push the GitHub issue body past its 65536-char limit (a 422). Strip it here;
     // the originals in QUEUE.ops keep baseText for reconcileFailedOps.
-    const postOps = ops.map(o => { const { baseText, ...rest } = o; return rest; });
+    const postOps = ops.map(o => {
+      const { baseText, ...rest } = o;                                  // baseText is local-only (merge); never sent
+      if (rest.op === 'put' && rest.path === 'devices.json') rest.content = trimForSave(rest.content);   // drop server-restored fields to keep the command small
+      return rest;
+    });
     const r = await command({ op: 'write', ops: postOps, message }, { onSent: () => { QUEUE.sending = false; QUEUE.savedAt = Date.now(); renderSync(); } });
     if (!r.ok) throw new Error(r.error || 'It wasn\'t saved.');
     if (QUEUE.conflictTries) appLog('Save succeeded after ' + QUEUE.conflictTries + ' merge-retr' + (QUEUE.conflictTries > 1 ? 'ies' : 'y') + '.');
