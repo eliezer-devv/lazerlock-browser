@@ -916,6 +916,9 @@ async function watchLateAnswer(number, seen) {
       if (path === 'devices.json') {
         S.devicesSha = await gitSha(text);
         if (!S.devDirty) { try { const d = JSON.parse(text); S.D = d; if (!S.D.archived) S.D.archived = {}; softRender(); } catch (e) { console.log('late devices', e); } }
+      } else if (path === listPathOf(S.current)) {           // keep the open list's base fresh too (e.g. an approval changed it)
+        S.listSha = await gitSha(text);
+        if (!S.listDirty) { try { S.L = toModel(JSON.parse(text)); softRender(); } catch (e) { console.log('late list', e); } }
       }
     }
     const sha = r.later ? await awaitAnswers(number, x => !!x.published, { minutes: 6, seen }).then(x => x ? x.sha || null : null).catch(() => null) : r.sha;
@@ -1021,6 +1024,44 @@ const seesPhones = () => fullAdmin() || canDo('edit') || canDo('manage') || canD
 const OVER = new Map();            // path -> { text } or { gone: true }
 const gitSha = async text => { const b = enc8(text); const head = enc8(`blob ${b.length}\0`); const all = new Uint8Array(head.length + b.length); all.set(head); all.set(b, head.length);
   return [...new Uint8Array(await crypto.subtle.digest('SHA-1', all))].map(x => x.toString(16).padStart(2, '0')).join(''); };
+// ---------- three-way merge (used only to recover a save when the file changed under us) ----------
+// Combines the admin's edits (mine) with a concurrent change on the server (theirs) against the common
+// ancestor (base), so a save is never lost to "it changed since you loaded it" and the concurrent change
+// (an approved request, a newly-registered phone) isn't dropped either. Verified against merge_test.js.
+const mClone = x => (x == null ? x : JSON.parse(JSON.stringify(x)));
+const mEq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const mObj = x => x && typeof x === 'object' && !Array.isArray(x);
+const mKey = x => (mObj(x) ? (x.domain ?? x.id ?? x.name ?? JSON.stringify(x)) : x);
+function mergeArr(base, mine, theirs) {
+  const bk = new Map(base.map(x => [mKey(x), x])), mk = new Map(mine.map(x => [mKey(x), x])), tk = new Map(theirs.map(x => [mKey(x), x]));
+  const order = [], seen = new Set();
+  for (const x of [...mine, ...theirs]) { const k = mKey(x); if (!seen.has(k)) { seen.add(k); order.push(k); } }
+  const out = [];
+  for (const k of order) {
+    const inB = bk.has(k), inM = mk.has(k), inT = tk.has(k);
+    if (inM && inT) out.push(merge3(inB ? bk.get(k) : undefined, mk.get(k), tk.get(k)));
+    else if (inM && !inT) { if (!(inB && mEq(bk.get(k), mk.get(k)))) out.push(mClone(mk.get(k))); }   // mine added/changed -> keep; unchanged+removed-by-them -> drop
+    else { if (!(inB && mEq(bk.get(k), tk.get(k)))) out.push(mClone(tk.get(k))); }                     // theirs added/changed -> keep; unchanged+removed-by-me -> drop
+  }
+  return out;
+}
+function merge3(base, mine, theirs) {
+  if (mEq(mine, theirs)) return mClone(mine);
+  if (mEq(base, mine)) return mClone(theirs);     // I didn't touch it
+  if (mEq(base, theirs)) return mClone(mine);     // they didn't touch it
+  if (mObj(mine) && mObj(theirs)) {
+    const b = mObj(base) ? base : {}, out = {};
+    for (const k of new Set([...Object.keys(mine), ...Object.keys(theirs)])) {
+      const inM = k in mine, inT = k in theirs;
+      if (inM && inT) out[k] = merge3(b[k], mine[k], theirs[k]);
+      else if (inM && !inT) { if (!(k in b) || !mEq(b[k], mine[k])) out[k] = mClone(mine[k]); }
+      else { if (!(k in b) || !mEq(b[k], theirs[k])) out[k] = mClone(theirs[k]); }
+    }
+    return out;
+  }
+  if (Array.isArray(mine) && Array.isArray(theirs)) return mergeArr(Array.isArray(base) ? base : [], mine, theirs);
+  return mClone(mine);   // a scalar both sides changed -> the admin's intent wins
+}
 async function textOf(path) {
   if (OVER.has(path)) return OVER.get(path).gone ? null : OVER.get(path).text;
   return fileText(path);
@@ -1046,10 +1087,48 @@ function queueOp(op, message) {
   renderSync();
 }
 async function putJson(path, data, fileSha, message) {
+  let baseText = null;   // what this change is based on — kept so a conflict can be merged, not lost
+  try { baseText = OVER.has(path) ? (OVER.get(path).gone ? null : OVER.get(path).text) : await fileText(path); } catch (e) { baseText = null; }
   const text = JSON.stringify(data, null, 2) + '\n';
-  queueOp({ op: 'put', path, content: text, base: fileSha || null }, message);
+  queueOp({ op: 'put', path, content: text, base: fileSha || null, baseText }, message);
   OVER.set(path, { text });
   return gitSha(text);
+}
+// The file as it is on the server right now (past our optimistic overlay). For conflict recovery.
+async function freshJson(path) {
+  const t = await fileText(path);
+  return t == null ? null : { sha: await gitSha(t), data: JSON.parse(t) };
+}
+// A save was refused because a file changed under us (an approved request, a new phone). Rather than lose the
+// admin's work: pull the newest published data, merge each refused change with what's now on the server, re-base
+// it, and let it save again. Returns false if the fresh data isn't reachable yet (caller then surfaces it).
+async function reconcileFailedOps(ops) {
+  try {
+    const start = DATA.sha;                                   // wait briefly for the concurrent change to publish
+    for (let i = 0; i < 5; i++) { const v = await latestSha(); if (v && v !== start) { await loadData(v).catch(() => false); break; } await sleep(1500); }
+    for (const op of ops) {
+      if (op.op !== 'put') continue;
+      const fr = await freshJson(op.path);
+      const theirs = fr ? fr.data : (op.baseText != null ? JSON.parse(op.baseText) : null);
+      if (theirs == null) return false;
+      const base = op.baseText != null ? JSON.parse(op.baseText) : theirs;
+      const merged = merge3(base, JSON.parse(op.content), theirs);
+      if (op.path === 'devices.json') {   // keep the shape the rest of the page expects
+        if (!Array.isArray(merged.default)) merged.default = ['public'];
+        if (!merged.devices) merged.devices = {};
+        if (!merged.archived) merged.archived = {};
+      }
+      const text = JSON.stringify(merged, null, 2) + '\n';
+      const ancestor = JSON.stringify(theirs, null, 2) + '\n';   // the server version we merged onto == the new base
+      op.content = text; op.base = fr ? fr.sha : await gitSha(text); op.baseText = ancestor;
+      OVER.set(op.path, { text });
+      // Reflect the merge in what's on screen — but never over newer edits the admin just made (those save next).
+      if (op.path === 'devices.json') { S.devicesSha = op.base; if (!S.devDirty) S.D = merged; }
+      else if (op.path === listPathOf(S.current)) { S.listSha = op.base; if (!S.listDirty) S.L = toModel(merged); }
+    }
+    softRender();
+    return true;
+  } catch (e) { console.log('reconcile', e && e.message); return false; }
 }
 async function deleteFile(path, fileSha, message) {
   queueOp({ op: 'delete', path, base: fileSha || null }, message);
@@ -1073,7 +1152,7 @@ async function flushQueue() {
     // answer to catch a rare refusal and to re-sync the tidied result, but the pill no longer waits for it.
     const r = await command({ op: 'write', ops, message }, { onSent: () => { QUEUE.sending = false; QUEUE.savedAt = Date.now(); renderSync(); } });
     if (!r.ok) throw new Error(r.error || 'It wasn\'t saved.');
-    QUEUE.busy = false; QUEUE.sending = false; QUEUE.savedAt = Date.now();
+    QUEUE.busy = false; QUEUE.sending = false; QUEUE.savedAt = Date.now(); QUEUE.conflictTries = 0;
     // Durably posted but not yet applied (the automation is slow): it's saved and will land. Don't re-pack from the
     // server now — that would show the pre-change data over the optimistic change. The background watcher re-syncs later.
     if (r.pending) { renderSync(); if (QUEUE.ops.length && !QUEUE.failed) flushQueue(); return; }
@@ -1085,12 +1164,25 @@ async function flushQueue() {
       if (path === 'devices.json') {
         S.devicesSha = await gitSha(text);
         if (!S.devDirty) { try { const d = JSON.parse(text); S.D = d; if (!S.D.archived) S.D.archived = {}; softRender(); } catch (e) { console.log('devices', e); } }
+      } else if (path === listPathOf(S.current)) {           // keep the open list's base fresh too (e.g. an approval changed it)
+        S.listSha = await gitSha(text);
+        if (!S.listDirty) { try { S.L = toModel(JSON.parse(text)); softRender(); } catch (e) { console.log('list', e); } }
       }
     }
     afterSave(r);
   } catch (e) {
-    QUEUE.busy = false; QUEUE.sending = false;
-    if (e.message !== 'SIGNED_OUT') { QUEUE.failed = e.message; QUEUE.ops.unshift(...ops); }
+    QUEUE.sending = false;
+    if (e.message === 'SIGNED_OUT') { QUEUE.busy = false; renderSync(); return; }
+    QUEUE.ops.unshift(...ops);
+    // It changed under us (an approved request, a newly-registered phone). Merge our edits with what's now on the
+    // server and save again, rather than lose the admin's work. Bounded, and busy stays set so nothing re-enters.
+    if (/changed since you loaded it/i.test(e.message) && (QUEUE.conflictTries || 0) < 4) {
+      QUEUE.conflictTries = (QUEUE.conflictTries || 0) + 1; renderSync();
+      const ok = await reconcileFailedOps(ops);
+      QUEUE.busy = false;
+      if (ok) { renderSync(); flushQueue(); return; }
+    } else { QUEUE.busy = false; }
+    QUEUE.failed = e.message;
   }
   renderSync();
   if (QUEUE.ops.length && !QUEUE.failed) flushQueue();
@@ -1175,7 +1267,13 @@ async function showSaveProblem() {
   if (!QUEUE.failed) return;
   const retry = await uiDialog({ title: 'Not saved', icon: 'warn', red: true, text: QUEUE.failed,
     ok: 'Try again', cancel: 'Start over' });
-  if (retry) { QUEUE.failed = null; flushQueue(); return; }
+  if (retry) {
+    // Re-sync with the server and merge our edits in first, so "Try again" actually goes through instead of
+    // hitting the same "it changed under us" wall. (For an ordinary network blip the merge is a harmless no-op.)
+    QUEUE.failed = null; QUEUE.conflictTries = 0; QUEUE.busy = true; renderSync();
+    await reconcileFailedOps(QUEUE.ops); QUEUE.busy = false;
+    flushQueue(); return;
+  }
   if (!(await uiConfirmDanger('Start over?', 'Your changes that weren\'t saved are thrown away, and everything is loaded again from GitHub.', 'Start over', 'warn'))) return;
   QUEUE.failed = null; QUEUE.ops = []; OVER.clear(); S.listDirty = false; S.devDirty = false;
   try { await refreshData(); } catch (e) { say(e.message, true); }
