@@ -2062,7 +2062,7 @@ function render() {
   else if (!S.connected) node = signInScreen();
   else if (S.sub) node = ({ site: siteScreen, temp: tempScreen, block: blockScreen, nomedia: noMediaScreen, import: importScreen,
     listsettings: listSettingsScreen, phone: phoneScreen, archived: archivedScreen, neverblock: neverBlockScreen, pin: pinScreen,
-    log: logScreen, account: accountScreen, admins: adminsScreen, admin: adminScreen, groups: groupsScreen,
+    log: logScreen, account: accountScreen, admins: adminsScreen, admin: adminScreen, groups: groupsScreen, capabilities: capabilitiesScreen,
     approvalpin: approvalPinScreen, embeds: embedsScreen, request: requestDetailsScreen, answered: answeredDetailsScreen, timer: timerScreen, browsers: browsersScreen,
     thread: threadScreen, newmsg: newMsgScreen })[S.sub.name]();
   else node = ({ requests: requestsScreen, sites: sitesScreen, phones: phonesScreen, timers: timersScreen, messages: messagesScreen, settings: settingsScreen })[S.tab]();
@@ -2570,7 +2570,52 @@ function accountScreen() {
     })(),
     h('button', { type: 'button', class: 'btn s wide', id: 'openPin', onclick: () => open({ name: 'pin' }) },
       getPin() || getBio() ? `The lock: ${[getBio() ? 'fingerprint' : '', getPin() ? 'PIN' : ''].filter(Boolean).join(' and ')}` : 'Lock with a PIN or fingerprint'),
+    // Browser capabilities: only meaningful inside the app (it inspects the app's own WebView).
+    INAPP ? h('div', { class: 'group' }, h('button', { type: 'button', class: 'row', id: 'openCaps', onclick: () => open({ name: 'capabilities' }) },
+      h('span', { class: 'ic' }, icon('shield', 20)),
+      h('span', { class: 'grow' }, h('span', { class: 't' }, 'Browser capabilities'), h('span', { class: 's' }, 'What this phone’s browser supports, and what LazerLock uses')),
+      h('span', { class: 'chev' }, icon('chev', 18)))) : null,
     h('button', { type: 'button', class: 'btn dline wide', id: 'signOut', onclick: signOut }, 'Sign out on this device'));
+}
+
+// What LazerLock turns on today, in plain words (a fixed list so it reads well regardless of the raw flag names below).
+const CAP_ON = [
+  ['Passkeys (WebAuthn)', 'Sign in with a passkey, the same as Chrome'],
+  ['Dark mode for sites', 'Darkens sites with no dark theme, when the app is in dark mode'],
+  ['Mixed-content compatibility', 'Shows a secure page’s images even if served over HTTP (insecure scripts stay blocked)'],
+  ['Safe Browsing', 'Google’s phishing and malware warnings (on by default)'],
+  ['Malware / adult / gambling filters', 'LazerLock’s own content filters'],
+  ['Early ad-block script injection', 'Runs ad-blocking before a page’s own scripts'],
+];
+// The raw WebViewFeature flags LazerLock already makes use of, so the full list can flag the rest as "available".
+const CAP_USED = ['WEB_AUTHENTICATION', 'ALGORITHMIC_DARKENING', 'DOCUMENT_START_SCRIPT'];
+
+function capabilitiesScreen() {
+  const head = [backLink('Your account', () => open({ name: 'account' })),
+    screenTitle('Browser capabilities', 'What this phone’s browser engine supports, and what LazerLock uses')];
+  let feats = null, wv = '';
+  try { if (INAPP && window.WLBAdmin && WLBAdmin.browserFeatures) feats = JSON.parse(WLBAdmin.browserFeatures() || '[]'); } catch {}
+  try { if (INAPP && window.WLBAdmin && WLBAdmin.webViewVersion) wv = String(WLBAdmin.webViewVersion() || ''); } catch {}
+  if (!feats) return h('main', { class: 'stack', style: 'padding-bottom:24px' }, ...head,
+    h('p', { class: 'hint' }, 'Open this inside the LazerLock admin app to see the browser’s capabilities — a web browser can’t report them.'));
+  const onList = h('div', { class: 'group' }, CAP_ON.map(([t, s]) => h('div', { class: 'row' },
+    h('span', { class: 'ic' }, icon('check', 20)),
+    h('span', { class: 'grow' }, h('span', { class: 't' }, t), h('span', { class: 's' }, s)))));
+  const supported = feats.filter(f => f.supported);
+  const available = supported.filter(f => !CAP_USED.includes(f.name));
+  const rawRows = feats.slice().sort((a, b) => (Number(b.supported) - Number(a.supported)) || a.name.localeCompare(b.name)).map(f =>
+    h('div', { class: 'row' },
+      h('span', { class: 'grow' }, h('span', { class: 't' }, f.name),
+        h('span', { class: 's' }, f.supported ? (CAP_USED.includes(f.name) ? 'Supported · used by LazerLock' : 'Supported · available to add') : 'Not supported on this WebView')),
+      h('span', { class: 't', style: 'opacity:.6;flex:none' }, f.supported ? '✓' : '—')));
+  return h('main', { class: 'stack', style: 'padding-bottom:24px' }, ...head,
+    wv ? h('p', { class: 'hint', style: 'margin-bottom:4px' }, 'Engine: ' + wv) : null,
+    h('h2', { class: 'sec' }, 'Turned on now'), onList,
+    h('h2', { class: 'sec' }, `All capabilities your WebView reports (${supported.length} of ${feats.length} supported)`),
+    h('p', { class: 'hint', style: 'margin-top:0' }, available.length
+      ? `${available.length} supported but not yet used — candidates to add. New ones appear here by themselves after the app’s browser library is updated.`
+      : 'Everything your WebView supports is already in use.'),
+    h('div', { class: 'group' }, rawRows));
 }
 
 // Your approval PIN: the main admin's is the one for all phones (Settings); a helper's own works on their phones only.
