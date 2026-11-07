@@ -1150,7 +1150,11 @@ async function flushQueue() {
   try {
     // "Saved" shows the moment the change reaches GitHub (onSent) — it's durable from then on. We keep awaiting the
     // answer to catch a rare refusal and to re-sync the tidied result, but the pill no longer waits for it.
-    const r = await command({ op: 'write', ops, message }, { onSent: () => { QUEUE.sending = false; QUEUE.savedAt = Date.now(); renderSync(); } });
+    // baseText is a local-only copy of the prior file contents (used to merge a conflict). It must NOT be sent: it
+    // would roughly double the command and push the GitHub issue body past its 65536-char limit (a 422). Strip it here;
+    // the originals in QUEUE.ops keep baseText for reconcileFailedOps.
+    const postOps = ops.map(o => { const { baseText, ...rest } = o; return rest; });
+    const r = await command({ op: 'write', ops: postOps, message }, { onSent: () => { QUEUE.sending = false; QUEUE.savedAt = Date.now(); renderSync(); } });
     if (!r.ok) throw new Error(r.error || 'It wasn\'t saved.');
     QUEUE.busy = false; QUEUE.sending = false; QUEUE.savedAt = Date.now(); QUEUE.conflictTries = 0;
     // Durably posted but not yet applied (the automation is slow): it's saved and will land. Don't re-pack from the
