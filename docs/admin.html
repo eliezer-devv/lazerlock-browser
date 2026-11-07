@@ -887,12 +887,40 @@ async function commandNow(cmd, { signed = true, minutes = 4, onSent = null } = {
   if (onSent) { try { onSent(number); } catch (e) { console.log(e); } }
   const seen = new Set();
   const r = await awaitAnswers(number, () => true, { minutes, seen });
-  if (!r) throw new Error('No answer from GitHub yet. Its automation may be busy or switched off (private repository → Actions). Try again in a minute.');
+  if (!r) {
+    // The issue was created, so the command is DURABLE — GitHub's automation will apply it once it runs. The private
+    // repo's Actions are just busy/backed up (often behind an APK build) and haven't answered in time. Treat it as
+    // saved-and-applying, NOT a failure: don't re-send it (that duplicates) and don't drop it. A background watcher
+    // picks up a late answer to re-sync or to surface a genuine refusal; otherwise the next data refresh reconciles.
+    watchLateAnswer(number, seen);
+    return { ok: true, pending: true, number };
+  }
   r.number = number;
   // Saved already; the admin data is re-packed after (a second answer says when, with the version to read).
   if (r.later) r.published = awaitAnswers(number, x => !!x.published, { minutes: 6, seen }).then(x => x ? x.sha || null : null).catch(() => null);
   if (r.code === 'SIGNED_OUT' || r.code === 'PAUSED') { await signedOutHere(r.error); throw new Error(r.error); }
   return r;
+}
+
+// A command that was durably posted but hadn't been answered in time: keep watching, longer, in the background. If the
+// automation finally answers OK, re-sync the tidied result / new version like a normal save; if it answers with a real
+// refusal (e.g. someone else changed it first), surface that so the admin knows; if it never answers here, leave it —
+// the change is still queued and a later data refresh will reflect it.
+async function watchLateAnswer(number, seen) {
+  try {
+    const r = await awaitAnswers(number, () => true, { minutes: 20, seen });
+    if (!r) return;
+    if (!r.ok) { QUEUE.failed = r.error || 'A change was refused.'; QUEUE.sending = false; renderSync(); return; }
+    for (const [path, text] of Object.entries(r.files || {})) {
+      OVER.set(path, { text });
+      if (path === 'devices.json') {
+        S.devicesSha = await gitSha(text);
+        if (!S.devDirty) { try { const d = JSON.parse(text); S.D = d; if (!S.D.archived) S.D.archived = {}; softRender(); } catch (e) { console.log('late devices', e); } }
+      }
+    }
+    const sha = r.later ? await awaitAnswers(number, x => !!x.published, { minutes: 6, seen }).then(x => x ? x.sha || null : null).catch(() => null) : r.sha;
+    if (quietNow()) refreshData(sha).catch(e => console.log('late refresh', e));
+  } catch (e) { console.log('watchLateAnswer', e && e.message); }
 }
 
 // ---------- What this admin sees: encrypted in the public repository, at a given version ----------
@@ -1046,6 +1074,9 @@ async function flushQueue() {
     const r = await command({ op: 'write', ops, message }, { onSent: () => { QUEUE.sending = false; QUEUE.savedAt = Date.now(); renderSync(); } });
     if (!r.ok) throw new Error(r.error || 'It wasn\'t saved.');
     QUEUE.busy = false; QUEUE.sending = false; QUEUE.savedAt = Date.now();
+    // Durably posted but not yet applied (the automation is slow): it's saved and will land. Don't re-pack from the
+    // server now — that would show the pre-change data over the optimistic change. The background watcher re-syncs later.
+    if (r.pending) { renderSync(); if (QUEUE.ops.length && !QUEUE.failed) flushQueue(); return; }
     if (r.warning) say(r.warning, true);
     // Saved a little differently (tidied by GitHub's automation): carry on from what's there now.
     for (const [path, text] of Object.entries(r.files || {})) {
@@ -1114,6 +1145,7 @@ function bg(cmd, okText, apply) {
   command(cmd, { onSent: markSent }).then(async r => {
     if (!r.ok) throw new Error(r.error || 'It wasn\'t saved.');
     QUEUE.savedAt = Date.now();
+    if (r.pending) { renderSync(); return; }   // durably posted, applying in the background — don't re-pack from the server (would show the pre-change data over what was just changed)
     if (r.later) afterSave(r); else await refreshData(r.sha).catch(e => console.log(`(carried on, line 951) ${e && e.message}`));
     if (r.warning) say(r.warning, true); else if (okText) say(r.msg || okText);
   }).catch(async e => {
