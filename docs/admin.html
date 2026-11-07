@@ -5031,7 +5031,7 @@ function bubbleView(id, t, m, selecting) {
     if (m.log) parts.push(logChip(id, m.log, mine, selecting));
     if (m.text) parts.push(h('div', { class: 'ctext' }, m.text));
   }
-  parts.push(h('div', { class: 'cmeta' }, (mine ? (m.by ? m.by + ' · ' : '') : '') + whenMsg(m.at), mine && !m.del ? tickEl(d, t, m) : null));
+  parts.push(h('div', { class: 'cmeta' }, (mine ? (m.by ? m.by + ' · ' : '') : '') + whenMsg(m.at), mine && !m.del ? tickEl(d, t, m, id) : null));
   const attrs = { class: 'cbub ' + (mine ? 'me' : 'them') + (m.del ? ' gone' : '') + (sel ? ' sel' : '') };
   if (!m.del) {
     if (selecting) attrs.onclick = () => { if (S.msel.ids.has(m.id)) S.msel.ids.delete(m.id); else S.msel.ids.add(m.id); render(); };
@@ -5042,9 +5042,13 @@ function bubbleView(id, t, m, selecting) {
   }
   return h('div', attrs, ...parts);
 }
-function tickEl(d, t, m) {
+function tickEl(d, t, m, id) {
   const read = parseAt(t.seenByPhoneAt) > 0 && parseAt(t.seenByPhoneAt) >= parseAt(m.at);
-  const delivered = parseAt(d.phoneSyncAt) > 0 && parseAt(d.phoneSyncAt) >= parseAt(m.at);
+  // When the phone last synced: from seen.json (a number in ms), falling back to the record's own phoneSyncAt if present
+  // (older data / other admins). phoneSyncAt is no longer carried in the owner's view, so seen.json is the source now.
+  const sy = (typeof seenOf === 'function' && id) ? seenOf(id) : null;
+  const syncAt = (sy && Number(sy.at)) || parseAt(d.phoneSyncAt);
+  const delivered = syncAt > 0 && syncAt >= parseAt(m.at);
   return h('span', { class: 'tk' + (read ? ' read' : '') }, read || delivered ? '✓✓' : '✓');
 }
 function refChip(ref, mine, selecting) {
