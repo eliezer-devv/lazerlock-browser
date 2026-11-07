@@ -2579,18 +2579,32 @@ function accountScreen() {
 }
 
 // What LazerLock turns on today, in plain words (a fixed list so it reads well regardless of the raw flag names below).
+// What LazerLock turns on today, in plain words.
 const CAP_ON = [
-  ['Passkeys (WebAuthn)', 'Sign in with a passkey, the same as Chrome'],
+  ['Passkeys (WebAuthn)', 'Sign in with a passkey, the same as Chrome (when the phone allows it)'],
   ['Dark mode for sites', 'Darkens sites with no dark theme, when the app is in dark mode'],
   ['Mixed-content compatibility', 'Shows a secure page’s images even if served over HTTP (insecure scripts stay blocked)'],
   ['Safe Browsing', 'Google’s phishing and malware warnings (on by default)'],
   ['Malware / adult / gambling filters', 'LazerLock’s own content filters'],
   ['Early ad-block script injection', 'Runs ad-blocking before a page’s own scripts'],
 ];
-// The raw WebViewFeature flags LazerLock already makes use of, so the full list can flag the rest as "available".
-const CAP_USED = ['WEB_AUTHENTICATION', 'ALGORITHMIC_DARKENING', 'DOCUMENT_START_SCRIPT'];
+// The few real, user-facing engine features worth surfacing (friendly names), keyed by their WebViewFeature flag.
+const CAP_FEATURES = {
+  WEB_AUTHENTICATION: 'Passkeys (WebAuthn)',
+  ALGORITHMIC_DARKENING: 'Dark mode for sites',
+  SAFE_BROWSING_ENABLE: 'Safe Browsing (phishing / malware warnings)',
+  DOCUMENT_START_SCRIPT: 'Early ad-block script injection',
+};
+const CAP_USED = ['WEB_AUTHENTICATION', 'ALGORITHMIC_DARKENING', 'SAFE_BROWSING_ENABLE', 'DOCUMENT_START_SCRIPT'];
+// The app checks package registries for newer library versions off the main thread and calls back here.
+window.wlLibUpdates = (data) => { try { S.libUpdates = data; if (S.sub && S.sub.name === 'capabilities') render(); } catch {} };
 
 function capabilitiesScreen() {
+  // Start the library-update check once per visit; the result arrives asynchronously via window.wlLibUpdates.
+  if (INAPP && window.WLBAdmin && WLBAdmin.checkLibraryUpdates && S.libUpdates === undefined) {
+    S.libUpdates = 'loading';
+    try { WLBAdmin.checkLibraryUpdates(); } catch { S.libUpdates = null; }
+  }
   const head = [backLink('Your account', () => open({ name: 'account' })),
     screenTitle('Browser capabilities', 'What this phone’s browser engine supports, and what LazerLock uses')];
   let feats = null, wv = '';
@@ -2598,24 +2612,46 @@ function capabilitiesScreen() {
   try { if (INAPP && window.WLBAdmin && WLBAdmin.webViewVersion) wv = String(WLBAdmin.webViewVersion() || ''); } catch {}
   if (!feats) return h('main', { class: 'stack', style: 'padding-bottom:24px' }, ...head,
     h('p', { class: 'hint' }, 'Open this inside the LazerLock admin app to see the browser’s capabilities — a web browser can’t report them.'));
+  const byName = {}; feats.forEach(f => { byName[f.name] = !!f.supported; });
+
   const onList = h('div', { class: 'group' }, CAP_ON.map(([t, s]) => h('div', { class: 'row' },
     h('span', { class: 'ic' }, icon('check', 20)),
     h('span', { class: 'grow' }, h('span', { class: 't' }, t), h('span', { class: 's' }, s)))));
-  const supported = feats.filter(f => f.supported);
-  const available = supported.filter(f => !CAP_USED.includes(f.name));
-  const rawRows = feats.slice().sort((a, b) => (Number(b.supported) - Number(a.supported)) || a.name.localeCompare(b.name)).map(f =>
-    h('div', { class: 'row' },
-      h('span', { class: 'grow' }, h('span', { class: 't' }, f.name),
-        h('span', { class: 's' }, f.supported ? (CAP_USED.includes(f.name) ? 'Supported · used by LazerLock' : 'Supported · available to add') : 'Not supported on this WebView')),
-      h('span', { class: 't', style: 'opacity:.6;flex:none' }, f.supported ? '✓' : '—')));
+
+  // The handful of genuinely user-facing engine features — not the ~90 internal flags.
+  const featRows = Object.entries(CAP_FEATURES).map(([k, label]) => {
+    const sup = !!byName[k], used = CAP_USED.includes(k);
+    return h('div', { class: 'row' }, h('span', { class: 'ic' }, icon(sup && used ? 'check' : 'shield', 20)),
+      h('span', { class: 'grow' }, h('span', { class: 't' }, label),
+        h('span', { class: 's' }, !sup ? 'Not available on this WebView' : used ? 'On' : 'Available — not turned on yet')));
+  });
+
+  // Library updates: an in-app check against the package registries (just a "worth a look" signal).
+  const hasLibCheck = INAPP && window.WLBAdmin && WLBAdmin.checkLibraryUpdates;
+  const libBody = !hasLibCheck ? null
+    : (S.libUpdates === 'loading' || S.libUpdates === undefined) ? h('p', { class: 'hint' }, 'Checking for newer versions…')
+    : (!Array.isArray(S.libUpdates) || !S.libUpdates.length) ? h('p', { class: 'hint' }, 'Couldn’t check right now — try again later.')
+    : h('div', { class: 'group' }, S.libUpdates.map(l => h('div', { class: 'row' },
+        h('span', { class: 'ic' }, icon(l.update ? 'shield' : 'check', 20)),
+        h('span', { class: 'grow' }, h('span', { class: 't' }, l.name + (l.update ? ' — update available' : '')),
+          h('span', { class: 's' }, l.latest ? `On ${l.current}, newest ${l.latest}` : `On ${l.current} · couldn’t reach registry`)))));
+
+  // Advanced: the full raw flag list (mostly internal), collapsed, and NOT framed as things to add.
+  const supCount = feats.filter(f => f.supported).length;
+  const advanced = h('details', { class: 'group', style: 'padding:0;overflow:hidden' },
+    h('summary', { class: 't', style: 'padding:12px 14px;cursor:pointer' }, `All WebView flags (${supCount} of ${feats.length}) — mostly internal`),
+    feats.slice().sort((a, b) => (Number(b.supported) - Number(a.supported)) || a.name.localeCompare(b.name)).map(f =>
+      h('div', { class: 'row' }, h('span', { class: 'grow' }, h('span', { class: 't', style: 'font-size:13px' }, f.name)),
+        h('span', { class: 't', style: 'opacity:.55;flex:none' }, f.supported ? '✓' : '—'))));
+
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, ...head,
     wv ? h('p', { class: 'hint', style: 'margin-bottom:4px' }, 'Engine: ' + wv) : null,
     h('h2', { class: 'sec' }, 'Turned on now'), onList,
-    h('h2', { class: 'sec' }, `All capabilities your WebView reports (${supported.length} of ${feats.length} supported)`),
-    h('p', { class: 'hint', style: 'margin-top:0' }, available.length
-      ? `${available.length} supported but not yet used — candidates to add. New ones appear here by themselves after the app’s browser library is updated.`
-      : 'Everything your WebView supports is already in use.'),
-    h('div', { class: 'group' }, rawRows));
+    h('h2', { class: 'sec' }, 'Browser-engine features'), h('div', { class: 'group' }, featRows),
+    libBody ? h('h2', { class: 'sec' }, 'Library updates') : null,
+    libBody ? h('p', { class: 'hint', style: 'margin-top:0' }, 'If one shows an update, tell me and I’ll check what it adds and whether it’s worth building in.') : null,
+    libBody,
+    h('h2', { class: 'sec' }, 'Advanced'), advanced);
 }
 
 // Your approval PIN: the main admin's is the one for all phones (Settings); a helper's own works on their phones only.
