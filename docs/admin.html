@@ -589,6 +589,10 @@ function say(text, error = false) {
   toastTimer = setTimeout(() => { t.hidden = true; }, error ? 9000 : 3500);
 }
 $('toast').onclick = () => { $('toast').hidden = true; };
+// Write a line to the app's log (inside the admin app) WITHOUT showing the user a toast. Used to record what the
+// saving pipeline is doing — failures (with GitHub's status), conflicts, merges and retries — so the exported log
+// explains a save problem on its own, instead of only flashing "Not saved" on screen.
+function appLog(text) { try { if (window.WLBAdmin && WLBAdmin.log) WLBAdmin.log(String(text)); } catch {} }
 // The page's own unexpected errors: in the app's log (inside the app), and the browser's console.
 window.addEventListener('error', e => { try { window.WLBAdmin && WLBAdmin.log && WLBAdmin.log(`Script error: ${e.message} (line ${e.lineno})`); } catch {} });
 window.addEventListener('unhandledrejection', e => { try { window.WLBAdmin && WLBAdmin.log && WLBAdmin.log(`Script error: ${(e.reason && (e.reason.stack || e.reason.message)) || e.reason}`); } catch {} });
@@ -781,7 +785,14 @@ async function postCommand(sealed) {
   // list may exceed that on exit — but the backstop and leave-screen saves will have committed it already by then.
   const res = await fetch(`${API}/repos/${C.owner}/${C.repo}/issues`, { method: 'POST', headers: ghHeaders(), body: JSON.stringify({ title: '🔒 Admin', body }), keepalive: UNLOAD });
   if (res.status === 401) throw new Error('GitHub turned the requests token down: it may have expired. Renew REQUESTS_TOKEN (README, section 6).');
-  if (!res.ok) throw new Error(`GitHub returned ${res.status}. Check this device is online, then try again.`);
+  if (!res.ok) {
+    // Record GitHub's real reason in the app's log (the on-screen message stays short). This turns an opaque "422"
+    // into e.g. "Validation Failed — body is too long (maximum is 65536 characters)", and shows the payload size.
+    let detail = '';
+    try { const j = JSON.parse(await res.text()); detail = [j.message, ...(Array.isArray(j.errors) ? j.errors.map(x => x.message || `${x.field || ''} ${x.code || ''}`.trim()) : [])].filter(Boolean).join(' — '); } catch {}
+    appLog(`Save POST rejected: GitHub ${res.status}${detail ? ' — ' + detail : ''} (request body ${body.length} chars; GitHub's issue limit is 65536).`);
+    throw new Error(`GitHub returned ${res.status}. Check this device is online, then try again.`);
+  }
   return (await res.json()).number;
 }
 
@@ -802,7 +813,7 @@ async function ensureSW() {
 // where the direct save and this both fire): whichever is behind is simply rejected as REPLAY and dropped.
 function buildCloseSave() {
   const run = signedChain.then(() => buildCloseSaveInner());
-  signedChain = run.catch(e => { console.log(`(carried on) buildCloseSave ${e && e.message}`); return null; });
+  signedChain = run.catch(e => { console.log(`(carried on) buildCloseSave ${e && e.message}`); appLog('Background (on-close) save couldn\'t be prepared: ' + (e && e.message)); return null; });
   return run;
 }
 async function buildCloseSaveInner() {
@@ -910,7 +921,7 @@ async function watchLateAnswer(number, seen) {
   try {
     const r = await awaitAnswers(number, () => true, { minutes: 20, seen });
     if (!r) return;
-    if (!r.ok) { QUEUE.failed = r.error || 'A change was refused.'; QUEUE.sending = false; renderSync(); return; }
+    if (!r.ok) { QUEUE.failed = r.error || 'A change was refused.'; QUEUE.sending = false; appLog('Save refused by GitHub after a delay: ' + QUEUE.failed); renderSync(); return; }
     for (const [path, text] of Object.entries(r.files || {})) {
       OVER.set(path, { text });
       if (path === 'devices.json') {
@@ -1128,7 +1139,7 @@ async function reconcileFailedOps(ops) {
     }
     softRender();
     return true;
-  } catch (e) { console.log('reconcile', e && e.message); return false; }
+  } catch (e) { console.log('reconcile', e && e.message); appLog('Save merge-retry error: ' + (e && e.message)); return false; }
 }
 async function deleteFile(path, fileSha, message) {
   queueOp({ op: 'delete', path, base: fileSha || null }, message);
@@ -1156,6 +1167,7 @@ async function flushQueue() {
     const postOps = ops.map(o => { const { baseText, ...rest } = o; return rest; });
     const r = await command({ op: 'write', ops: postOps, message }, { onSent: () => { QUEUE.sending = false; QUEUE.savedAt = Date.now(); renderSync(); } });
     if (!r.ok) throw new Error(r.error || 'It wasn\'t saved.');
+    if (QUEUE.conflictTries) appLog('Save succeeded after ' + QUEUE.conflictTries + ' merge-retr' + (QUEUE.conflictTries > 1 ? 'ies' : 'y') + '.');
     QUEUE.busy = false; QUEUE.sending = false; QUEUE.savedAt = Date.now(); QUEUE.conflictTries = 0;
     // Durably posted but not yet applied (the automation is slow): it's saved and will land. Don't re-pack from the
     // server now — that would show the pre-change data over the optimistic change. The background watcher re-syncs later.
@@ -1176,17 +1188,21 @@ async function flushQueue() {
     afterSave(r);
   } catch (e) {
     QUEUE.sending = false;
-    if (e.message === 'SIGNED_OUT') { QUEUE.busy = false; renderSync(); return; }
+    if (e.message === 'SIGNED_OUT') { QUEUE.busy = false; appLog('Save stopped: signed out on this device.'); renderSync(); return; }
     QUEUE.ops.unshift(...ops);
     // It changed under us (an approved request, a newly-registered phone). Merge our edits with what's now on the
     // server and save again, rather than lose the admin's work. Bounded, and busy stays set so nothing re-enters.
     if (/changed since you loaded it/i.test(e.message) && (QUEUE.conflictTries || 0) < 4) {
-      QUEUE.conflictTries = (QUEUE.conflictTries || 0) + 1; renderSync();
+      QUEUE.conflictTries = (QUEUE.conflictTries || 0) + 1;
+      appLog('Save: the data changed on the server since it loaded — merging your changes and retrying (attempt ' + QUEUE.conflictTries + ').');
+      renderSync();
       const ok = await reconcileFailedOps(ops);
       QUEUE.busy = false;
       if (ok) { renderSync(); flushQueue(); return; }
+      appLog('Save: couldn\'t fetch the latest data to merge — showing as not saved so nothing is lost.');
     } else { QUEUE.busy = false; }
     QUEUE.failed = e.message;
+    appLog('Save failed (shown as "Not saved"): ' + e.message);
   }
   renderSync();
   if (QUEUE.ops.length && !QUEUE.failed) flushQueue();
