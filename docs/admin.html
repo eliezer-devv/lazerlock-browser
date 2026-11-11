@@ -3791,8 +3791,13 @@ function siteScreen() {
       pages: d.only ? [...d.pages] : [], noPhotos: d.noPhotos, noVideos: d.noVideos, noSound: d.noSound,
       onPhotos: !!d.onPhotos && !d.noPhotos, onVideos: !!d.onVideos && !d.noVideos, onSound: !!d.onSound && !d.noSound, passThrough: d.passThrough, frames: d.frames, unfiltered: d.unfiltered,
       filtersOff: [...d.filtersOff] };
+    // Only treat it as a change (and save) if something actually differs — leaving a site you merely opened and looked
+    // at should not mark anything dirty or kick off a save. Field order doesn't matter; compare by key.
+    const sameSite = (a, b) => { const ks = Object.keys(a); return a && b && ks.length === Object.keys(b).length && ks.every(k => JSON.stringify(a[k]) === JSON.stringify(b[k])); };
+    sub.committed = true;
+    if (sub.index >= 0 && sameSite(S.L.sites[sub.index], site)) return true;   // nothing changed → no dirty, no save
     if (sub.index < 0) { S.L.sites.push(site); sub.index = S.L.sites.length - 1; } else S.L.sites[sub.index] = site;
-    sub.committed = true; markList();
+    markList();
     return true;
   };
   sub.commit = () => commit(true);      // leaving the screen saves what's there, as if Done was tapped
