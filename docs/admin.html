@@ -839,6 +839,13 @@ async function armOutbox() {
   try {
     const req = await buildCloseSave();
     if (!req) return;
+    // Inside the Android admin app: hand the finished request to native WorkManager, which delivers it even if the app
+    // is killed right after, waits for a connection and retries — far more reliable than a WebView service worker. A
+    // successful in-page save cancels it (cancelNativeSave), so an ordinary minimise never double-posts. The 12s delay
+    // native gives it is the cancel window. No service-worker fallback is needed in the app.
+    if (INAPP && window.WLBAdmin && WLBAdmin.scheduleBackgroundSave) {
+      try { WLBAdmin.scheduleBackgroundSave(JSON.stringify(req)); return; } catch (e) { appLog('Native background save couldn\'t be queued: ' + (e && e.message)); }
+    }
     await idb.set('outbox', req);
     const reg = await ensureSW();
     if (!reg) return;
@@ -849,6 +856,8 @@ async function armOutbox() {
   } catch (e) { console.log('armOutbox', e && e.message); }
 }
 function clearOutbox() { idb.del('outbox').catch(() => {}); }
+// The in-page save landed: drop any native background job armOutbox queued, so it can't post the same change again.
+function cancelNativeSave() { try { if (INAPP && window.WLBAdmin && WLBAdmin.cancelBackgroundSave) WLBAdmin.cancelBackgroundSave(); } catch {} }
 // Waits for the automation's answers on that issue (sealed for this device). onEach(result) returns true to stop.
 async function awaitAnswers(number, onEach, { minutes = 4, seen = new Set() } = {}) {
   const until = Date.now() + minutes * 60000;
@@ -1677,7 +1686,7 @@ async function saveAll(auto = false) {
       S.devDirty = false;
     }
     S.saveError = null; S.saveBlocked = false;
-    if (!S.listDirty && !S.devDirty) { dirtySince = null; clearOutbox(); }   // all pending changes committed: clear the pending-clock and the on-close fallback
+    if (!S.listDirty && !S.devDirty) { dirtySince = null; clearOutbox(); cancelNativeSave(); }   // all pending changes committed: clear the pending-clock, the on-close fallback, and any queued native background save
     if (did) noteSave();
     if (!auto) say('Saved ✓ · phones pick it up within a few minutes.');   // only a manual Save/Retry says so — auto-saves stay silent (the bar is the only sign)
     render();
