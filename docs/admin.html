@@ -549,7 +549,8 @@ const ICONS = {
   archive: '<rect x="3.5" y="4.5" width="17" height="4.5" rx="1"/><path d="M5 9v9.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M5.6 18.4l1.8-1.8M16.6 7.4l1.8-1.8"/>',
   sync: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 21v-5h5"/><g transform="translate(12 12.6) scale(0.55) translate(-12 -12.65)"><path stroke-width="3.09" d="M17.5 19a4.5 4.5 0 0 0 0-9 6 6 0 0 0-11.6-1.6A4 4 0 0 0 6 19z"/></g>',
-  warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.5v.01"/>'
+  warn: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17.5v.01"/>',
+  pencil: '<path d="M4 20h4L18.5 9.5a2 2 0 0 0-3-3L5 17z"/><path d="M14 7l3 3"/>'
 };
 function icon(name, size = 20, sw = 1.8) {
   return h('span', { class: 'icwrap', style: 'display:inline-flex', 'aria-hidden': 'true',
@@ -1830,6 +1831,43 @@ async function newList() {
   render();
   say(`New list "${listLabel(name)}". Add sites, then give it to phones under Phones.`);
 }
+// Rename a custom list (not the public list, not a phone's own id-named list). Moves the list file and points every
+// phone and setting that used the old name at the new one, so nothing loses its list.
+async function renameList() {
+  const old = S.current;
+  if (old === 'public' || ID_LIST.test(old)) return;
+  if (!(await discardListChanges())) return;
+  const nameIn = h('input', { class: 'inp', id: 'rnName', type: 'text', value: old, autocapitalize: 'off', spellcheck: 'false' });
+  let name = '';
+  const ok = await uiDialog({ title: 'Rename list', icon: 'list', ok: 'Rename', body: [
+    h('div', { class: 'field' }, h('label', { for: 'rnName' }, 'Name'), nameIn,
+      h('span', { class: 'hint' }, 'List names can be seen publicly, so don\'t use full names.'))],
+    onOk: () => {
+      name = nameIn.value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30);
+      if (!name) { say('Use letters and numbers for the list name.', true); return false; }
+      if (name !== old && S.lists.includes(name)) { say(`There's already a list called ${name}.`, true); return false; }
+    } });
+  if (!ok || name === old) return;
+  try {
+    if (!(await moveFile(listPathOf(old), listPathOf(name), `Rename list ${old} to ${name}`))) { say('Couldn\'t rename that list.', true); return; }
+    // Point every phone and setting that used the old name at the new one.
+    Object.values(S.D.devices).forEach(d => {
+      if (Array.isArray(d.lists)) d.lists = d.lists.map(l => l === old ? name : l);
+      if (Array.isArray(d.blockedLists)) d.blockedLists = d.blockedLists.map(l => l === old ? name : l);
+      if (d.requestsTo === old) d.requestsTo = name;
+    });
+    if (Array.isArray(S.D.default)) S.D.default = S.D.default.map(l => l === old ? name : l);
+    if (Array.isArray(S.D.publicLists)) S.D.publicLists = S.D.publicLists.map(l => l === old ? name : l);
+    Object.values(S.D.timers || {}).forEach(t => ['during', 'on'].forEach(k => { if (t[k] && Array.isArray(t[k].lists)) t[k].lists = t[k].lists.map(l => l === old ? name : l); }));
+    S.devicesSha = await putJson('devices.json', S.D, S.devicesSha, `Rename list ${old} to ${name} on phones`);
+    S.devDirty = false;
+    S.lists = [...new Set(S.lists.map(l => l === old ? name : l))].sort();
+    S.current = name; S.listSha = null;
+    await openList(name);
+    S.sub = null; render();
+    say(`Renamed to the ${listLabel(name)} list.`);
+  } catch (e) { say(e.message, true); }
+}
 async function deleteList() {
   const name = S.current;
   if (name === 'public') return;
@@ -2645,22 +2683,13 @@ function capabilitiesScreen() {
         h('span', { class: 'grow' }, h('span', { class: 't' }, l.name + (l.update ? ' — update available' : '')),
           h('span', { class: 's' }, l.latest ? `On ${l.current}, newest ${l.latest}` : `On ${l.current} · couldn’t reach registry`)))));
 
-  // Advanced: the full raw flag list (mostly internal), collapsed, and NOT framed as things to add.
-  const supCount = feats.filter(f => f.supported).length;
-  const advanced = h('details', { class: 'group', style: 'padding:0;overflow:hidden' },
-    h('summary', { class: 't', style: 'padding:12px 14px;cursor:pointer' }, `All WebView flags (${supCount} of ${feats.length}) — mostly internal`),
-    feats.slice().sort((a, b) => (Number(b.supported) - Number(a.supported)) || a.name.localeCompare(b.name)).map(f =>
-      h('div', { class: 'row' }, h('span', { class: 'grow' }, h('span', { class: 't', style: 'font-size:13px' }, f.name)),
-        h('span', { class: 't', style: 'opacity:.55;flex:none' }, f.supported ? '✓' : '—'))));
-
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, ...head,
     wv ? h('p', { class: 'hint', style: 'margin-bottom:4px' }, 'Engine: ' + wv) : null,
     h('h2', { class: 'sec' }, 'Turned on now'), onList,
     h('h2', { class: 'sec' }, 'Browser-engine features'), h('div', { class: 'group' }, featRows),
     libBody ? h('h2', { class: 'sec' }, 'Library updates') : null,
     libBody ? h('p', { class: 'hint', style: 'margin-top:0' }, 'If one shows an update, tell me and I’ll check what it adds and whether it’s worth building in.') : null,
-    libBody,
-    h('h2', { class: 'sec' }, 'Advanced'), advanced);
+    libBody);
 }
 
 // Your approval PIN: the main admin's is the one for all phones (Settings); a helper's own works on their phones only.
@@ -4117,6 +4146,9 @@ function listSettingsScreen() {
       settingsRow('table', 'Import or download a spreadsheet', null, () => open({ name: 'import' }), 'openImport'),
       settingsRow('link', 'Embedded content allowed (all sites)', Object.values((L.extra && L.extra.embeds) || {}).reduce((n, v) => n + (Array.isArray(v) ? v.length : 0), 0),
         () => open({ name: 'embeds' }), 'openEmbeds')),
+    // Rename: custom lists only (not the public list, and not a phone's own id-named list).
+    S.current !== 'public' && !ID_LIST.test(S.current) ? h('div', { class: 'group' },
+      settingsRow('pencil', 'Rename this list', null, renameList, 'renameList')) : null,
     S.current !== 'public' ? h('button', { type: 'button', class: 'btn dline wide', id: 'delList', onclick: deleteList }, `Delete the ${listLabel(S.current)} list`) : null);
 }
 function settingsRow(ic, label, count, onclick, id) {
@@ -4788,7 +4820,16 @@ async function bringBack(fromId, toId) {
     fromId === toId ? 'It comes back with its lists.' : 'That phone takes over its name and lists.', fromId === toId ? 'Restore' : 'Give', { icon: 'archive' }))) return render();
   try {
     const renamed = {};
+    const oldOwn = fromId.toLowerCase(), newOwn = toId.toLowerCase();   // a phone's own list is named after its ID
     for (const l of a.archivedLists || []) {
+      // Giving to a different phone: the old phone's own list becomes the NEW phone's own list — so it keeps its
+      // sites, shows the new owner's name (not a bare ID), and future approvals land in it. If the new phone already
+      // has an own list (made, empty, when it registered), replace that one.
+      if (fromId !== toId && l === oldOwn) {
+        if (S.lists.includes(newOwn)) { const ex = await getRaw(`docs/lists/${newOwn}.json`); if (ex) await deleteFile(`docs/lists/${newOwn}.json`, ex.sha, `Replace ${newOwn}'s empty own list`); }
+        if (await moveFile(`docs/lists/archive/${l}.json`, `docs/lists/${newOwn}.json`, `Give ${who}'s own list to its new phone`)) { if (!S.lists.includes(newOwn)) S.lists.push(newOwn); renamed[l] = newOwn; }
+        continue;
+      }
       let name = l, n = 2;
       while (S.lists.includes(name)) name = `${l}-${n++}`;
       if (await moveFile(`docs/lists/archive/${l}.json`, `docs/lists/${name}.json`, `Restore list ${name} from the archive`)) { S.lists.push(name); renamed[l] = name; }
