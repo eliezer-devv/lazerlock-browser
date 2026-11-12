@@ -855,14 +855,15 @@ async function buildCloseSaveInner() {
 //  - In a web browser: the service-worker outbox (a background-sync that sends after the tab is gone).
 // A successful in-page save clears/cancels either one (cancelNativeSave / clearOutbox), so nothing double-posts.
 let stashTimer = null;
-function scheduleStash() { if (!INAPP) return; if (stashTimer) clearTimeout(stashTimer); stashTimer = setTimeout(() => { stashTimer = null; stashNow(); }, 1200); }
+function scheduleStash() { if (!INAPP) return; if (stashTimer) clearTimeout(stashTimer); stashTimer = setTimeout(() => { stashTimer = null; stashNow(); }, 400); }
 async function stashNow() {
   if (!INAPP || !(window.WLBAdmin && WLBAdmin.stashPendingSave)) return;
   try {
     if (!(S.listDirty || S.devDirty)) { cancelNativeSave(); return; }   // nothing unsaved: drop any stash
     const req = await buildCloseSave();
-    if (req) WLBAdmin.stashPendingSave(JSON.stringify(req));
-  } catch (e) { console.log('stashNow', e && e.message); }
+    if (req) { WLBAdmin.stashPendingSave(JSON.stringify(req)); appLog('On-close save stashed in the app, ready for background delivery.'); }
+    else appLog('On-close save NOT stashed (buildCloseSave returned nothing: no token / not signed in / not dirty).');
+  } catch (e) { console.log('stashNow', e && e.message); appLog('On-close save couldn\'t be stashed: ' + (e && e.message)); }
 }
 async function armOutbox() {
   try {
