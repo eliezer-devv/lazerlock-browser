@@ -5660,7 +5660,15 @@ async function autoRefresh() {
     if (sha && sha !== DATA.sha) await refreshData(sha);
   } catch {}
 }
-setInterval(autoRefresh, 45000);
+// While you're looking at waiting requests, poll quickly so one answered elsewhere (a PIN typed on the phone, or
+// another admin) clears within a few seconds instead of up to 45. Otherwise keep the slow, quiet cadence.
+function nextRefreshDelay() {
+  const watching = !S.sub && S.tab === 'requests' && ((S.requests && S.requests.length) || (S.newPhones && S.newPhones.length));
+  return watching ? 7000 : 45000;
+}
+(function scheduleRefresh() {
+  setTimeout(async () => { try { await autoRefresh(); } finally { scheduleRefresh(); } }, nextRefreshDelay());
+})();
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') autoRefresh(); });
 (async () => {
   if (INAPP) document.title = 'Admin';
