@@ -1634,6 +1634,7 @@ async function loadAll(sha, opts) {
   await loadDevices();
   await openList(S.lists.includes(S.current) ? S.current : 'public');
   S.connected = true;
+  getRequestKey().catch(() => {});   // prefetch + cache the (public) request key while online, so a later offline save can still be sealed
   ensureSW().then(reg => { const w = reg && (reg.active || navigator.serviceWorker.controller); if (w) w.postMessage({ type: 'wl-drain' }); });   // ready the background-save worker; send anything a previous session left unsent
   // Signed in on this phone: it may act as an admin phone again (clears the signed-out flag the app keeps).
   if (INAPP && window.WLBAdmin && WLBAdmin.adminSignedIn) try { WLBAdmin.adminSignedIn(); } catch {}
