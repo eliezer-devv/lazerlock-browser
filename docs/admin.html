@@ -2627,22 +2627,24 @@ function accountScreen() {
 
 // What LazerLock turns on today, in plain words (a fixed list so it reads well regardless of the raw flag names below).
 // What LazerLock turns on today, in plain words.
-const CAP_ON = [
-  ['Passkeys (WebAuthn)', 'Sign in with a passkey, the same as Chrome (when the phone allows it)'],
-  ['Dark mode for sites', 'Darkens sites with no dark theme, when the app is in dark mode'],
-  ['Mixed-content compatibility', 'Shows a secure page’s images even if served over HTTP (insecure scripts stay blocked)'],
-  ['Safe Browsing', 'Google’s phishing and malware warnings (on by default)'],
-  ['Malware / adult / gambling filters', 'LazerLock’s own content filters'],
-  ['Early ad-block script injection', 'Runs ad-blocking before a page’s own scripts'],
-];
-// The few real, user-facing engine features worth surfacing (friendly names), keyed by their WebViewFeature flag.
-const CAP_FEATURES = {
-  WEB_AUTHENTICATION: 'Passkeys (WebAuthn)',
-  ALGORITHMIC_DARKENING: 'Dark mode for sites',
-  SAFE_BROWSING_ENABLE: 'Safe Browsing (phishing / malware warnings)',
-  DOCUMENT_START_SCRIPT: 'Early ad-block script injection',
-};
+// What LazerLock already turns on (left out of the "could add" list below), by WebViewFeature flag.
 const CAP_USED = ['WEB_AUTHENTICATION', 'ALGORITHMIC_DARKENING', 'SAFE_BROWSING_ENABLE', 'DOCUMENT_START_SCRIPT'];
+const CAP_USED_LABELS = 'passkeys, dark mode for sites, Safe Browsing, mixed-content images, early ad-block injection';
+// Capabilities worth considering — keyed by their androidx.webkit WebViewFeature flag, each with what turning it on
+// would PRACTICALLY do (not just the flag name). The page shows only the ones THIS phone's engine actually supports and
+// LazerLock doesn't already use, so it reads as "things you could add". An engine that lacks one simply never lists it.
+const CAP_CATALOG = {
+  MUTE_AUDIO: ['Mute a page’s sound', 'Silence a site’s audio from the app itself, without the page knowing — for the media controls and muting autoplay.'],
+  PAYMENT_REQUEST: ['In-page payment (Web Payment)', 'Let a site show the Google Pay / card sheet in place, instead of sending the user off to a separate checkout page.'],
+  BACK_FORWARD_CACHE: ['Instant Back / Forward', 'Keep the last few pages in memory so Back and Forward are instant instead of reloading the page.'],
+  SPECULATIVE_LOADING: ['Preload the next page', 'Start loading the page a link is likely to open before it’s tapped, so it appears instantly.'],
+  SUPPRESS_ERROR_PAGE: ['Custom “can’t reach site” page', 'Replace Chrome’s default error page with LazerLock’s own styled message when a site won’t load.'],
+  REQUESTED_WITH_HEADER_ALLOW_LIST: ['Stop the app-identifier header', 'Stop sending the X-Requested-With header that tells every site which app is doing the browsing (privacy).'],
+  ATTRIBUTION_REGISTRATION_BEHAVIOR: ['Turn off ad attribution', 'Switch off the browser’s ad-conversion measurement, so sites can’t register ad attributions (privacy).'],
+  USER_AGENT_METADATA: ['Control what sites learn about the device', 'Set exactly what the browser reveals about the device (User-Agent Client Hints) — for privacy, or to force a site’s mobile or desktop version.'],
+  MULTI_PROFILE: ['Separate profiles', 'Keep cookies, logins and history separate per profile — e.g. different people sharing a phone, or school vs. personal.'],
+  PROXY_OVERRIDE: ['Route through a proxy', 'Send all web traffic through a proxy or an external content filter.'],
+};
 // The app checks package registries for newer library versions off the main thread and calls back here.
 window.wlLibUpdates = (data) => { try { S.libUpdates = data; if (S.sub && S.sub.name === 'capabilities') render(); } catch {} };
 
@@ -2653,7 +2655,7 @@ function capabilitiesScreen() {
     try { WLBAdmin.checkLibraryUpdates(); } catch { S.libUpdates = null; }
   }
   const head = [backLink('Your account', () => open({ name: 'account' })),
-    screenTitle('Browser capabilities', 'What this phone’s browser engine supports, and what LazerLock uses')];
+    screenTitle('Browser capabilities', 'Features this phone’s engine could add, and library updates')];
   let feats = null, wv = '';
   try { if (INAPP && window.WLBAdmin && WLBAdmin.browserFeatures) feats = JSON.parse(WLBAdmin.browserFeatures() || '[]'); } catch {}
   try { if (INAPP && window.WLBAdmin && WLBAdmin.webViewVersion) wv = String(WLBAdmin.webViewVersion() || ''); } catch {}
@@ -2661,17 +2663,14 @@ function capabilitiesScreen() {
     h('p', { class: 'hint' }, 'Open this inside the LazerLock admin app to see the browser’s capabilities — a web browser can’t report them.'));
   const byName = {}; feats.forEach(f => { byName[f.name] = !!f.supported; });
 
-  const onList = h('div', { class: 'group' }, CAP_ON.map(([t, s]) => h('div', { class: 'row' },
-    h('span', { class: 'ic' }, icon('check', 20)),
-    h('span', { class: 'grow' }, h('span', { class: 't' }, t), h('span', { class: 's' }, s)))));
-
-  // The handful of genuinely user-facing engine features — not the ~90 internal flags.
-  const featRows = Object.entries(CAP_FEATURES).map(([k, label]) => {
-    const sup = !!byName[k], used = CAP_USED.includes(k);
-    return h('div', { class: 'row' }, h('span', { class: 'ic' }, icon(sup && used ? 'check' : 'shield', 20)),
-      h('span', { class: 'grow' }, h('span', { class: 't' }, label),
-        h('span', { class: 's' }, !sup ? 'Not available on this WebView' : used ? 'On' : 'Available — not turned on yet')));
-  });
+  // The point of this page: capabilities the engine supports that LazerLock doesn't use yet — what you could add, and
+  // what each would practically do. Engine-unsupported ones aren't shown (there'd be nothing to add).
+  const canAdd = Object.entries(CAP_CATALOG).filter(([k]) => byName[k] && !CAP_USED.includes(k));
+  const addBody = canAdd.length
+    ? h('div', { class: 'group' }, canAdd.map(([, [label, what]]) => h('div', { class: 'row' },
+        h('span', { class: 'ic' }, icon('plus', 20)),
+        h('span', { class: 'grow' }, h('span', { class: 't' }, label), h('span', { class: 's' }, what)))))
+    : h('p', { class: 'hint' }, 'Nothing new to suggest right now — this engine supports what LazerLock already uses.');
 
   // Library updates: an in-app check against the package registries (just a "worth a look" signal).
   const hasLibCheck = INAPP && window.WLBAdmin && WLBAdmin.checkLibraryUpdates;
@@ -2685,11 +2684,13 @@ function capabilitiesScreen() {
 
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, ...head,
     wv ? h('p', { class: 'hint', style: 'margin-bottom:4px' }, 'Engine: ' + wv) : null,
-    h('h2', { class: 'sec' }, 'Turned on now'), onList,
-    h('h2', { class: 'sec' }, 'Browser-engine features'), h('div', { class: 'group' }, featRows),
+    h('h2', { class: 'sec' }, 'Features you could add'),
+    h('p', { class: 'hint', style: 'margin-top:0' }, 'Things this phone’s engine can do that LazerLock doesn’t use yet. Tell me any you’d like and I’ll look into building it in.'),
+    addBody,
     libBody ? h('h2', { class: 'sec' }, 'Library updates') : null,
     libBody ? h('p', { class: 'hint', style: 'margin-top:0' }, 'If one shows an update, tell me and I’ll check what it adds and whether it’s worth building in.') : null,
-    libBody);
+    libBody,
+    h('p', { class: 'hint', style: 'margin-top:14px;opacity:.75' }, 'Already in use: ' + CAP_USED_LABELS + '.'));
 }
 
 // Your approval PIN: the main admin's is the one for all phones (Settings); a helper's own works on their phones only.
