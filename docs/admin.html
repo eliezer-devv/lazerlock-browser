@@ -857,9 +857,10 @@ async function buildCloseSaveInner() {
 let stashTimer = null;
 function scheduleStash() { if (!INAPP) return; if (stashTimer) clearTimeout(stashTimer); stashTimer = setTimeout(() => { stashTimer = null; stashNow(); }, 400); }
 async function stashNow() {
-  if (!INAPP || !(window.WLBAdmin && WLBAdmin.stashPendingSave)) return;
+  if (!INAPP) { appLog('Stash skipped: not running in the app (INAPP false).'); return; }
+  if (!(window.WLBAdmin && WLBAdmin.stashPendingSave)) { appLog('Stash skipped: native stash bridge missing.'); return; }
   try {
-    if (!(S.listDirty || S.devDirty)) { cancelNativeSave(); return; }   // nothing unsaved: drop any stash
+    if (!(S.listDirty || S.devDirty)) { cancelNativeSave(); appLog('Stash skipped: nothing unsaved.'); return; }   // nothing unsaved: drop any stash
     const req = await buildCloseSave();
     if (req) { WLBAdmin.stashPendingSave(JSON.stringify(req)); appLog('On-close save stashed in the app, ready for background delivery.'); }
     else appLog('On-close save NOT stashed (buildCloseSave returned nothing: no token / not signed in / not dirty).');
@@ -1636,6 +1637,7 @@ async function loadAll(sha, opts) {
   await openList(S.lists.includes(S.current) ? S.current : 'public');
   S.connected = true;
   getRequestKey().catch(() => {});   // prefetch + cache the (public) request key while online, so a later offline save can still be sealed
+  if (INAPP) idb.del('outbox').catch(() => {});   // in the app, native WorkManager delivers the on-close save, not the service-worker outbox; drop any stale relic that would otherwise retry forever
   ensureSW().then(reg => { const w = reg && (reg.active || navigator.serviceWorker.controller); if (w) w.postMessage({ type: 'wl-drain' }); });   // ready the background-save worker; send anything a previous session left unsent
   // Signed in on this phone: it may act as an admin phone again (clears the signed-out flag the app keeps).
   if (INAPP && window.WLBAdmin && WLBAdmin.adminSignedIn) try { WLBAdmin.adminSignedIn(); } catch {}
