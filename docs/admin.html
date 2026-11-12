@@ -755,9 +755,18 @@ const deviceName = () => {
 let requestKey = null;
 async function getRequestKey() {
   if (requestKey) return requestKey;
-  const res = await fetch(`https://raw.githubusercontent.com/${C.owner}/${publicRepoName()}/${branch()}/request-key.pem`, { cache: 'no-store' });
-  if (!res.ok) throw new Error('Couldn\'t get the request key. Check this device is online (and that Publish lists has run once in the private repository).');
-  const pem = (await res.text()).replace(/-----[^-]+-----|\s/g, '');
+  // The request key is a PUBLIC key, so we can keep the last fetched copy in IndexedDB and fall back to it when the
+  // network is down — this is what lets a background/on-close save be prepared offline (delivered later by WorkManager).
+  let pem;
+  try {
+    const res = await fetch(`https://raw.githubusercontent.com/${C.owner}/${publicRepoName()}/${branch()}/request-key.pem`, { cache: 'no-store' });
+    if (!res.ok) throw new Error('status ' + res.status);
+    pem = (await res.text()).replace(/-----[^-]+-----|\s/g, '');
+    idb.set('reqKeyPem', pem).catch(() => {});
+  } catch (e) {
+    pem = await idb.get('reqKeyPem').catch(() => null);
+    if (!pem) throw new Error('Couldn\'t get the request key. Check this device is online (and that Publish lists has run once in the private repository).');
+  }
   requestKey = await crypto.subtle.importKey('spki', b64u8(pem), { name: 'RSA-OAEP', hash: 'SHA-1' }, false, ['encrypt']);
   return requestKey;
 }
@@ -818,7 +827,11 @@ function buildCloseSave() {
   return run;
 }
 async function buildCloseSaveInner() {
-  if (!S.connected || S.saveBlocked || !(S.listDirty || S.devDirty) || !ghToken()) return null;
+  // NOTE: no S.connected check here on purpose. The whole point of the on-close / background save is to build the
+  // sealed request even when the network is down (going offline flips S.connected to false), so WorkManager can deliver
+  // it once a connection returns. Signed-in is still required via ghToken() + the session/mac checks below; a pending
+  // change implies the data was loaded, so S.D / S.L are present.
+  if (S.saveBlocked || !(S.listDirty || S.devDirty) || !ghToken()) return null;
   const ops = [];
   if (S.devDirty) ops.push({ op: 'put', path: 'devices.json', content: trimForSave(JSON.stringify(S.D, null, 2) + '\n'), base: S.devicesSha || null });
   if (S.listDirty) { const out = fromModel(S.L); if (!out.error) ops.push({ op: 'put', path: listPathOf(S.current), content: JSON.stringify(out.data, null, 2) + '\n', base: S.listSha || null }); }
