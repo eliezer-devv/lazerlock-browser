@@ -5472,17 +5472,12 @@ function browsersScreen() {
       protectionLapsed(id) ? h('p', { class: 'warn', style: 'margin:0' }, `Protection has lapsed on the phone${Array.isArray(seenProtect(id).missing) && seenProtect(id).missing.length ? ': ' + seenProtect(id).missing.join(', ') : ''}. Whoever has the phone was alerted to put it back.`) : null,
       seenProtect(id) && seenProtect(id).coverLists ? h('p', { class: 'hint', style: 'margin:0;color:var(--accent-text)' }, '✓ Also covering the whole Accessibility & Device admin lists.') : null,
       h('p', { class: 'hint', style: 'margin:0' }, 'Turned on from the phone (one switch under ⋮ → Settings → Protection & controls → Phone protection). Raising protection is free; turning it off sends you a request to approve.')),
-    // How to keep it in place: which mode the admin wants.
-    M ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'How this phone is protected'),
-      h('div', { class: 'group' }, [
-        ['cover', 'Device admin', 'A blocked app is covered the moment it opens; uninstall needs a step that\'s covered. Set up on the phone, no computer.'],
-        ['off', 'Off', 'Other browsers are found and listed, but nothing is blocked.'],
-      ].map(([v, t, s]) =>
-        h('label', { class: 'radio' },
-          h('input', { type: 'radio', name: 'pmode', value: v, checked: em === v, onchange: () => setMode(v) }),
-          h('span', { class: 'grow' }, h('b', null, t), h('span', { class: 'small muted', style: 'display:block' }, s))))),
-      em === 'cover' ? sw('Screen guard', 'Turn the screen guard off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { const pr = lockMode(d, 'cover'); pr.overlay = v; }) : null,
-      em === 'cover' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = lockMode(d, 'cover'); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null) : null,
+    // Protection is a single on/off switch — device admin is the one method.
+    M ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Protection'),
+      h('div', { class: 'group' },
+        sw('Protect this phone', 'Device admin: other browsers and blocked apps are covered the moment they open, and the app can\'t be removed without a step that\'s covered. Set up on the phone, no computer needed.', em !== 'off', on => setMode(on ? 'cover' : 'off')),
+        em !== 'off' ? sw('Screen guard', 'Turn the screen guard off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { const pr = lockMode(d, 'cover'); pr.overlay = v; }) : null,
+        em !== 'off' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = lockMode(d, 'cover'); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null)) : null,
     // The apps.
     h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Apps that can open websites'),
       browsers.length ? h('div', { class: 'group' }, browsers.map(appRow))
