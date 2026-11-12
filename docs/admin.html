@@ -5516,13 +5516,20 @@ function browsersScreen() {
         h('p', { class: 'hint', style: 'margin:0' }, 'Waiting for the phone to report which permissions it has — open the app on the phone once it\'s online, and grant the steps it shows.') : null,
       protectionLapsed(id) ? h('p', { class: 'warn', style: 'margin:0' }, `Protection has lapsed on the phone${Array.isArray(seenProtect(id).missing) && seenProtect(id).missing.length ? ': ' + seenProtect(id).missing.join(', ') : ''}. Whoever has the phone was alerted to put it back.`) : null,
       seenProtect(id) && seenProtect(id).coverLists ? h('p', { class: 'hint', style: 'margin:0;color:var(--accent-text)' }, '✓ Also covering the whole Accessibility & Device admin lists.') : null,
+      // Accessibility-recovery watchdog: what the phone reports (active / needs its one-time adb grant / waiting).
+      (() => { const s = seenProtect(id); if (!s || !(s.recovery || p.recovery)) return null;
+        if (s.recoveryActive) return h('p', { class: 'hint', style: 'margin:0;color:var(--accent-text)' }, '✓ Guard-recovery watchdog is active — the screen guard switches itself back on if it\'s turned off.');
+        if (s.recovery && !s.recoveryGranted) return h('p', { class: 'warn', style: 'margin:0' }, 'Guard-recovery is on but needs its one-time adb grant on the phone (the phone\'s Protection screen shows the command). Until then it does nothing.');
+        if (s.recovery) return h('p', { class: 'hint', style: 'margin:0' }, 'Guard-recovery is on (waiting for protection to be fully in place).');
+        return null; })(),
       h('p', { class: 'hint', style: 'margin:0' }, 'Turned on from the phone (one switch under ⋮ → Settings → Protection & controls → Phone protection). Raising protection is free; turning it off sends you a request to approve.')),
     // Protection is a single on/off switch — device admin is the one method.
     M ? h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Protection'),
       h('div', { class: 'group' },
         sw('Protect this phone', 'Device admin: other browsers and blocked apps are covered the moment they open, and the app can\'t be removed without a step that\'s covered. Set up on the phone, no computer needed.', em !== 'off', on => setMode(on ? 'cover' : 'off')),
         em !== 'off' ? sw('Screen guard', 'Turn the screen guard off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { const pr = lockMode(d, 'cover'); pr.overlay = v; }) : null,
-        em !== 'off' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = lockMode(d, 'cover'); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null)) : null,
+        em !== 'off' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = lockMode(d, 'cover'); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null,
+        em !== 'off' && p.overlay !== false ? sw('Switch the screen guard back on if it\'s turned off', 'A watchdog that re-enables the screen guard the instant someone switches it off in Settings. Needs a one-time adb grant on the phone (shown on the phone\'s Protection screen); until that\'s done it does nothing.', p.recovery === true, v => { const pr = lockMode(d, 'cover'); if (v) pr.recovery = true; else delete pr.recovery; }) : null)) : null,
     // The apps.
     h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Apps that can open websites'),
       browsers.length ? h('div', { class: 'group' }, browsers.map(appRow))
