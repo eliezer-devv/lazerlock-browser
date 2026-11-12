@@ -835,18 +835,27 @@ async function buildCloseSaveInner() {
   const body = `🔒 Admin\n<!-- whitelist-admin-cmd\n${JSON.stringify(await seal(sealedInner))}\n-->`;
   return { url: `${API}/repos/${C.owner}/${C.repo}/issues`, method: 'POST', headers: ghHeaders(), body: JSON.stringify({ title: '🔒 Admin', body }) };
 }
-// Stash the latest pending save and ask the worker to send it (and register a background-sync so it still runs after close).
+// Background save-on-close. Two different mechanisms:
+//  - In the Android admin app (INAPP): we keep the latest sealed save STASHED in native as the user edits (stashNow,
+//    debounced via scheduleStash). Native hands that stash to WorkManager from its own onStop — so it works even on a
+//    hard swipe-close, where the WebView is torn down before any JS at close time could finish building/sending.
+//  - In a web browser: the service-worker outbox (a background-sync that sends after the tab is gone).
+// A successful in-page save clears/cancels either one (cancelNativeSave / clearOutbox), so nothing double-posts.
+let stashTimer = null;
+function scheduleStash() { if (!INAPP) return; if (stashTimer) clearTimeout(stashTimer); stashTimer = setTimeout(() => { stashTimer = null; stashNow(); }, 1200); }
+async function stashNow() {
+  if (!INAPP || !(window.WLBAdmin && WLBAdmin.stashPendingSave)) return;
+  try {
+    if (!(S.listDirty || S.devDirty)) { cancelNativeSave(); return; }   // nothing unsaved: drop any stash
+    const req = await buildCloseSave();
+    if (req) WLBAdmin.stashPendingSave(JSON.stringify(req));
+  } catch (e) { console.log('stashNow', e && e.message); }
+}
 async function armOutbox() {
   try {
+    if (INAPP) { await stashNow(); return; }   // in the app: native delivers the stashed save from onStop
     const req = await buildCloseSave();
     if (!req) return;
-    // Inside the Android admin app: hand the finished request to native WorkManager, which delivers it even if the app
-    // is killed right after, waits for a connection and retries — far more reliable than a WebView service worker. A
-    // successful in-page save cancels it (cancelNativeSave), so an ordinary minimise never double-posts. The 12s delay
-    // native gives it is the cancel window. No service-worker fallback is needed in the app.
-    if (INAPP && window.WLBAdmin && WLBAdmin.scheduleBackgroundSave) {
-      try { WLBAdmin.scheduleBackgroundSave(JSON.stringify(req)); return; } catch (e) { appLog('Native background save couldn\'t be queued: ' + (e && e.message)); }
-    }
     await idb.set('outbox', req);
     const reg = await ensureSW();
     if (!reg) return;
@@ -857,8 +866,8 @@ async function armOutbox() {
   } catch (e) { console.log('armOutbox', e && e.message); }
 }
 function clearOutbox() { idb.del('outbox').catch(() => {}); }
-// The in-page save landed: drop any native background job armOutbox queued, so it can't post the same change again.
-function cancelNativeSave() { try { if (INAPP && window.WLBAdmin && WLBAdmin.cancelBackgroundSave) WLBAdmin.cancelBackgroundSave(); } catch {} }
+// The in-page save landed: drop the native stash (and any queued job) so it can't post the same change again.
+function cancelNativeSave() { try { if (INAPP && window.WLBAdmin && WLBAdmin.clearPendingSave) WLBAdmin.clearPendingSave(); } catch {} }
 // Waits for the automation's answers on that issue (sealed for this device). onEach(result) returns true to stop.
 async function awaitAnswers(number, onEach, { minutes = 4, seen = new Set() } = {}) {
   const until = Date.now() + minutes * 60000;
@@ -1599,9 +1608,9 @@ function phonesUsing(name) {
 const canEditList = n => fullAdmin() || (canDo('edit') && !isPublicList(n) && !(S.D.default || []).includes(n));
 function markList() {
   if (!canEditList(S.current)) { say(`You can look at ${listLabel(S.current)}, but not change it.`, true); openList(S.current).then(render); return; }
-  S.listDirty = true; S.saveError = null; S.saveBlocked = false; if (dirtySince == null) dirtySince = Date.now(); scheduleAutoSave(true); renderSaveBar();
+  S.listDirty = true; S.saveError = null; S.saveBlocked = false; if (dirtySince == null) dirtySince = Date.now(); scheduleAutoSave(true); scheduleStash(); renderSaveBar();
 }
-function markDevices() { S.devDirty = true; S.saveError = null; S.saveBlocked = false; if (dirtySince == null) dirtySince = Date.now(); scheduleAutoSave(true); renderSaveBar(); }
+function markDevices() { S.devDirty = true; S.saveError = null; S.saveBlocked = false; if (dirtySince == null) dirtySince = Date.now(); scheduleAutoSave(true); scheduleStash(); renderSaveBar(); }
 
 // ---------- loading ----------
 // Everything this admin sees, at the newest version (or [sha]). False: this device is signed out.
