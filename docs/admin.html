@@ -831,10 +831,15 @@ async function buildCloseSaveInner() {
   // sealed request even when the network is down (going offline flips S.connected to false), so WorkManager can deliver
   // it once a connection returns. Signed-in is still required via ghToken() + the session/mac checks below; a pending
   // change implies the data was loaded, so S.D / S.L are present.
-  if (S.saveBlocked || !(S.listDirty || S.devDirty) || !ghToken()) return null;
-  const ops = [];
-  if (S.devDirty) ops.push({ op: 'put', path: 'devices.json', content: trimForSave(JSON.stringify(S.D, null, 2) + '\n'), base: S.devicesSha || null });
-  if (S.listDirty) { const out = fromModel(S.L); if (!out.error) ops.push({ op: 'put', path: listPathOf(S.current), content: JSON.stringify(out.data, null, 2) + '\n', base: S.listSha || null }); }
+  if (S.saveBlocked || !ghToken()) return null;
+  // What's still unsaved is NOT just S.listDirty/devDirty: a normal save moves the change into QUEUE.ops and clears
+  // those flags immediately (optimistic), so while the queued POST is in flight or has failed, the real unsaved work
+  // lives in QUEUE.ops. Build the on-close save from the queued ops AND any current dirty state (dirty wins per path).
+  const byPath = new Map();
+  for (const o of coalesceOps(QUEUE.ops)) if (o.op === 'put') byPath.set(o.path, { op: 'put', path: o.path, content: o.content, base: o.base || null });
+  if (S.devDirty) byPath.set('devices.json', { op: 'put', path: 'devices.json', content: trimForSave(JSON.stringify(S.D, null, 2) + '\n'), base: S.devicesSha || null });
+  if (S.listDirty) { const out = fromModel(S.L); if (!out.error) byPath.set(listPathOf(S.current), { op: 'put', path: listPathOf(S.current), content: JSON.stringify(out.data, null, 2) + '\n', base: S.listSha || null }); }
+  const ops = [...byPath.values()];
   if (!ops.length) return null;
   const dev = await deviceKeys();
   const mac = await idb.get('mac');
@@ -860,7 +865,7 @@ async function stashNow() {
   if (!INAPP) { appLog('Stash skipped: not running in the app (INAPP false).'); return; }
   if (!(window.WLBAdmin && WLBAdmin.stashPendingSave)) { appLog('Stash skipped: native stash bridge missing.'); return; }
   try {
-    if (!(S.listDirty || S.devDirty)) { cancelNativeSave(); appLog('Stash skipped: nothing unsaved.'); return; }   // nothing unsaved: drop any stash
+    if (!(S.listDirty || S.devDirty || QUEUE.ops.length || QUEUE.failed || S.saveError)) { cancelNativeSave(); appLog('Stash skipped: nothing unsaved.'); return; }   // truly nothing unsaved (incl. the send-queue): drop any stash
     const req = await buildCloseSave();
     if (req) { WLBAdmin.stashPendingSave(JSON.stringify(req)); appLog('On-close save stashed in the app, ready for background delivery.'); }
     else appLog('On-close save NOT stashed (buildCloseSave returned nothing: no token / not signed in / not dirty).');
@@ -882,7 +887,12 @@ async function armOutbox() {
 }
 function clearOutbox() { idb.del('outbox').catch(() => {}); }
 // The in-page save landed: drop the native stash (and any queued job) so it can't post the same change again.
-function cancelNativeSave() { try { if (INAPP && window.WLBAdmin && WLBAdmin.clearPendingSave) WLBAdmin.clearPendingSave(); } catch {} }
+function cancelNativeSave() {
+  // Only drop the native on-close stash when NOTHING is unsaved anywhere — not just when the UI dirty flags clear
+  // (a normal save clears those the moment it queues the op, long before the send actually confirms).
+  if (S.listDirty || S.devDirty || QUEUE.ops.length || QUEUE.busy || QUEUE.failed || S.saveError) return;
+  try { if (INAPP && window.WLBAdmin && WLBAdmin.clearPendingSave) WLBAdmin.clearPendingSave(); } catch {}
+}
 // Waits for the automation's answers on that issue (sealed for this device). onEach(result) returns true to stop.
 async function awaitAnswers(number, onEach, { minutes = 4, seen = new Set() } = {}) {
   const until = Date.now() + minutes * 60000;
@@ -1127,6 +1137,7 @@ const QUEUE = { ops: [], message: '', timer: null, busy: false, sending: false, 
 function queueOp(op, message) {
   QUEUE.ops.push(op);
   if (!QUEUE.message && message) QUEUE.message = message;
+  scheduleStash();   // keep the native on-close stash in step with the send-queue (not just with the UI dirty flags)
   clearTimeout(QUEUE.timer);
   QUEUE.timer = setTimeout(flushQueue, 60);
   renderSync();
@@ -1247,6 +1258,7 @@ async function flushQueue() {
       }
     }
     afterSave(r);
+    cancelNativeSave();   // truly saved (the send-queue drained): now it's safe to drop the native on-close stash
   } catch (e) {
     QUEUE.sending = false;
     if (e.message === 'SIGNED_OUT') { QUEUE.busy = false; appLog('Save stopped: signed out on this device.'); renderSync(); return; }
