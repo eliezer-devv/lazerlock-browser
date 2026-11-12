@@ -835,11 +835,17 @@ async function buildCloseSaveInner() {
   // What's still unsaved is NOT just S.listDirty/devDirty: a normal save moves the change into QUEUE.ops and clears
   // those flags immediately (optimistic), so while the queued POST is in flight or has failed, the real unsaved work
   // lives in QUEUE.ops. Build the on-close save from the queued ops AND any current dirty state (dirty wins per path).
-  const byPath = new Map();
-  for (const o of coalesceOps(QUEUE.ops)) if (o.op === 'put') byPath.set(o.path, { op: 'put', path: o.path, content: o.content, base: o.base || null });
+  const byPath = new Map();     // put ops, coalesced per path and overlaid with the current dirty state
+  const structural = [];        // delete / move ops (e.g. a list rename or archive) pass through in queue order
+  // Queued devices.json content is untrimmed; trim it exactly as the normal send does (postOps), or the command can
+  // blow past GitHub's 65,536-char issue-body limit and 422. List files need no trimming. baseText is local-only (merge).
+  for (const o of coalesceOps(QUEUE.ops)) {
+    if (o.op === 'put') byPath.set(o.path, { op: 'put', path: o.path, content: o.path === 'devices.json' ? trimForSave(o.content) : o.content, base: o.base || null });
+    else { const { baseText, ...rest } = o; structural.push(rest); }
+  }
   if (S.devDirty) byPath.set('devices.json', { op: 'put', path: 'devices.json', content: trimForSave(JSON.stringify(S.D, null, 2) + '\n'), base: S.devicesSha || null });
   if (S.listDirty) { const out = fromModel(S.L); if (!out.error) byPath.set(listPathOf(S.current), { op: 'put', path: listPathOf(S.current), content: JSON.stringify(out.data, null, 2) + '\n', base: S.listSha || null }); }
-  const ops = [...byPath.values()];
+  const ops = [...structural, ...byPath.values()];   // structural ops first (a rename's move before the devices.json that references the new name)
   if (!ops.length) return null;
   const dev = await deviceKeys();
   const mac = await idb.get('mac');
