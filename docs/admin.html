@@ -3022,7 +3022,7 @@ async function loadInbox() {
       i._site = (i.record && i.record.site) || null;           // what the site says it is (found when it arrived)
     }
     const answered = new Set(S.answeredNumbers || []);
-    S.requests = items.filter(i => i.kind === 'request' && marker(i.body) && !answered.has(i.number));
+    S.requests = items.filter(i => i.kind === 'request' && marker(i.body) && marker(i.body).type !== 'recoveryon' && !answered.has(i.number));
     S.newPhones = items.filter(i => i.kind === 'phone' && (marker(i.body) || {}).type === 'register' && !answered.has(i.number));
     try { S.answeredList = JSON.parse(await textOf('answered.json') || '[]'); } catch { S.answeredList = []; }
     try { S.seen = JSON.parse(await textOf('seen.json') || 'null'); } catch (e) { console.log('seen', e); S.seen = null; }
@@ -5561,7 +5561,7 @@ function browsersScreen() {
         sw('Protect this phone', 'Device admin: other browsers and blocked apps are covered the moment they open, and the app can\'t be removed without a step that\'s covered. Set up on the phone, no computer needed.', em !== 'off', on => setMode(on ? 'cover' : 'off')),
         em !== 'off' ? sw('Screen guard', 'Turn the screen guard off from here if you need to (the phone picks it up within a minute).', p.overlay !== false, v => { const pr = lockMode(d, 'cover'); pr.overlay = v; }) : null,
         em !== 'off' && p.overlay !== false ? sw('Cover the whole Accessibility & Device admin screens', 'Stronger: covers those entire settings screens, not just this app\'s own pages. Off by default (it also covers other apps on them). The phone can turn this on itself, but only you can turn it off.', p.coverLists === true, v => { const pr = lockMode(d, 'cover'); if (v) { pr.coverLists = true; delete pr.coverListsOff; } else { delete pr.coverLists; pr.coverListsOff = true; } }) : null,
-        em !== 'off' && p.overlay !== false ? sw('Switch the screen guard back on if it\'s turned off', 'A watchdog that re-enables the screen guard the instant someone switches it off in Settings. Needs a one-time adb grant on the phone (shown on the phone\'s Protection screen); until that\'s done it does nothing.', (p.recovery === true) || !!(seenProtect(id) && seenProtect(id).recovery), v => { const pr = lockMode(d, 'cover'); if (v) { pr.recovery = true; delete pr.recoveryOffAt; } else { delete pr.recovery; pr.recoveryOffAt = Date.now(); } }) : null)) : null,
+        em !== 'off' && p.overlay !== false ? sw('Switch the screen guard back on if it\'s turned off', 'A watchdog that re-enables the screen guard the instant someone switches it off in Settings. One shared switch with the phone. Needs a one-time adb grant on the phone (shown on the phone\'s Protection screen); until that\'s done it does nothing.', p.recovery === true, v => { const pr = lockMode(d, 'cover'); if (v) { pr.recovery = true; delete pr.recoveryOffAt; } else { delete pr.recovery; pr.recoveryOffAt = Date.now(); } }) : null)) : null,
     // The apps.
     h('div', { class: 'field' }, h('span', { class: 'flabel' }, 'Apps that can open websites'),
       browsers.length ? h('div', { class: 'group' }, browsers.map(appRow))
