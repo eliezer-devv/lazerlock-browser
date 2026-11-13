@@ -1,0 +1,33 @@
+name: Dashboard build
+
+# The dashboard is built from the modules in dashboard/ into docs/admin.html (which Pages serves and the APK bundles).
+# The generated file is committed; this check rebuilds it and fails if the committed copy is stale — so dashboard/ is
+# the single source of truth and nobody hand-edits the generated docs/admin.html.
+
+on:
+  push:
+    branches: [main, refactor]
+    paths: ['dashboard/**', 'docs/admin.html', '.github/workflows/dashboard-build.yml']
+  pull_request:
+    paths: ['dashboard/**', 'docs/admin.html']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Rebuild the dashboard and check it is in sync
+        run: |
+          node dashboard/build.mjs
+          if ! git diff --quiet docs/admin.html; then
+            echo "::error::docs/admin.html is out of sync with the dashboard/ source. Run 'node dashboard/build.mjs' and commit the result."
+            git --no-pager diff --stat docs/admin.html
+            exit 1
+          fi
+          echo "OK: docs/admin.html matches the dashboard/ source."
