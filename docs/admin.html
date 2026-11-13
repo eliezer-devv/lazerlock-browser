@@ -2519,19 +2519,51 @@ function pinScreen() {
     if (never && never.checked) { try { localStorage.setItem(NOLOCK_KEY, '1'); } catch {} }
     done(never && never.checked ? 'OK, it won\'t ask again on this device (Your account → Lock with a PIN, any time).' : '');
   } }, 'Not now') : null;
+  const triesHint = h('p', { class: 'hint' }, `After 5 wrong PINs, this ${where} is signed out, and needs your email and password again.`);
+  // In the app, make it a focused, phone-style PIN screen: the keypad is the whole screen, and it's entered in two
+  // steps (type the PIN, then repeat it) instead of two fields crammed on one page. Fingerprint, when available, is
+  // offered first. In a browser the original two-field form stays (a hardware keyboard, no keypad).
+  if (INAPP) {
+    const step = (S.sub && S.sub.pinStep) === 'confirm' ? 'confirm' : 'enter';
+    if (step === 'confirm') {
+      const confirm = async () => {
+        const b = ($('pinAgain') || {}).value || '';
+        if (b !== (S.sub.pin1 || '')) { S.sub.pinStep = 'enter'; S.sub.pin1 = ''; render(); return say('The two PINs don\'t match. Type it again.', true); }
+        const a = S.sub.pin1; S.sub.pin1 = '';
+        await setPin(a);
+        done(had ? 'PIN changed. Use the new one next time.' : 'PIN saved. Next time, just type it to open the admin.');
+      };
+      return h('main', { class: 'stack', style: 'padding-bottom:24px' },
+        backLink('Back', () => { S.sub.pinStep = 'enter'; S.sub.pin1 = ''; render(); }),
+        screenTitle('Repeat the PIN', 'Type the same PIN again to confirm it.'),
+        pinKeypad([{ id: 'pinAgain', label: 'Repeat PIN' }], confirm),
+        triesHint);
+    }
+    const toConfirm = () => {
+      const a = ($('pinNew') || {}).value || '';
+      if (!/^\d{4,8}$/.test(a)) return say('The PIN needs 4 to 8 digits.', true);
+      S.sub = { ...(S.sub || {}), name: 'pin', pinStep: 'confirm', pin1: a }; render();
+    };
+    return h('main', { class: 'stack', style: 'padding-bottom:24px' }, first ? null : backLink('Your account', () => open({ name: 'account' })),
+      screenTitle(first ? `Lock the admin on this ${where}?` : had ? 'Change the PIN' : 'Lock with a PIN or fingerprint',
+        first ? 'This phone stays signed in, so the admin needs a lock here: anyone who taps the title 7 times would get in otherwise.'
+          : had ? 'The old PIN stops working straight away.' : 'You unlock it each time you open the admin here.'),
+      bioBtn,
+      bioBtn ? h('p', { class: 'hint', style: 'margin:0;text-align:center' }, 'or set a PIN') : null,
+      pinKeypad([{ id: 'pinNew', label: had ? 'New PIN' : 'PIN' }], toConfirm),
+      triesHint);
+  }
   setTimeout(() => !S.bioOk && $('pinNew') && $('pinNew').focus(), 50);
   return h('main', { class: 'stack', style: 'padding-bottom:24px' }, first ? null : backLink('Your account', () => open({ name: 'account' })),
     screenTitle(first ? `Lock the admin on this ${where}?` : had ? 'Change the PIN' : 'Lock with a PIN or fingerprint', first
-      ? (INAPP ? 'This phone stays signed in, so the admin needs a lock here: anyone who taps the title 7 times would get in otherwise.'
-        : 'This device stays signed in. If others use it, a lock keeps them out of the admin: you unlock it each time you open it.')
+      ? 'This device stays signed in. If others use it, a lock keeps them out of the admin: you unlock it each time you open it.'
       : had ? 'The old PIN stops working straight away.' : 'You unlock it each time you open the admin here.'),
     bioBtn,
     bioBtn ? h('p', { class: 'hint', style: 'margin:0;text-align:center' }, 'or a PIN') : null,
-    INAPP ? pinKeypad([{ id: 'pinNew', label: had ? 'New PIN' : 'PIN' }, { id: 'pinAgain', label: 'Repeat PIN' }], () => saveBtn.onclick())
-          : [field('pinNew', had ? 'New PIN' : 'PIN'), field('pinAgain', 'The same PIN again'), saveBtn],
+    [field('pinNew', had ? 'New PIN' : 'PIN'), field('pinAgain', 'The same PIN again'), saveBtn],
     skip, never ? h('label', { class: 'check', for: 'noLock' }, never, 'Don\'t ask again on this device') : null,
-    had && !INAPP ? h('button', { type: 'button', class: 'btn d', id: 'pinRemove', onclick: () => { localStorage.removeItem(PIN_KEY); done('PIN removed from this device.'); } }, 'Remove the PIN') : null,
-    h('p', { class: 'hint' }, `After 5 wrong PINs, this ${where} is signed out, and needs your email and password again.`));
+    had ? h('button', { type: 'button', class: 'btn d', id: 'pinRemove', onclick: () => { localStorage.removeItem(PIN_KEY); done('PIN removed from this device.'); } }, 'Remove the PIN') : null,
+    triesHint);
 }
 function unlockScreen() {
   const P = getPin(), B = getBio();
