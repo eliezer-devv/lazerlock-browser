@@ -3094,6 +3094,7 @@ function describe(req) {
   if (req.type === 'search') return { title: req.off === true ? 'Turn off search' : req.wasOn === true ? 'Change search' : 'Turn on search', page: null };
   if (req.type === 'unprotect') return { title: 'Turn off phone protection', page: null };
   if (req.type === 'uncoverlists') return { title: 'Turn off the stronger lists cover', page: null };
+  if (req.type === 'unrecovery') return { title: 'Turn off guard-recovery', page: null };
   // A site request needs a domain/action; without one (e.g. a record still loading), don't guess "Open ?".
   if (!req.domain && !req.action && req.media === undefined && !(Array.isArray(req.frames) && req.frames.length)) return { title: 'A request from a phone', page: null };
   const site = req.domain || '?';
@@ -3171,7 +3172,7 @@ const phoneName = issue => field(issue.body, 'Phone').replace(/`/g, '').replace(
 function bulkOK(issue) {
   const req = marker(issue.body);
   if (!req || typeof req !== 'object') return false;
-  if (['timer', 'browser', 'unprotect', 'uncoverlists', 'mediaDefault', 'search'].includes(req.type)) return false;
+  if (['timer', 'browser', 'unprotect', 'uncoverlists', 'unrecovery', 'mediaDefault', 'search'].includes(req.type)) return false;
   if (req.action === 'block' || req.media === 'on' || !req.domain) return false;
   if (Array.isArray(req.frames) && req.frames.length) return false;
   if (Array.isArray(req.filtered) && req.filtered.some(f => ['adult', 'gambling', 'malware'].includes(f))) return false;
@@ -3246,7 +3247,7 @@ function requestCard(issue) {
   if (req.type === 'mediaDefault' || req.type === 'search') return settingRequestCard(issue, req);
   if (req.type === 'timer') return timerRequestCard(issue, req);
   if (req.type === 'browser') return browserRequestCard(issue, req);
-  if (req.type === 'unprotect' || req.type === 'uncoverlists') return protectRequestCard(issue, req);
+  if (req.type === 'unprotect' || req.type === 'uncoverlists' || req.type === 'unrecovery') return protectRequestCard(issue, req);
   const { title, page } = describe(req);
   const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
   const note = field(issue.body, 'Note');
@@ -3500,7 +3501,8 @@ function browserRequestCard(issue, req) {
 // Approving turns it off; Keep it on is the safe default (shown as the primary button).
 function protectRequestCard(issue, req) {
   const lists = req.type === 'uncoverlists';
-  const title = lists ? 'Turn off the stronger lists cover' : 'Turn off phone protection';
+  const recov = req.type === 'unrecovery';
+  const title = recov ? 'Turn off guard-recovery' : lists ? 'Turn off the stronger lists cover' : 'Turn off phone protection';
   const phone = field(issue.body, 'Phone').replace(/`/g, '').replace(/\s*\([A-Z0-9-]+\)\s*$/, '') || 'A phone';
   const card = h('article', { class: 'card', 'data-n': issue.number });
   const actions = h('div', { class: 'acts' });
@@ -3517,12 +3519,14 @@ function protectRequestCard(issue, req) {
   };
   actions.append(
     h('button', { type: 'button', class: 'btn p grow', onclick: () => send('deny keep it on', 'Kept on') }, 'Keep it on'),
-    h('button', { type: 'button', class: 'btn dline', onclick: () => send('approve', lists ? 'Stronger cover turned off' : 'Protection turned off') }, lists ? 'Turn the cover off' : 'Turn protection off'));
+    h('button', { type: 'button', class: 'btn dline', onclick: () => send('approve', recov ? 'Guard-recovery turned off' : lists ? 'Stronger cover turned off' : 'Protection turned off') }, recov ? 'Turn recovery off' : lists ? 'Turn the cover off' : 'Turn protection off'));
   card.append(...[
     h('div', { class: 'who' }, h('span', null, h('span', { class: 'av' }, phone[0].toUpperCase()), h('b', null, phone), h('span', { class: 'muted small' }, '· ' + ago(issue.created_at))),
       chip('Protection', 'amber', 'shield')),
     h('h3', null, title),
-    h('p', { class: 'hint', style: 'margin:0' }, lists
+    h('p', { class: 'hint', style: 'margin:0' }, recov
+      ? `${phone} asked to turn off guard-recovery — the watchdog that switches the screen guard back on if it's turned off. Approving turns the watchdog off; "Keep it on" leaves it running.`
+      : lists
       ? `${phone} asked to stop covering the whole Accessibility and Device admin lists. The app's own screens stay covered either way. Approving turns the stronger cover off.`
       : `${phone} asked to switch off all protection — blocking other browsers, the uninstall lock and the screen guard. Approving turns it all off; "Keep it on" leaves everything as it is.`),
     actions].filter(Boolean));
@@ -3608,12 +3612,12 @@ function requestDetailsScreen() {
   const hopText = hops.map(x => typeof x === 'string' ? x : `${x.url} (${x.scope === 'site' ? 'whole site' : 'this page'}${x.tile ? ', with a tile' : ', no tile'})`);
   const when = new Date(issue.created_at);
   // Requests that aren't about a site (a setting, protection, …): a simple details card, then the (relevant) answer card.
-  if (req.type === 'mediaDefault' || req.type === 'search' || req.type === 'unprotect' || req.type === 'uncoverlists') return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(reqBackLabel(), reqBack),
+  if (req.type === 'mediaDefault' || req.type === 'search' || req.type === 'unprotect' || req.type === 'uncoverlists' || req.type === 'unrecovery') return h('main', { class: 'stack', style: 'padding-bottom:24px' }, backLink(reqBackLabel(), reqBack),
     screenTitle(title, `Request #${issue.number}`),
     h('section', { class: 'card kvs' },
       kv('Phone', dev ? `${dev.name || devId} (${devId})${dev.model ? ', ' + dev.model : ''}` : (devId || 'Unknown')),
       kv('Date asked', when.toLocaleString([], { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })),
-      kv('Asking to', req.type === 'unprotect' ? 'Turn off all phone protection' : req.type === 'uncoverlists' ? 'Turn off the stronger lists cover' : null),
+      kv('Asking to', req.type === 'unprotect' ? 'Turn off all phone protection' : req.type === 'uncoverlists' ? 'Turn off the stronger lists cover' : req.type === 'unrecovery' ? 'Turn off guard-recovery' : null),
       kv('Note', field(issue.body, 'Note') ? `“${field(issue.body, 'Note')}”` : null),
       null),
     h('div', { class: 'flabel', style: 'margin-top:8px' }, 'Answer it'),
